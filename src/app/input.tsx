@@ -12,8 +12,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { fetchProjects, getFragment, insertFragment, updateFragment } from '@/lib/supabase';
+import {
+  fetchProjects,
+  getFragment,
+  insertFragment,
+  setFragmentProjects,
+  updateFragment,
+} from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { markThrown } from '@/lib/thrown';
 import { detectType } from '@/lib/typeDetector';
 import type { Project } from '@/lib/types';
 
@@ -28,7 +35,7 @@ const GLOW_COLOR: Record<string, string> = {
 export default function Input() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [text, setText] = useState('');
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -40,7 +47,7 @@ export default function Input() {
       getFragment(id)
         .then((fr) => {
           setText(fr.content);
-          setProjectId(fr.project_id);
+          setProjectIds(fr.project_ids);
         })
         .catch(() => {});
     }
@@ -49,7 +56,13 @@ export default function Input() {
   const trimmed = text.trim();
   const detected = detectType(trimmed);
   const glowColor = GLOW_COLOR[detected];
-  const projectName = projects.find((p) => p.id === projectId)?.name ?? 'Inbox';
+  const projectName =
+    projectIds.length === 0
+      ? 'Inbox'
+      : projects
+          .filter((p) => projectIds.includes(p.id))
+          .map((p) => p.name)
+          .join(', ') || 'Inbox';
 
   // 타입이 인식되는 순간 입력창 주위가 은은하게 빛난다
   useEffect(() => {
@@ -65,9 +78,11 @@ export default function Input() {
     setBusy(true);
     try {
       if (id) {
-        await updateFragment(id, { content: trimmed, type: detected, project_id: projectId });
+        await updateFragment(id, { content: trimmed, type: detected });
+        await setFragmentProjects(id, projectIds);
       } else {
-        await insertFragment({ content: trimmed, type: detected, project_id: projectId });
+        await insertFragment({ content: trimmed, type: detected, project_ids: projectIds });
+        markThrown(); // 데일리 뷰가 오늘로 이동하도록 (PLAN §6.1)
       }
       router.back();
     } catch {
@@ -130,13 +145,20 @@ export default function Input() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.projectRow}>
               {[{ id: null as string | null, name: 'Inbox' }, ...projects].map((p) => {
-                const active = projectId === p.id;
+                const active =
+                  p.id === null ? projectIds.length === 0 : projectIds.includes(p.id);
                 return (
                   <Pressable
                     key={p.id ?? 'inbox'}
                     onPress={() => {
-                      setProjectId(p.id);
-                      setExpanded(false);
+                      // 다중 토글 — Inbox를 누르면 전부 해제 (PLAN §3.3)
+                      if (p.id === null) setProjectIds([]);
+                      else
+                        setProjectIds((prev) =>
+                          prev.includes(p.id!)
+                            ? prev.filter((pid) => pid !== p.id)
+                            : [...prev, p.id!],
+                        );
                     }}
                     style={[styles.projectChip, active && styles.projectChipActive]}
                   >

@@ -3,14 +3,6 @@
 
 -- ============ 테이블 ============
 
-create table projects (
-  id         uuid primary key default gen_random_uuid(),
-  created_at timestamptz not null default now(),
-  name       text not null,
-  status     text not null default 'before'
-             check (status in ('before','active','paused','done'))
-);
-
 create table fragments (
   id                 uuid primary key default gen_random_uuid(),
   created_at         timestamptz not null default now(),
@@ -23,21 +15,44 @@ create table fragments (
   last_touched_at    timestamptz not null default now(),
   tier               text not null default 'normal'
                      check (tier in ('normal','important','pinned')),
-  project_id         uuid references projects(id) on delete set null,
   archived           boolean not null default false
 );
 
 create index fragments_created_at_idx on fragments (created_at desc);
 
+-- 프로젝트는 파편과 다른 종류의 아이템 — 타임라인에 쌓이지 않고 폴더처럼 존재한다.
+create table projects (
+  id          uuid primary key default gen_random_uuid(),
+  created_at  timestamptz not null default now(),
+  name        text not null,
+  status      text not null default 'before'
+              check (status in ('before','active','paused','done')),
+  started_at  date,
+  description text
+);
+
+-- 파편 ↔ 프로젝트 다대다 (태그처럼 여러 프로젝트에 동시에 붙는다)
+create table fragment_projects (
+  fragment_id uuid not null references fragments(id) on delete cascade,
+  project_id  uuid not null references projects(id) on delete cascade,
+  primary key (fragment_id, project_id)
+);
+
+create index fragment_projects_project_idx on fragment_projects (project_id);
+
 -- ============ RLS: 로그인 사용자 전부 허용 / anon 전부 차단 ============
 
-alter table projects enable row level security;
 alter table fragments enable row level security;
+alter table projects enable row level security;
+alter table fragment_projects enable row level security;
+
+create policy "authenticated full access" on fragments
+  for all to authenticated using (true) with check (true);
 
 create policy "authenticated full access" on projects
   for all to authenticated using (true) with check (true);
 
-create policy "authenticated full access" on fragments
+create policy "authenticated full access" on fragment_projects
   for all to authenticated using (true) with check (true);
 
 -- ============ Storage: images 버킷 (private) ============

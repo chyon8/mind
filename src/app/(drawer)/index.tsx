@@ -1,10 +1,11 @@
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
-import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { DailyView } from '@/components/DailyView';
 import { FragmentCard } from '@/components/FragmentCard';
 import { ProjectChips } from '@/components/ProjectChips';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { confirmDelete } from '@/lib/confirm';
 import { agendaDateParts, dayKey, feedDateLabel, formatTime } from '@/lib/dates';
 import { deleteFragment, fetchFragments, fetchProjects, type FeedFilter } from '@/lib/supabase';
@@ -12,7 +13,8 @@ import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/them
 import type { Fragment, Project } from '@/lib/types';
 import { opacity } from '@/lib/vividness';
 
-type Mode = 'feed' | 'agenda';
+type Mode = 'daily' | 'feed' | 'agenda';
+const MODE_LABEL: Record<Mode, string> = { daily: '데일리', feed: '피드', agenda: '어젠다' };
 
 export default function Home() {
   // 드로어 화면의 navigation에는 openDrawer 헬퍼가 있다 (expo-router 내장 드로어)
@@ -20,7 +22,7 @@ export default function Home() {
   const params = useLocalSearchParams<{ filter?: string }>();
   const filter: FeedFilter = params.filter ?? 'all';
 
-  const [mode, setMode] = useState<Mode>('feed');
+  const [mode, setMode] = useState<Mode>('daily');
   const [fragments, setFragments] = useState<Fragment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [failed, setFailed] = useState(false);
@@ -85,14 +87,14 @@ export default function Home() {
             <Text style={styles.searchIcon}>⌕</Text>
           </Pressable>
           <View style={styles.toggle}>
-            {(['feed', 'agenda'] as Mode[]).map((m) => (
+            {(['daily', 'feed', 'agenda'] as Mode[]).map((m) => (
               <Pressable
                 key={m}
                 onPress={() => setMode(m)}
                 style={[styles.toggleBtn, mode === m && styles.toggleBtnActive]}
               >
                 <Text style={[styles.toggleLabel, mode === m && styles.toggleLabelActive]}>
-                  {m === 'feed' ? '피드' : '어젠다'}
+                  {MODE_LABEL[m]}
                 </Text>
               </Pressable>
             ))}
@@ -100,95 +102,71 @@ export default function Home() {
         </View>
       </View>
 
-      <ProjectChips
-        projects={projects}
-        selected={filter}
-        onSelect={(f) => router.setParams({ filter: f })}
-      />
-
-      {failed ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyText}>불러오지 못했다</Text>
-          <Pressable onPress={load} style={styles.retry}>
-            <Text style={styles.retryLabel}>다시 시도</Text>
-          </Pressable>
-        </View>
-      ) : sections.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyText}>
-            {filter === 'grave' ? '무덤이 비어 있다' : '아직 파편이 없다'}
-          </Text>
-        </View>
+      {mode === 'daily' ? (
+        // 데일리는 필터와 무관하게 전체(무덤 제외)를 본다 — 렌즈는 피드/프로젝트 상세의 역할
+        <DailyView />
       ) : (
-        <SectionList
-          sections={sections}
-          keyExtractor={(fr) => fr.id}
-          stickySectionHeadersEnabled={false}
-          contentContainerStyle={styles.listContent}
-          renderSectionHeader={({ section }) =>
-            mode === 'feed' ? (
-              <View style={styles.feedSep}>
-                <Text style={styles.feedSepLabel}>{feedDateLabel(section.date)}</Text>
-                <View style={styles.feedSepLine} />
-              </View>
-            ) : (
-              <AgendaHeader iso={section.date} />
-            )
-          }
-          renderItem={({ item }) => (
-            <SwipeableRow
-              onEdit={() => router.push({ pathname: '/input', params: { id: item.id } })}
-              onDelete={() => removeFragment(item)}
-            >
-              <Pressable onPress={() => router.push(`/fragment/${item.id}`)}>
-                {mode === 'feed' ? (
-                  <View style={styles.cardWrap}>
-                    <FragmentCard fragment={item} opacity={fragmentOpacity(item)} />
+        <>
+          <ProjectChips
+            projects={projects}
+            selected={filter}
+            onSelect={(f) => router.setParams({ filter: f })}
+          />
+
+          {failed ? (
+            <View style={styles.center}>
+              <Text style={styles.emptyText}>불러오지 못했다</Text>
+              <Pressable onPress={load} style={styles.retry}>
+                <Text style={styles.retryLabel}>다시 시도</Text>
+              </Pressable>
+            </View>
+          ) : sections.length === 0 ? (
+            <View style={styles.center}>
+              <Text style={styles.emptyText}>
+                {filter === 'grave' ? '무덤이 비어 있다' : '아직 파편이 없다'}
+              </Text>
+            </View>
+          ) : (
+            <SectionList
+              sections={sections}
+              keyExtractor={(fr) => fr.id}
+              stickySectionHeadersEnabled={false}
+              contentContainerStyle={styles.listContent}
+              renderSectionHeader={({ section }) =>
+                mode === 'feed' ? (
+                  <View style={styles.feedSep}>
+                    <Text style={styles.feedSepLabel}>{feedDateLabel(section.date)}</Text>
+                    <View style={styles.feedSepLine} />
                   </View>
                 ) : (
-                  <AgendaRow fragment={item} rowOpacity={fragmentOpacity(item)} />
-                )}
-              </Pressable>
-            </SwipeableRow>
+                  <AgendaHeader iso={section.date} />
+                )
+              }
+              renderItem={({ item }) => (
+                <SwipeableRow
+                  onEdit={() => router.push({ pathname: '/input', params: { id: item.id } })}
+                  onDelete={() => removeFragment(item)}
+                >
+                  <Pressable onPress={() => router.push(`/fragment/${item.id}`)}>
+                    {mode === 'feed' ? (
+                      <View style={styles.cardWrap}>
+                        <FragmentCard fragment={item} opacity={fragmentOpacity(item)} />
+                      </View>
+                    ) : (
+                      <AgendaRow fragment={item} rowOpacity={fragmentOpacity(item)} />
+                    )}
+                  </Pressable>
+                </SwipeableRow>
+              )}
+            />
           )}
-        />
+        </>
       )}
 
       <Pressable style={styles.fab} onPress={() => router.push('/input')}>
         <Text style={styles.fabLabel}>＋ 던지기</Text>
       </Pressable>
     </SafeAreaView>
-  );
-}
-
-// 오른쪽→왼쪽 스와이프로 수정/삭제 노출
-function SwipeableRow({
-  children,
-  onEdit,
-  onDelete,
-}: {
-  children: React.ReactNode;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <ReanimatedSwipeable
-      friction={2}
-      rightThreshold={40}
-      overshootRight={false}
-      renderRightActions={() => (
-        <View style={styles.actions}>
-          <Pressable style={[styles.actionBtn, styles.editBtn]} onPress={onEdit}>
-            <Text style={styles.editLabel}>수정</Text>
-          </Pressable>
-          <Pressable style={[styles.actionBtn, styles.deleteBtn]} onPress={onDelete}>
-            <Text style={styles.deleteLabel}>삭제</Text>
-          </Pressable>
-        </View>
-      )}
-    >
-      {children}
-    </ReanimatedSwipeable>
   );
 }
 
@@ -228,6 +206,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
+    paddingBottom: spacing.xs,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -237,13 +216,13 @@ const styles = StyleSheet.create({
   toggle: { flexDirection: 'row', gap: spacing.xxs },
   toggleBtn: {
     borderRadius: rounded.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
     paddingVertical: spacing.xxs,
     borderWidth: 1,
     borderColor: colors.hairline,
   },
   toggleBtnActive: { backgroundColor: colors.ink, borderColor: colors.ink },
-  toggleLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
+  toggleLabel: { ...type.bodySm, color: colors.body, fontFamily: fonts.sansMedium },
   toggleLabelActive: { color: colors.onInk },
   listContent: { paddingHorizontal: spacing.md, paddingBottom: 120 },
   cardWrap: { marginBottom: spacing.sm },
@@ -276,18 +255,6 @@ const styles = StyleSheet.create({
   },
   agendaTime: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, width: 42 },
   agendaText: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
-  actions: { flexDirection: 'row', gap: spacing.xxs, marginLeft: spacing.xs },
-  actionBtn: {
-    width: 64,
-    borderRadius: rounded.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
-  editBtn: { backgroundColor: colors.hairlineSoft },
-  deleteBtn: { backgroundColor: 'rgba(255, 77, 77, 0.14)' },
-  editLabel: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
-  deleteLabel: { ...type.bodyMd, color: colors.error, fontFamily: fonts.sansMedium },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans },
   retry: {

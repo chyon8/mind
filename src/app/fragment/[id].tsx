@@ -8,6 +8,7 @@ import {
   deleteFragment,
   fetchProjects,
   getFragment,
+  setFragmentProjects,
   touchFragment,
   updateFragment,
 } from '@/lib/supabase';
@@ -42,9 +43,22 @@ export default function FragmentDetail() {
 
   if (!fragment) return <SafeAreaView style={styles.screen} />;
 
-  async function patch(p: Partial<Fragment>) {
+  async function patch(p: Partial<Omit<Fragment, 'project_ids'>>) {
     await updateFragment(fragment!.id, p);
     setFragment({ ...fragment!, ...p });
+  }
+
+  // 프로젝트는 태그 — 여러 개 동시에 붙는다 (PLAN.md §3.3)
+  async function toggleProject(projectId: string | null) {
+    const current = fragment!.project_ids;
+    const next =
+      projectId === null
+        ? [] // Inbox = 매핑 전부 해제
+        : current.includes(projectId)
+          ? current.filter((pid) => pid !== projectId)
+          : [...current, projectId];
+    await setFragmentProjects(fragment!.id, next);
+    setFragment({ ...fragment!, project_ids: next });
   }
 
   async function remove() {
@@ -99,11 +113,14 @@ export default function FragmentDetail() {
         <Text style={styles.sectionLabel}>PROJECT</Text>
         <View style={styles.projectRow}>
           {[{ id: null as string | null, name: 'Inbox' }, ...projects].map((p) => {
-            const active = fragment.project_id === p.id;
+            const active =
+              p.id === null
+                ? fragment.project_ids.length === 0
+                : fragment.project_ids.includes(p.id);
             return (
               <Pressable
                 key={p.id ?? 'inbox'}
-                onPress={() => patch({ project_id: p.id })}
+                onPress={() => toggleProject(p.id)}
                 style={[styles.projectChip, active && styles.projectChipActive]}
               >
                 <Text style={[styles.projectLabel, active && styles.projectLabelActive]}>

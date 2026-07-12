@@ -8,11 +8,39 @@ const NOW = Date.now();
 const ago = (days: number, hours = 0) =>
   new Date(NOW - days * 86_400_000 - hours * 3_600_000).toISOString();
 
-export const fixtureProjects: Project[] = [
-  { id: 'p-side', created_at: ago(90), name: '사이드 프로젝트', status: 'active' },
-  { id: 'p-write', created_at: ago(120), name: '글쓰기', status: 'paused' },
-  { id: 'p-move', created_at: ago(10), name: '이사 준비', status: 'before' },
-  { id: 'p-port', created_at: ago(200), name: '포트폴리오 개편', status: 'done' },
+let projects: Project[] = [
+  {
+    id: 'p-side',
+    created_at: ago(90),
+    name: '사이드 프로젝트',
+    status: 'active',
+    started_at: '2026-03-02',
+    description: '앱/도구 만들기 실험실. Mind도 여기서 나왔다.',
+  },
+  {
+    id: 'p-write',
+    created_at: ago(120),
+    name: '글쓰기',
+    status: 'paused',
+    started_at: '2026-01-10',
+    description: null,
+  },
+  {
+    id: 'p-move',
+    created_at: ago(10),
+    name: '이사 준비',
+    status: 'before',
+    started_at: null,
+    description: null,
+  },
+  {
+    id: 'p-port',
+    created_at: ago(200),
+    name: '포트폴리오 개편',
+    status: 'done',
+    started_at: '2025-11-01',
+    description: '끝난 프로젝트. 기록용.',
+  },
 ];
 
 const f = (
@@ -31,8 +59,8 @@ const f = (
   image_path: null,
   last_touched_at: createdAt,
   tier: 'normal',
-  project_id: null,
   archived: false,
+  project_ids: [],
   ...extra,
 });
 
@@ -47,12 +75,12 @@ let store: Fragment[] = [
   f('fx-04', ago(0, 8), 'Ship early, ship often — but never ship silence.', 'text'),
   // ── 어제
   f('fx-05', ago(1, 2), '앱 아이콘은 검은 바탕에 흐려지는 점 하나면 충분할 것 같다', 'text', {
-    project_id: 'p-side',
+    project_ids: ['p-side'],
   }),
   f('fx-06', ago(1, 6), 'www.youtube.com/watch?v=dQw4w9WgXcQ', 'link'), // 제목 백필 전 상태
   // ── 2~6일 (아직 100%)
   f('fx-07', ago(2, 4), '회사 앞 카페 이름이 왜 자꾸 바뀌는지에 대한 짧은 글감', 'text', {
-    project_id: 'p-write',
+    project_ids: ['p-write'],
   }),
   f('fx-08', ago(3, 1), '', 'image', { image_path: 'fixture-sunset.jpg' }),
   f(
@@ -60,6 +88,7 @@ let store: Fragment[] = [
     ago(5, 3),
     '기억의 구조에 대해:\n1. 저장은 자동이어야 한다\n2. 인출은 우연이어야 한다\n3. 망각은 기능이어야 한다\n\n이 세 줄이 앱 전체 설계를 요약한다. 특히 3번 — 잊히는 것을 버그가 아니라 기능으로 만드는 것.',
     'text',
+    { project_ids: ['p-side', 'p-write'] }, // 다대다 매핑 데모 — 두 프로젝트에 동시에 속함
   ),
   // ── 감쇠 구간 (normal: 7일부터 흐려짐)
   f('fx-10', ago(9, 2), '지하철에서 본 광고 카피. 문장이 리듬을 갖는 순간 기억에 남는다', 'text'), // ~93%
@@ -90,23 +119,23 @@ let store: Fragment[] = [
   f('fx-19', ago(33, 2), '묻어둔 파편. 무덤 칩에서만 보인다', 'text', { archived: true }),
 ];
 
-function statusRank(p: Project) {
-  return p.status === 'active' ? 0 : 1; // active 먼저 (SPEC §6)
-}
-
-export function fixtureListProjects(): Project[] {
-  return [...fixtureProjects].sort((a, b) => statusRank(a) - statusRank(b));
-}
+// ============ 파편 ============
 
 export function fixtureListFragments(filter: FeedFilter): Fragment[] {
   return store
     .filter((fr) => {
       if (filter === 'grave') return fr.archived;
       if (fr.archived) return false;
-      if (filter === 'inbox') return fr.project_id === null;
-      if (filter !== 'all') return fr.project_id === filter;
+      if (filter === 'inbox') return fr.project_ids.length === 0;
+      if (filter !== 'all') return fr.project_ids.includes(filter);
       return true;
     })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export function fixtureListFragmentsByRange(fromISO: string, toISO: string): Fragment[] {
+  return store
+    .filter((fr) => !fr.archived && fr.created_at >= fromISO && fr.created_at < toISO)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
@@ -131,6 +160,10 @@ export function fixtureUpdateFragment(id: string, patch: Partial<Fragment>): voi
   store = store.map((fr) => (fr.id === id ? { ...fr, ...patch } : fr));
 }
 
+export function fixtureSetFragmentProjects(id: string, projectIds: string[]): void {
+  fixtureUpdateFragment(id, { project_ids: projectIds });
+}
+
 export function fixtureDeleteFragment(id: string): void {
   store = store.filter((fr) => fr.id !== id);
 }
@@ -138,16 +171,62 @@ export function fixtureDeleteFragment(id: string): void {
 export function fixtureInsertFragment(input: {
   content: string;
   type: FragmentType;
-  project_id?: string | null;
+  project_ids?: string[];
   image_path?: string | null;
   link_title?: string | null;
 }): Fragment {
   const created = new Date().toISOString();
   const fragment = f(`fx-new-${Date.now()}`, created, input.content, input.type, {
-    project_id: input.project_id ?? null,
+    project_ids: input.project_ids ?? [],
     image_path: input.image_path ?? null,
     link_title: input.link_title ?? null,
   });
   store = [fragment, ...store];
   return fragment;
+}
+
+// ============ 프로젝트 ============
+
+function withCount(p: Project): Project {
+  return {
+    ...p,
+    fragment_count: store.filter((fr) => !fr.archived && fr.project_ids.includes(p.id)).length,
+  };
+}
+
+export function fixtureListProjects(): Project[] {
+  return projects.map(withCount);
+}
+
+export function fixtureGetProject(id: string): Project {
+  const found = projects.find((p) => p.id === id);
+  if (!found) throw new Error(`project not found: ${id}`);
+  return withCount(found);
+}
+
+export function fixtureCreateProject(name: string): Project {
+  const project: Project = {
+    id: `p-new-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    name,
+    status: 'before',
+    started_at: null,
+    description: null,
+  };
+  projects = [...projects, project];
+  return { ...project, fragment_count: 0 };
+}
+
+export function fixtureUpdateProject(id: string, patch: Partial<Project>): void {
+  projects = projects.map((p) => (p.id === id ? { ...p, ...patch } : p));
+}
+
+export function fixtureDeleteProject(id: string): void {
+  projects = projects.filter((p) => p.id !== id);
+  // 매핑만 사라지고 파편은 살아남는다
+  store = store.map((fr) =>
+    fr.project_ids.includes(id)
+      ? { ...fr, project_ids: fr.project_ids.filter((pid) => pid !== id) }
+      : fr,
+  );
 }
