@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DailyView } from '@/components/DailyView';
@@ -11,6 +11,7 @@ import { confirmDelete } from '@/lib/confirm';
 import { agendaDateParts, dayKey, feedDateLabel, formatTime } from '@/lib/dates';
 import { deleteFragment, fetchFragments, fetchProjects, type FeedFilter } from '@/lib/supabase';
 import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/theme';
+import { onThrown } from '@/lib/thrown';
 import type { Fragment, Project } from '@/lib/types';
 import { opacity } from '@/lib/vividness';
 
@@ -46,6 +47,9 @@ export default function Home() {
       load();
     }, [load]),
   );
+
+  // 공유 저장은 이 화면이 이미 떠 있는 채로 일어난다 — 포커스가 안 바뀌므로 직접 듣는다
+  useEffect(() => onThrown(load), [load]);
 
   const now = useMemo(() => new Date(), [fragments]);
 

@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -15,7 +15,7 @@ import { confirmDelete } from '@/lib/confirm';
 import { addDays, dayKey, feedDateLabel, startOfWeek, WEEKDAY_LABELS } from '@/lib/dates';
 import { deleteFragment, fetchFragmentsByRange } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
-import { consumeThrown } from '@/lib/thrown';
+import { consumeThrown, onThrown } from '@/lib/thrown';
 import type { Fragment } from '@/lib/types';
 import { opacity } from '@/lib/vividness';
 
@@ -50,17 +50,26 @@ export function DailyView() {
     }
   }, []);
 
+  // 던진 직후에는 오늘로 이동해서 방금 던진 게 보이게 한다 (PLAN §6.1)
+  const jumpToToday = useCallback(() => {
+    setSelected(new Date());
+    setWeekIdx(WEEKS_BACK);
+    stripRef.current?.scrollToIndex({ index: WEEKS_BACK, animated: false });
+    loadWeek(weeks[WEEKS_BACK]);
+  }, [loadWeek, weeks]);
+
   useFocusEffect(
     useCallback(() => {
-      // 던진 직후에는 오늘로 이동 (PLAN §6.1)
-      if (consumeThrown()) {
-        setSelected(new Date());
-        setWeekIdx(WEEKS_BACK);
-        stripRef.current?.scrollToIndex({ index: WEEKS_BACK, animated: false });
-      }
+      if (consumeThrown()) jumpToToday();
       loadWeek(weeks[weekIdx]);
-    }, [weekIdx, loadWeek, weeks]),
+    }, [weekIdx, loadWeek, weeks, jumpToToday]),
   );
+
+  // 공유 저장은 이 화면이 이미 떠 있는 채로 일어난다 — 포커스가 안 바뀌므로 직접 듣는다
+  useEffect(() => onThrown(() => {
+    consumeThrown();
+    jumpToToday();
+  }), [jumpToToday]);
 
   const weekFragments = byWeek[weeks[weekIdx].toISOString()] ?? [];
   const now = new Date();

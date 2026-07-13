@@ -23,28 +23,29 @@ export function ShareIntentHandler() {
 
   useEffect(() => {
     if (!hasShareIntent) return;
-    let alive = true;
 
     (async () => {
       try {
         await throwShared(shareIntent);
-        markThrown(); // 데일리 뷰가 오늘로 이동하도록
-        if (!alive) return;
         setToast(true);
-        setTimeout(() => alive && setToast(false), TOAST_MS);
+        markThrown(); // 열려 있는 목록을 즉시 갱신 + 데일리를 오늘로 이동
       } catch {
         // 원문 보존 — 입력 화면에 채워서 열어준다
         const text = shareIntent.webUrl ?? shareIntent.text ?? '';
-        if (alive && text) router.push({ pathname: '/input', params: { draft: text } });
+        if (text) router.push({ pathname: '/input', params: { draft: text } });
       } finally {
         resetShareIntent();
       }
     })();
-
-    return () => {
-      alive = false;
-    };
   }, [hasShareIntent]);
+
+  // 토스트 숨기기는 별도 effect — 위 effect는 resetShareIntent 직후 정리되므로
+  // 거기에 타이머를 두면 cleanup에 걸려 토스트가 영영 안 사라진다.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(false), TOAST_MS);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   if (!toast) return null;
 
