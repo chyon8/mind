@@ -1,19 +1,25 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FragmentCard } from '@/components/FragmentCard';
 import { feedDateLabel } from '@/lib/dates';
 import { searchFragments } from '@/lib/supabase';
-import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment } from '@/lib/types';
 import { opacity } from '@/lib/vividness';
 
+// 검색은 별도 화면이 아니라 홈 위에 제자리에서 열리는 레이어.
+// 헤더 자리에 검색바가 스르륵 내려오고, 결과는 같은 화면에서 바로 보인다.
 // 검색은 찾으러 들어온 행위 — 감쇠와 무관하게 결과는 전부 선명하게 보여준다.
 // 대신 원래 얼마나 흐린 파편이었는지는 카드 opacity로 남긴다.
-export default function Search() {
+export function SearchOverlay({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Fragment[]>([]);
+  // absolute 자식은 부모(SafeAreaView)의 padding을 무시하고 화면 맨 위부터 그려진다.
+  // 그래서 safe area를 여기서 직접 얹어준다 — 안 그러면 상태바 밑에 깔려 터치도 안 먹는다.
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!q.trim()) {
@@ -28,11 +34,21 @@ export default function Search() {
 
   const now = new Date();
 
+  function open(id: string) {
+    onClose();
+    router.push(`/fragment/${id}`);
+  }
+
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <View style={styles.header}>
+    <Animated.View
+      style={[styles.overlay, { paddingTop: insets.top }]}
+      entering={FadeIn.duration(140)}
+      exiting={FadeOut.duration(120)}
+    >
+      <Animated.View style={styles.bar} entering={FadeInDown.duration(200)}>
+        <Text style={styles.glyph}>⌕</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, noFocusRing]}
           value={q}
           onChangeText={setQ}
           autoFocus
@@ -41,10 +57,10 @@ export default function Search() {
           keyboardAppearance="dark"
           returnKeyType="search"
         />
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Text style={styles.cancel}>닫기</Text>
+        <Pressable onPress={onClose} hitSlop={12}>
+          <Text style={styles.close}>✕</Text>
         </Pressable>
-      </View>
+      </Animated.View>
 
       {q.trim() !== '' && results.length === 0 ? (
         <View style={styles.center}>
@@ -55,9 +71,10 @@ export default function Search() {
           data={results}
           keyExtractor={(fr) => fr.id}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag" // 결과를 훑어 내리면 키보드가 비켜준다
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <Pressable onPress={() => router.push(`/fragment/${item.id}`)} style={styles.row}>
+            <Pressable onPress={() => open(item.id)} style={styles.row}>
               <Text style={styles.date}>
                 {feedDateLabel(item.created_at)}
                 {item.archived ? ' · 무덤' : ''}
@@ -70,31 +87,41 @@ export default function Search() {
           )}
         />
       )}
-    </SafeAreaView>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.canvas },
-  header: {
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.canvas,
+  },
+  bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
+    gap: spacing.xs,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.sm,
   },
+  glyph: { fontSize: 18, color: colors.faint },
   input: {
     flex: 1,
     ...type.bodyLg,
     color: colors.ink,
     fontFamily: fonts.sans,
-    backgroundColor: colors.canvasElevated,
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: rounded.sm,
-    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },
-  cancel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
+  close: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
   list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxxl },
   row: { marginBottom: spacing.sm },
   date: {

@@ -1,6 +1,8 @@
 // PLAN.md §6.5 — Design.md(Geist)의 다크 반전 토큰. 컴포넌트에 하드코딩 금지, 전부 여기서.
 // 라이트 모드는 v2 — 그때 이 파일만 스킴 분기하면 된다.
 
+import type { TextStyle } from 'react-native';
+
 export const colors = {
   canvas: '#0a0a0a', // 페이지 바탕 — 파편이 이쪽으로 가라앉는다
   canvasElevated: '#111111', // 카드/입력창/시트
@@ -56,3 +58,8 @@ export const type = {
 } as const;
 
 export const FLOOR_OPACITY = 0.25; // 무덤 뷰 고정 opacity (SPEC §5의 바닥값과 동일)
+
+// 웹(react-native-web)에서 TextInput에 그려지는 브라우저 기본 파란 포커스 링을 끈다.
+// outline-style:auto는 outline-width를 무시하므로 style 자체를 none으로 꺼야 한다.
+// RN 네이티브 타입엔 'none'이 없어 캐스팅이 필요하다. 네이티브에선 무시된다.
+export const noFocusRing = { outlineStyle: 'none' } as unknown as TextStyle;

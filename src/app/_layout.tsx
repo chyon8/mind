@@ -38,8 +38,15 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="(drawer)" />
-        <Stack.Screen name="input" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="search" options={{ presentation: 'modal' }} />
+        {/* 가운데 카드 모달 — 등장/퇴장 애니메이션은 input.tsx가 직접 그린다 */}
+        <Stack.Screen
+          name="input"
+          options={{
+            presentation: 'transparentModal',
+            animation: 'none',
+            contentStyle: { backgroundColor: 'transparent' },
+          }}
+        />
         <Stack.Screen name="fragment/[id]" />
       </Stack>
     </GestureHandlerRootView>

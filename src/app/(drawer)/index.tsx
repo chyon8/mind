@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { DailyView } from '@/components/DailyView';
 import { FragmentCard } from '@/components/FragmentCard';
 import { ProjectChips } from '@/components/ProjectChips';
+import { SearchOverlay } from '@/components/SearchOverlay';
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { confirmDelete } from '@/lib/confirm';
 import { agendaDateParts, dayKey, feedDateLabel, formatTime } from '@/lib/dates';
@@ -23,6 +24,7 @@ export default function Home() {
   const filter: FeedFilter = params.filter ?? 'all';
 
   const [mode, setMode] = useState<Mode>('daily');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [fragments, setFragments] = useState<Fragment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [failed, setFailed] = useState(false);
@@ -83,7 +85,7 @@ export default function Home() {
           <Text style={styles.wordmark}>MIND</Text>
         </View>
         <View style={styles.headerRight}>
-          <Pressable onPress={() => router.push('/search')} hitSlop={12}>
+          <Pressable onPress={() => setSearchOpen(true)} hitSlop={12}>
             <Text style={styles.searchIcon}>⌕</Text>
           </Pressable>
           <View style={styles.toggle}>
@@ -166,6 +168,8 @@ export default function Home() {
       <Pressable style={styles.fab} onPress={() => router.push('/input')}>
         <Text style={styles.fabLabel}>＋ 던지기</Text>
       </Pressable>
+
+      {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
     </SafeAreaView>
   );
 }

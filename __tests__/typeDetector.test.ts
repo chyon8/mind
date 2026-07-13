@@ -13,6 +13,12 @@ describe('detectType — PLAN.md §3.3 규칙 표', () => {
     expect(detectType('  https://example.com  ')).toBe('link'); // trim 후 판별
   });
 
+  test('타이핑 도중의 불완전한 URL도 link (느슨한 판별)', () => {
+    expect(detectType('www.')).toBe('link');
+    expect(detectType('https://')).toBe('link');
+    expect(detectType('www.exa')).toBe('link');
+  });
+
   test('URL + 다른 텍스트가 섞이면 text', () => {
     expect(detectType('https://example.com 이거 봐라')).toBe('text');
     expect(detectType('이거 봐라 https://example.com')).toBe('text');
@@ -27,8 +33,14 @@ describe('detectType — PLAN.md §3.3 규칙 표', () => {
     expect(detectType('『겹낫표』')).toBe('quote');
   });
 
-  test('짝이 안 맞는 인용부호는 text', () => {
-    expect(detectType('"열기만 하고')).toBe('text');
+  test('여는 인용부호만 있어도 quote — 닫을 때까지 기다리지 않는다 (느슨한 판별)', () => {
+    expect(detectType('"')).toBe('quote');
+    expect(detectType('"열기만 하고')).toBe('quote');
+    expect(detectType('“')).toBe('quote');
+    expect(detectType('「일본식')).toBe('quote');
+  });
+
+  test('인용부호로 시작하지 않으면 text — 여는 쪽이 기준', () => {
     expect(detectType('닫기만"')).toBe('text');
   });
 
