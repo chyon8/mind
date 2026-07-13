@@ -23,6 +23,27 @@ export function supabase(): SupabaseClient {
   return client;
 }
 
+// ============ 인증 (PLAN.md §2.2) ============
+// 사용자 1명. 회원가입 흐름 없음 — 계정은 Supabase 대시보드에서 수동 생성.
+// 세션은 AsyncStorage에 유지되므로 로그인은 기기당 한 번뿐이다.
+
+export async function hasSession(): Promise<boolean> {
+  if (!isConfigured) return true; // 픽스처 모드 — 로그인 없이 통과
+  const { data } = await supabase().auth.getSession();
+  return data.session != null;
+}
+
+export function onAuthChange(cb: (signedIn: boolean) => void): () => void {
+  if (!isConfigured) return () => {};
+  const { data } = supabase().auth.onAuthStateChange((_e, session) => cb(session != null));
+  return () => data.subscription.unsubscribe();
+}
+
+export async function signIn(email: string, password: string): Promise<void> {
+  const { error } = await supabase().auth.signInWithPassword({ email, password });
+  if (error) throw error;
+}
+
 const PAGE_SIZE = 100;
 
 // 'all' | 'inbox' | 'grave' | 프로젝트 id
@@ -130,6 +151,34 @@ export async function insertFragment(input: {
   const fragment = { ...toFragment(data), project_ids: project_ids ?? [] };
   if (project_ids?.length) await setFragmentProjects(fragment.id, project_ids);
   return fragment;
+}
+
+// 제목이 아직 안 붙은 링크 파편 — 포그라운드 백필 대상 (PLAN.md §3.6)
+export async function fetchLinksMissingMeta(
+  limit: number,
+): Promise<{ id: string; content: string }[]> {
+  if (!isConfigured) return [];
+  const { data, error } = await supabase()
+    .from('fragments')
+    .select('id, content')
+    .eq('type', 'link')
+    .is('link_title', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data;
+}
+
+// 공유받은 이미지를 Storage에 올린다 → image_path 반환 (PLAN.md §2.3, §4)
+export async function uploadImage(uri: string, mimeType: string): Promise<string> {
+  const ext = mimeType.split('/')[1] ?? 'jpg';
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const bytes = await (await fetch(uri)).arrayBuffer();
+  const { error } = await supabase()
+    .storage.from('images')
+    .upload(path, bytes, { contentType: mimeType });
+  if (error) throw error;
+  return path;
 }
 
 // 파편 ↔ 프로젝트 매핑 전체 교체 (다대다, PLAN.md §3.3)

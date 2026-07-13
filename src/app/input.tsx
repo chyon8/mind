@@ -46,8 +46,9 @@ const BADGE_COLOR: Record<string, string> = {
 // 던지기 성공 시 카드가 위로 날아가며 사라진다.
 // ?id= 가 있으면 수정 모드. 프로젝트 선택은 접힌 옵션, 기본 Inbox (SPEC §6-3).
 export default function Input() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
-  const [text, setText] = useState('');
+  // draft = 공유 저장이 실패했을 때 넘어온 원문 (확정 결정 2)
+  const { id, draft } = useLocalSearchParams<{ id?: string; draft?: string }>();
+  const [text, setText] = useState(draft ?? '');
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [expanded, setExpanded] = useState(false);
