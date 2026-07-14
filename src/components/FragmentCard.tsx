@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { formatTime } from '@/lib/dates';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment } from '@/lib/types';
+import { useImageUrl } from '@/lib/useImageUrl';
 
 const TIER_LABEL: Record<string, string> = { important: 'IMPORTANT', pinned: 'PINNED' };
 
@@ -50,15 +51,7 @@ function CardBody({ fragment }: { fragment: Fragment }) {
         </View>
       );
     case 'image':
-      return (
-        <View>
-          {/* 백엔드 연결 후 signed URL 로드로 교체 — 지금은 자리 표시 */}
-          <View style={styles.imageWell}>
-            <Text style={styles.eyebrow}>IMAGE</Text>
-          </View>
-          {fragment.content !== '' && <Text style={styles.body}>{fragment.content}</Text>}
-        </View>
-      );
+      return <ImageBody fragment={fragment} />;
     default:
       return (
         <Text style={styles.body} numberOfLines={8}>
@@ -66,6 +59,17 @@ function CardBody({ fragment }: { fragment: Fragment }) {
         </Text>
       );
   }
+}
+
+// URL이 오기 전까지는 빈 well — 다크 캔버스 위에서 자리만 잡고 조용히 채워진다
+function ImageBody({ fragment }: { fragment: Fragment }) {
+  const url = useImageUrl(fragment.image_path);
+  return (
+    <View>
+      <Image source={url} style={styles.imageWell} contentFit="cover" transition={200} />
+      {fragment.content !== '' && <Text style={styles.body}>{fragment.content}</Text>}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -97,8 +101,6 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: rounded.sm,
     backgroundColor: colors.hairlineSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: spacing.xs,
   },
 });

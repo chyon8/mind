@@ -181,6 +181,30 @@ export async function uploadImage(uri: string, mimeType: string): Promise<string
   return path;
 }
 
+// images 버킷이 private이라 표시에도 서명 URL이 필요하다 (PLAN.md §2.3).
+// Promise를 캐시해 같은 이미지를 여러 카드가 동시에 요구해도 발급은 한 번만 나간다.
+const SIGNED_URL_TTL = 60 * 60 * 24 * 7; // 1주
+const signedUrls = new Map<string, Promise<string>>();
+
+export function getImageUrl(path: string): Promise<string> {
+  if (!isConfigured) return Promise.resolve(''); // 픽스처 이미지는 실제 파일이 없다
+  let pending = signedUrls.get(path);
+  if (!pending) {
+    pending = supabase()
+      .storage.from('images')
+      .createSignedUrl(path, SIGNED_URL_TTL)
+      .then(({ data, error }) => {
+        if (error) {
+          signedUrls.delete(path); // 실패는 캐시하지 않는다 — 다음 렌더에서 재시도
+          throw error;
+        }
+        return data.signedUrl;
+      });
+    signedUrls.set(path, pending);
+  }
+  return pending;
+}
+
 // 파편 ↔ 프로젝트 매핑 전체 교체 (다대다, PLAN.md §3.3)
 export async function setFragmentProjects(fragmentId: string, projectIds: string[]): Promise<void> {
   if (!isConfigured) {
@@ -229,6 +253,7 @@ export async function deleteFragment(fragment: Fragment): Promise<void> {
   }
   if (fragment.image_path) {
     await supabase().storage.from('images').remove([fragment.image_path]); // 고아 파일 방지
+    signedUrls.delete(fragment.image_path);
   }
   const { error } = await supabase().from('fragments').delete().eq('id', fragment.id);
   if (error) throw error;

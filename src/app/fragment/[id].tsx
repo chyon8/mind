@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -14,6 +15,7 @@ import {
 } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment, Project, Tier } from '@/lib/types';
+import { useImageUrl } from '@/lib/useImageUrl';
 
 const TIERS: { value: Tier; label: string }[] = [
   { value: 'normal', label: '보통' },
@@ -87,6 +89,8 @@ export default function FragmentDetail() {
           {formatTime(fragment.created_at)}
         </Text>
 
+        {fragment.image_path && <DetailImage path={fragment.image_path} />}
+
         <Text style={styles.content}>{fragment.content}</Text>
         {fragment.link_title && <Text style={styles.linkTitle}>{fragment.link_title}</Text>}
 
@@ -150,6 +154,21 @@ export default function FragmentDetail() {
   );
 }
 
+// 원문 전체를 보는 화면이므로 이미지도 잘리지 않게 — 실제 비율은 로드된 뒤에야 안다
+function DetailImage({ path }: { path: string }) {
+  const url = useImageUrl(path);
+  const [ratio, setRatio] = useState(4 / 3);
+  return (
+    <Image
+      source={url}
+      style={[styles.image, { aspectRatio: ratio }]}
+      contentFit="contain"
+      transition={200}
+      onLoad={(e) => setRatio(e.source.width / e.source.height)}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.canvas },
   header: {
@@ -165,6 +184,12 @@ const styles = StyleSheet.create({
     color: colors.mute,
     fontFamily: fonts.mono,
     marginBottom: spacing.lg,
+  },
+  image: {
+    width: '100%',
+    borderRadius: rounded.md,
+    backgroundColor: colors.hairlineSoft,
+    marginBottom: spacing.md,
   },
   content: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sans },
   linkTitle: {

@@ -1,153 +1,86 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { CalendarStrip } from '@/components/CalendarStrip';
 import { FragmentBullet } from '@/components/FragmentBullet';
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { confirmDelete } from '@/lib/confirm';
-import { addDays, dayKey, feedDateLabel, startOfWeek, WEEKDAY_LABELS } from '@/lib/dates';
+import { addDays, dayKey, feedDateLabel, startOfWeek } from '@/lib/dates';
 import { deleteFragment, fetchFragmentsByRange } from '@/lib/supabase';
-import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { colors, fonts, spacing, type } from '@/lib/theme';
 import { consumeThrown, onThrown } from '@/lib/thrown';
 import type { Fragment } from '@/lib/types';
 import { opacity } from '@/lib/vividness';
 
-// 표시 가능한 과거 범위: 26주 (반년). 더 옛날은 피드/검색으로.
-const WEEKS_BACK = 26;
-const MAX_DOTS = 12;
-
 // 화면 6.1 — 데일리 뷰. 주간 스트립의 점 투명도 = 그 파편의 현재 선명도.
 // 캘린더 스트립 자체가 기억의 지도가 된다.
 export function DailyView() {
-  const { width } = useWindowDimensions();
   const today = useMemo(() => new Date(), []);
-  const weeks = useMemo(() => {
-    const cur = startOfWeek(today);
-    return Array.from({ length: WEEKS_BACK + 1 }, (_, i) => addDays(cur, -7 * (WEEKS_BACK - i)));
-  }, [today]);
-
   const [selected, setSelected] = useState<Date>(today);
-  const [weekIdx, setWeekIdx] = useState(WEEKS_BACK);
-  const [byWeek, setByWeek] = useState<Record<string, Fragment[]>>({});
-  const stripRef = useRef<FlatList>(null);
+  // 스트립이 월까지 펼쳐지면 6주치가 한 번에 필요하다 — 캐시 단위는 주가 아니라 날.
+  const [byDay, setByDay] = useState<Record<string, Fragment[]>>({});
+  const range = useRef<[Date, Date]>([startOfWeek(today), addDays(startOfWeek(today), 7)]);
 
-  const loadWeek = useCallback(async (weekStart: Date) => {
+  const loadRange = useCallback(async (from: Date, to: Date) => {
+    range.current = [from, to];
     try {
-      const frs = await fetchFragmentsByRange(
-        weekStart.toISOString(),
-        addDays(weekStart, 7).toISOString(),
-      );
-      setByWeek((prev) => ({ ...prev, [weekStart.toISOString()]: frs }));
+      const frs = await fetchFragmentsByRange(from.toISOString(), to.toISOString());
+      // 범위 안의 날은 전부 새로 쓴다 — 안 그러면 삭제된 파편이 캐시에 남는다
+      const fresh: Record<string, Fragment[]> = {};
+      for (let d = new Date(from); d < to; d = addDays(d, 1)) {
+        fresh[dayKey(d.toISOString())] = [];
+      }
+      for (const fr of frs) {
+        const key = dayKey(fr.created_at);
+        if (fresh[key]) fresh[key].push(fr);
+      }
+      setByDay((prev) => ({ ...prev, ...fresh }));
     } catch {
-      // 조회 실패 시 해당 주는 빈 채로 — 재진입 시 재시도
+      // 조회 실패 시 해당 범위는 빈 채로 — 재진입 시 재시도
     }
   }, []);
 
   // 던진 직후에는 오늘로 이동해서 방금 던진 게 보이게 한다 (PLAN §6.1)
   const jumpToToday = useCallback(() => {
-    setSelected(new Date());
-    setWeekIdx(WEEKS_BACK);
-    stripRef.current?.scrollToIndex({ index: WEEKS_BACK, animated: false });
-    loadWeek(weeks[WEEKS_BACK]);
-  }, [loadWeek, weeks]);
+    const now = new Date();
+    setSelected(now);
+    loadRange(startOfWeek(now), addDays(startOfWeek(now), 7));
+  }, [loadRange]);
 
   useFocusEffect(
     useCallback(() => {
       if (consumeThrown()) jumpToToday();
-      loadWeek(weeks[weekIdx]);
-    }, [weekIdx, loadWeek, weeks, jumpToToday]),
+      else loadRange(...range.current);
+    }, [loadRange, jumpToToday]),
   );
 
   // 공유 저장은 이 화면이 이미 떠 있는 채로 일어난다 — 포커스가 안 바뀌므로 직접 듣는다
-  useEffect(() => onThrown(() => {
-    consumeThrown();
-    jumpToToday();
-  }), [jumpToToday]);
+  useEffect(
+    () =>
+      onThrown(() => {
+        consumeThrown();
+        jumpToToday();
+      }),
+    [jumpToToday],
+  );
 
-  const weekFragments = byWeek[weeks[weekIdx].toISOString()] ?? [];
   const now = new Date();
-  const selectedKey = dayKey(selected.toISOString());
-  const dayFragments = weekFragments.filter((fr) => dayKey(fr.created_at) === selectedKey);
-  const todayKey = dayKey(today.toISOString());
+  const dayFragments = byDay[dayKey(selected.toISOString())] ?? [];
 
   async function removeFragment(fr: Fragment) {
     if (!(await confirmDelete())) return;
     await deleteFragment(fr);
-    loadWeek(weeks[weekIdx]);
-  }
-
-  function renderWeek({ item: weekStart }: { item: Date }) {
-    const frs = byWeek[weekStart.toISOString()] ?? [];
-    return (
-      <View style={[styles.weekRow, { width }]}>
-        {Array.from({ length: 7 }, (_, i) => {
-          const day = addDays(weekStart, i);
-          const key = dayKey(day.toISOString());
-          const isFuture = day.getTime() > today.getTime();
-          const dayFrs = frs.filter((fr) => dayKey(fr.created_at) === key);
-          return (
-            <Pressable
-              key={key}
-              style={[styles.dayCell, key === selectedKey && styles.dayCellSelected]}
-              onPress={() => !isFuture && setSelected(day)}
-            >
-              <Text style={styles.weekdayLabel}>{WEEKDAY_LABELS[day.getDay()]}</Text>
-              <Text
-                style={[
-                  styles.dayNum,
-                  key === todayKey && styles.dayNumToday,
-                  isFuture && styles.dayNumFuture,
-                ]}
-              >
-                {day.getDate()}
-              </Text>
-              <View style={styles.dots}>
-                {dayFrs.slice(0, MAX_DOTS).map((fr) => (
-                  <View
-                    key={fr.id}
-                    style={[
-                      styles.dot,
-                      { opacity: opacity(new Date(fr.last_touched_at), fr.tier, now) },
-                    ]}
-                  />
-                ))}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-    );
+    loadRange(...range.current);
   }
 
   return (
     <View style={styles.container}>
-      <FlatList
-        ref={stripRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        data={weeks}
-        keyExtractor={(d) => d.toISOString()}
-        renderItem={renderWeek}
-        initialScrollIndex={WEEKS_BACK}
-        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-        onMomentumScrollEnd={(e) => {
-          const idx = Math.round(e.nativeEvent.contentOffset.x / width);
-          if (idx !== weekIdx && idx >= 0 && idx <= WEEKS_BACK) {
-            setWeekIdx(idx);
-            // 주가 바뀌면 같은 요일을 선택 유지
-            const next = addDays(weeks[idx], selected.getDay());
-            setSelected(next.getTime() > today.getTime() ? today : next);
-          }
-        }}
-        style={styles.strip}
+      <CalendarStrip
+        selected={selected}
+        today={today}
+        byDay={byDay}
+        onSelect={setSelected}
+        onRangeNeeded={loadRange}
       />
 
       <Text style={styles.dateTitle}>{feedDateLabel(selected.toISOString())}요일</Text>
@@ -180,35 +113,6 @@ export function DailyView() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  strip: {
-    flexGrow: 0,
-    flexShrink: 0,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.hairline,
-  },
-  weekRow: { flexDirection: 'row', paddingVertical: spacing.sm },
-  dayCell: {
-    flex: 1,
-    alignItems: 'center',
-    gap: spacing.xxs,
-    paddingVertical: spacing.xs,
-    marginHorizontal: 2,
-    borderRadius: rounded.sm,
-  },
-  dayCellSelected: { backgroundColor: colors.hairlineSoft },
-  weekdayLabel: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
-  dayNum: { ...type.labelSm, color: colors.ink, fontFamily: fonts.sansMedium },
-  dayNumToday: { color: colors.link },
-  dayNumFuture: { color: colors.faint },
-  dots: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 3,
-    width: 30,
-    minHeight: 18,
-  },
-  dot: { width: 4.5, height: 4.5, borderRadius: 2.5, backgroundColor: colors.ink },
   dateTitle: {
     ...type.headingMd,
     color: colors.ink,
