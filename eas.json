@@ -5,13 +5,11 @@
   },
   "build": {
     "development": {
-      "node": "22.x",
       "developmentClient": true,
       "distribution": "internal",
       "ios": { "simulator": false }
     },
     "production": {
-      "node": "22.x",
       "autoIncrement": true
     }
   },
