@@ -19,7 +19,7 @@ import {
 } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment, Project, ProjectStatus } from '@/lib/types';
-import { opacity } from '@/lib/vividness';
+import { vividness } from '@/lib/vividness';
 
 const STATUSES: { value: ProjectStatus; label: string }[] = [
   { value: 'active', label: '진행중' },
@@ -171,7 +171,7 @@ export default function ProjectDetail() {
             <Pressable key={fr.id} onPress={() => router.push(`/fragment/${fr.id}`)}>
               <FragmentBullet
                 fragment={fr}
-                rowOpacity={opacity(new Date(fr.last_touched_at), fr.tier, now)}
+                rowOpacity={vividness(fr, now)}
               />
             </Pressable>
           ))

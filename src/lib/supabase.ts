@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Fragment, FragmentType, Project } from './types';
+import type { DayMark, Fragment, FragmentType, Project } from './types';
 
 // 키는 .env의 EXPO_PUBLIC_* — anon key는 공개 가능 전제, RLS가 방어선 (PLAN.md §2.2)
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -44,10 +44,15 @@ export async function signIn(email: string, password: string): Promise<void> {
   if (error) throw error;
 }
 
-const PAGE_SIZE = 100;
+export const PAGE_SIZE = 100;
 
-// 'all' | 'inbox' | 'grave' | 프로젝트 id
-export type FeedFilter = 'all' | 'inbox' | 'grave' | (string & {});
+// 'all' | 'inbox' | 'pinned' | 'grave' | 프로젝트 id
+// pinned = 즐겨찾기. 새 개념이 아니라 tier의 pinned를 모아 보는 렌즈일 뿐이다.
+export type FeedFilter = 'all' | 'inbox' | 'pinned' | 'grave' | (string & {});
+
+function isLens(filter: FeedFilter): boolean {
+  return filter === 'all' || filter === 'inbox' || filter === 'pinned' || filter === 'grave';
+}
 
 const EMBED = '*, fragment_projects(project_id)';
 
@@ -67,7 +72,7 @@ export async function fetchFragments(filter: FeedFilter, page = 0): Promise<Frag
     return page === 0 ? fixtureListFragments(filter) : [];
   }
   let q;
-  if (filter !== 'all' && filter !== 'inbox' && filter !== 'grave') {
+  if (!isLens(filter)) {
     // 프로젝트 렌즈 — inner join으로 해당 프로젝트에 매핑된 파편만
     q = supabase()
       .from('fragments')
@@ -80,6 +85,7 @@ export async function fetchFragments(filter: FeedFilter, page = 0): Promise<Frag
     else {
       q = q.eq('archived', false);
       if (filter === 'inbox') q = q.is('fragment_projects', null); // 매핑 0개 = Inbox
+      if (filter === 'pinned') q = q.eq('tier', 'pinned');
     }
   }
   const { data, error } = await q
@@ -87,6 +93,35 @@ export async function fetchFragments(filter: FeedFilter, page = 0): Promise<Frag
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
   if (error) throw error;
   return data.map(toFragment);
+}
+
+// 월 캘린더용 — 날짜별 밀도만 알면 되므로 원문 없이 가볍게 전부 가져온다.
+// 피드는 100개씩 끊어 읽지만 캘린더는 아직 안 읽은 날에도 점을 찍어야 한다.
+export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
+  if (!isConfigured) {
+    const { fixtureListFragments } = await import('./fixtures');
+    return fixtureListFragments(filter);
+  }
+  const cols = 'id, created_at, last_touched_at, tier, touch_count';
+  let q;
+  if (!isLens(filter)) {
+    q = supabase()
+      .from('fragments')
+      .select(`${cols}, fragment_projects!inner(project_id)`)
+      .eq('fragment_projects.project_id', filter)
+      .eq('archived', false);
+  } else {
+    q = supabase().from('fragments').select(`${cols}, fragment_projects(project_id)`);
+    if (filter === 'grave') q = q.eq('archived', true);
+    else {
+      q = q.eq('archived', false);
+      if (filter === 'inbox') q = q.is('fragment_projects', null);
+      if (filter === 'pinned') q = q.eq('tier', 'pinned');
+    }
+  }
+  const { data, error } = await q.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data as DayMark[];
 }
 
 // 데일리 뷰: 주 단위 범위 조회 (무덤 제외)
@@ -221,6 +256,53 @@ export async function setFragmentProjects(fragmentId: string, projectIds: string
     .from('fragment_projects')
     .insert(projectIds.map((project_id) => ({ fragment_id: fragmentId, project_id })));
   if (error) throw error;
+}
+
+// ============ 회상 (SPEC §5의 없어진 반쪽) ============
+
+const LET_GO_COOLDOWN_DAYS = 60;
+
+// 회상 후보 — 가장 오래 안 건드린 것부터. 흘려보낸 지 얼마 안 된 건 뺀다.
+// 어느 게 실제로 잊히기 직전인지는 선명도를 계산해봐야 알므로 판정은 recall.ts에서.
+export async function fetchRecallPool(): Promise<Fragment[]> {
+  if (!isConfigured) {
+    const { fixtureRecallPool } = await import('./fixtures');
+    return fixtureRecallPool();
+  }
+  const cooldown = new Date(Date.now() - LET_GO_COOLDOWN_DAYS * 86_400_000).toISOString();
+  const { data, error } = await supabase()
+    .from('fragments')
+    .select(EMBED)
+    .eq('archived', false)
+    .or(`let_go_at.is.null,let_go_at.lt.${cooldown}`)
+    .order('last_touched_at', { ascending: true })
+    .limit(100);
+  if (error) throw error;
+  return data.map(toFragment);
+}
+
+export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
+  if (ids.length === 0) return [];
+  if (!isConfigured) {
+    const { fixtureFragmentsByIds } = await import('./fixtures');
+    return fixtureFragmentsByIds(ids);
+  }
+  const { data, error } = await supabase().from('fragments').select(EMBED).in('id', ids);
+  if (error) throw error;
+  return data.map(toFragment);
+}
+
+// 구해냈다 — 선명도 100% 복귀 + 중요도 한 칸. 회상에서 "기억하기"를 누를 때만.
+export async function rememberFragment(fr: Fragment): Promise<void> {
+  await updateFragment(fr.id, {
+    last_touched_at: new Date().toISOString(),
+    touch_count: fr.touch_count + 1,
+  });
+}
+
+// 흘려보냈다 — 파편은 그대로 두고(삭제도 아카이브도 아니다) 당분간 다시 띄우지 않는다
+export async function letGoFragment(id: string): Promise<void> {
+  await updateFragment(id, { let_go_at: new Date().toISOString() });
 }
 
 // 파편을 열면 100% 복귀 — 유일한 last_touched_at 갱신 지점 (PLAN.md §3.2)

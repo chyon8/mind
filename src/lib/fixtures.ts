@@ -60,6 +60,8 @@ const f = (
   last_touched_at: createdAt,
   tier: 'normal',
   archived: false,
+  touch_count: 0,
+  let_go_at: null,
   project_ids: [],
   ...extra,
 });
@@ -127,6 +129,7 @@ export function fixtureListFragments(filter: FeedFilter): Fragment[] {
       if (filter === 'grave') return fr.archived;
       if (fr.archived) return false;
       if (filter === 'inbox') return fr.project_ids.length === 0;
+      if (filter === 'pinned') return fr.tier === 'pinned';
       if (filter !== 'all') return fr.project_ids.includes(filter);
       return true;
     })
@@ -158,6 +161,20 @@ export function fixtureGetFragment(id: string): Fragment {
 
 export function fixtureUpdateFragment(id: string, patch: Partial<Fragment>): void {
   store = store.map((fr) => (fr.id === id ? { ...fr, ...patch } : fr));
+}
+
+const LET_GO_COOLDOWN_MS = 60 * 86_400_000;
+
+export function fixtureRecallPool(): Fragment[] {
+  const cutoff = Date.now() - LET_GO_COOLDOWN_MS;
+  return store
+    .filter((fr) => !fr.archived)
+    .filter((fr) => fr.let_go_at == null || new Date(fr.let_go_at).getTime() < cutoff)
+    .sort((a, b) => a.last_touched_at.localeCompare(b.last_touched_at));
+}
+
+export function fixtureFragmentsByIds(ids: string[]): Fragment[] {
+  return store.filter((fr) => ids.includes(fr.id));
 }
 
 export function fixtureSetFragmentProjects(id: string, projectIds: string[]): void {

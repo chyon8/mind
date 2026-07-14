@@ -15,10 +15,17 @@ create table fragments (
   last_touched_at    timestamptz not null default now(),
   tier               text not null default 'normal'
                      check (tier in ('normal','important','pinned')),
-  archived           boolean not null default false
+  archived           boolean not null default false,
+  -- 회상: 몇 번이나 구해냈나 = 중요도. 손으로 tier를 정하지 않아도 자라난다.
+  touch_count        integer not null default 0,
+  -- 회상에서 흘려보낸 시각. 보여준 것만으로는 아무것도 기록하지 않는다 —
+  -- 무시하면 아무 일도 안 일어나야 "안 보는 행위 자체가 판정이다"(SPEC §1)가 산다.
+  let_go_at          timestamptz
 );
 
 create index fragments_created_at_idx on fragments (created_at desc);
+-- 회상 후보는 "가장 오래 안 건드린 것"부터 찾는다
+create index fragments_last_touched_idx on fragments (last_touched_at);
 
 -- 프로젝트는 파편과 다른 종류의 아이템 — 타임라인에 쌓이지 않고 폴더처럼 존재한다.
 create table projects (

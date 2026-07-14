@@ -20,3 +20,18 @@ export function opacity(lastTouchedAt: Date, tier: Tier, now: Date = new Date())
   if (days >= floor) return FLOOR_OPACITY;
   return 1 - (1 - FLOOR_OPACITY) * ((days - start) / (floor - start));
 }
+
+// 회상에서 두 번 이상 구해낸 파편은 잘 안 잊힌다 — 중요도를 손으로 정할 필요가 없다.
+// 수동 tier는 그대로 우선한다 (명시적 지정이 자동 추론을 이긴다).
+export function effectiveTier(tier: Tier, touchCount: number): Tier {
+  if (tier !== 'normal') return tier;
+  return touchCount >= 2 ? 'important' : 'normal';
+}
+
+// 화면에서 쓰는 실제 선명도. 파편이 들고 있는 값만으로 계산된다.
+export function vividness(
+  fr: { last_touched_at: string; tier: Tier; touch_count: number },
+  now?: Date,
+): number {
+  return opacity(new Date(fr.last_touched_at), effectiveTier(fr.tier, fr.touch_count), now);
+}

@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { FeedFilter } from '@/lib/supabase';
 import { colors, fonts, spacing, type } from '@/lib/theme';
 
-// 사이드바는 네 개뿐 — All · Inbox · 프로젝트 · 무덤 (PLAN.md §6.2)
+// All · Inbox · 고정 · 프로젝트 / 헤매기 · 무덤 (PLAN.md §6.2)
 // 프로젝트의 상태별 분류는 프로젝트 목록 화면의 칩이 담당한다.
 export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
   function go(filter: FeedFilter) {
@@ -28,12 +28,26 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
         <Pressable style={styles.row} onPress={() => go('inbox')}>
           <Text style={styles.rowLabel}>Inbox</Text>
         </Pressable>
+        {/* 즐겨찾기 = tier가 pinned인 것들. 새 개념이 아니라 렌즈다. */}
+        <Pressable style={styles.row} onPress={() => go('pinned')}>
+          <Text style={styles.rowLabel}>고정</Text>
+        </Pressable>
         <Pressable style={styles.row} onPress={goProjects}>
           <Text style={styles.rowLabel}>프로젝트</Text>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
 
         <View style={styles.divider} />
+        {/* 판단 없는 자리 — 그냥 무작위로 흘러나온다 */}
+        <Pressable
+          style={styles.row}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/wander');
+          }}
+        >
+          <Text style={styles.rowLabel}>헤매기</Text>
+        </Pressable>
         <Pressable style={styles.row} onPress={() => go('grave')}>
           <Text style={styles.graveLabel}>무덤</Text>
         </Pressable>

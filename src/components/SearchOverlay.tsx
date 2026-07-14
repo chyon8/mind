@@ -8,7 +8,7 @@ import { feedDateLabel } from '@/lib/dates';
 import { searchFragments } from '@/lib/supabase';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment } from '@/lib/types';
-import { opacity } from '@/lib/vividness';
+import { vividness } from '@/lib/vividness';
 
 // 검색은 별도 화면이 아니라 홈 위에 제자리에서 열리는 레이어.
 // 헤더 자리에 검색바가 스르륵 내려오고, 결과는 같은 화면에서 바로 보인다.
@@ -81,7 +81,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
               </Text>
               <FragmentCard
                 fragment={item}
-                opacity={opacity(new Date(item.last_touched_at), item.tier, now)}
+                opacity={vividness(item, now)}
               />
             </Pressable>
           )}

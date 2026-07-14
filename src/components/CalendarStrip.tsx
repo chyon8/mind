@@ -18,8 +18,8 @@ import {
   WEEKDAY_LABELS,
 } from '@/lib/dates';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
-import type { Fragment } from '@/lib/types';
-import { opacity } from '@/lib/vividness';
+import type { DayMark, Fragment } from '@/lib/types';
+import { vividness } from '@/lib/vividness';
 
 // 스트립을 아래로 끌면 펼쳐진다: 주 → 2주 → 월. 리스트는 덮이지 않고 아래로 밀린다.
 export type StripMode = 'week' | 'biweek' | 'month';
@@ -206,7 +206,7 @@ export function CalendarStrip({
                           key={fr.id}
                           style={[
                             styles.dot,
-                            { opacity: opacity(new Date(fr.last_touched_at), fr.tier, today) },
+                            { opacity: vividness(fr, today) },
                           ]}
                         />
                       ))
@@ -259,11 +259,11 @@ export function CalendarStrip({
 
 // 월 뷰엔 점 12개가 안 들어간다 — 하나로 접되 개수는 크기로, 기억은 투명도로 남긴다.
 // 하루 중 가장 또렷한 파편을 쓴다: 하나만 다시 열어봐도 그 날은 되살아난다.
-function DensityMark({ fragments, today }: { fragments: Fragment[]; today: Date }) {
+export function DensityMark({ fragments, today }: { fragments: DayMark[]; today: Date }) {
   if (fragments.length === 0) return null;
   const size = fragments.length >= 6 ? 8 : fragments.length >= 3 ? 6 : 4;
   const vivid = Math.max(
-    ...fragments.map((fr) => opacity(new Date(fr.last_touched_at), fr.tier, today)),
+    ...fragments.map((fr) => vividness(fr, today)),
   );
   return (
     <View

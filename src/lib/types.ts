@@ -14,9 +14,17 @@ export interface Fragment {
   last_touched_at: string;
   tier: Tier;
   archived: boolean;
+  touch_count: number; // 회상에서 구해낸 횟수 = 자라나는 중요도
+  let_go_at: string | null; // 회상에서 흘려보낸 시각. 보여준 것만으론 기록되지 않는다
   // fragment_projects에서 파생 (클라이언트 전용). 빈 배열 = Inbox
   project_ids: string[];
 }
+
+// 캘린더에 점만 찍으면 되는 최소 정보. 날짜별 밀도를 알려고 파편 전체를 들고 올 이유가 없다.
+export type DayMark = Pick<
+  Fragment,
+  'id' | 'created_at' | 'last_touched_at' | 'tier' | 'touch_count'
+>;
 
 export interface Project {
   id: string;

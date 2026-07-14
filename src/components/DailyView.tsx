@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CalendarStrip } from '@/components/CalendarStrip';
 import { FragmentBullet } from '@/components/FragmentBullet';
+import { RecallSection } from '@/components/RecallSection';
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
@@ -11,7 +12,7 @@ import { deleteFragment, fetchFragmentsByRange } from '@/lib/supabase';
 import { colors, fonts, spacing, type } from '@/lib/theme';
 import { consumeThrown, onThrown } from '@/lib/thrown';
 import type { Fragment } from '@/lib/types';
-import { opacity } from '@/lib/vividness';
+import { vividness } from '@/lib/vividness';
 
 // 화면 6.1 — 데일리 뷰. 주간 스트립의 점 투명도 = 그 파편의 현재 선명도.
 // 캘린더 스트립 자체가 기억의 지도가 된다.
@@ -75,6 +76,7 @@ export function DailyView() {
   );
 
   const now = new Date();
+  const isToday = dayKey(selected.toISOString()) === dayKey(today.toISOString());
   const dayFragments = byDay[dayKey(selected.toISOString())] ?? [];
 
   async function removeFragment(fr: Fragment) {
@@ -98,28 +100,26 @@ export function DailyView() {
 
       <Text style={styles.dateTitle}>{feedDateLabel(selected.toISOString())}요일</Text>
 
-      {dayFragments.length === 0 ? (
-        <View style={styles.center}>
+      <ScrollView contentContainerStyle={styles.list}>
+        {dayFragments.length === 0 ? (
           <Text style={styles.emptyText}>이 날은 아무것도 던지지 않았다</Text>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          {dayFragments.map((fr) => (
+        ) : (
+          dayFragments.map((fr) => (
             <SwipeableRow
               key={fr.id}
               onEdit={() => router.push({ pathname: '/input', params: { id: fr.id } })}
               onDelete={() => removeFragment(fr)}
             >
               <Pressable onPress={() => router.push(`/fragment/${fr.id}`)}>
-                <FragmentBullet
-                  fragment={fr}
-                  rowOpacity={opacity(new Date(fr.last_touched_at), fr.tier, now)}
-                />
+                <FragmentBullet fragment={fr} rowOpacity={vividness(fr, now)} />
               </Pressable>
             </SwipeableRow>
-          ))}
-        </ScrollView>
-      )}
+          ))
+        )}
+
+        {/* 오늘을 보고 있을 때만 떠오른다. 과거를 들여다보는 중엔 방해하지 않는다. */}
+        <RecallSection visible={isToday} />
+      </ScrollView>
 
       {/* 다른 날을 보고 있거나, 스트립이 오늘이 없는 주/달을 넘겨보고 있을 때 */}
       <TodayPill
@@ -141,6 +141,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   list: { paddingHorizontal: spacing.md, paddingBottom: 120 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans },
+  emptyText: {
+    ...type.bodyMd,
+    color: colors.mute,
+    fontFamily: fonts.sans,
+    paddingTop: spacing.xl,
+    textAlign: 'center',
+  },
 });
