@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DailyView } from '@/components/DailyView';
@@ -7,6 +7,7 @@ import { FragmentCard } from '@/components/FragmentCard';
 import { ProjectChips } from '@/components/ProjectChips';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { SwipeableRow } from '@/components/SwipeableRow';
+import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
 import { agendaDateParts, dayKey, feedDateLabel, formatTime } from '@/lib/dates';
 import { deleteFragment, fetchFragments, fetchProjects, type FeedFilter } from '@/lib/supabase';
@@ -29,6 +30,9 @@ export default function Home() {
   const [fragments, setFragments] = useState<Fragment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [failed, setFailed] = useState(false);
+  // 피드/어젠다는 최신이 맨 위 — 과거로 깊이 내려간 상태가 곧 "오늘에서 벗어남"이다
+  const listRef = useRef<SectionList<Fragment>>(null);
+  const [scrolledAway, setScrolledAway] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -134,10 +138,13 @@ export default function Home() {
             </View>
           ) : (
             <SectionList
+              ref={listRef}
               sections={sections}
               keyExtractor={(fr) => fr.id}
               stickySectionHeadersEnabled={false}
               contentContainerStyle={styles.listContent}
+              scrollEventThrottle={16}
+              onScroll={(e) => setScrolledAway(e.nativeEvent.contentOffset.y > 700)}
               renderSectionHeader={({ section }) =>
                 mode === 'feed' ? (
                   <View style={styles.feedSep}>
@@ -166,6 +173,11 @@ export default function Home() {
               )}
             />
           )}
+
+          <TodayPill
+            visible={scrolledAway}
+            onPress={() => listRef.current?.getScrollResponder()?.scrollTo({ y: 0, animated: true })}
+          />
         </>
       )}
 

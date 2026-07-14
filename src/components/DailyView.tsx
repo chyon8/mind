@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CalendarStrip } from '@/components/CalendarStrip';
 import { FragmentBullet } from '@/components/FragmentBullet';
 import { SwipeableRow } from '@/components/SwipeableRow';
+import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
 import { addDays, dayKey, feedDateLabel, startOfWeek } from '@/lib/dates';
 import { deleteFragment, fetchFragmentsByRange } from '@/lib/supabase';
@@ -17,6 +18,8 @@ import { opacity } from '@/lib/vividness';
 export function DailyView() {
   const today = useMemo(() => new Date(), []);
   const [selected, setSelected] = useState<Date>(today);
+  const [anchor, setAnchor] = useState<Date>(today); // 스트립이 넘겨보고 있는 위치
+  const [away, setAway] = useState(false); // 스트립이 오늘을 벗어났나
   // 스트립이 월까지 펼쳐지면 6주치가 한 번에 필요하다 — 캐시 단위는 주가 아니라 날.
   const [byDay, setByDay] = useState<Record<string, Fragment[]>>({});
   const range = useRef<[Date, Date]>([startOfWeek(today), addDays(startOfWeek(today), 7)]);
@@ -44,8 +47,15 @@ export function DailyView() {
   const jumpToToday = useCallback(() => {
     const now = new Date();
     setSelected(now);
+    setAnchor(now);
     loadRange(startOfWeek(now), addDays(startOfWeek(now), 7));
   }, [loadRange]);
+
+  // 날짜를 고르면 그 날이 곧 보고 있는 자리다
+  const selectDay = useCallback((d: Date) => {
+    setSelected(d);
+    setAnchor(d);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -79,8 +89,11 @@ export function DailyView() {
         selected={selected}
         today={today}
         byDay={byDay}
-        onSelect={setSelected}
+        anchor={anchor}
+        onSelect={selectDay}
+        onAnchor={setAnchor}
         onRangeNeeded={loadRange}
+        onAwayChange={setAway}
       />
 
       <Text style={styles.dateTitle}>{feedDateLabel(selected.toISOString())}요일</Text>
@@ -107,6 +120,12 @@ export function DailyView() {
           ))}
         </ScrollView>
       )}
+
+      {/* 다른 날을 보고 있거나, 스트립이 오늘이 없는 주/달을 넘겨보고 있을 때 */}
+      <TodayPill
+        visible={away || dayKey(selected.toISOString()) !== dayKey(today.toISOString())}
+        onPress={jumpToToday}
+      />
     </View>
   );
 }
