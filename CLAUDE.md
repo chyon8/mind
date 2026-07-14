@@ -10,7 +10,7 @@
 - **PLAN.md** — 기술 설계 + 개발 마일스톤. 구현 전 해당 섹션 확인.
 - **Design.md** — 비주얼 스타일 원천 (Geist 시스템, 라이트 기준). 앱은 다크 반전 적용 — PLAN.md §6.5의 매핑을 따른다.
 
-스택: Expo(React Native + TypeScript) + expo-share-intent + Supabase + 순수 HTML 웹 입력 페이지. 사용자는 한 명.
+스택: Expo(React Native + TypeScript) + expo-share-intent + Supabase. 사용자는 한 명.
 
 ---
 
@@ -98,8 +98,8 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ```
 📁 변경된 파일:
-- Mind/components/FragmentCard.tsx — [무엇을 왜 변경했는지]
-- web/index.html — [무엇을 왜 변경했는지]
+- src/components/FragmentCard.tsx — [무엇을 왜 변경했는지]
+- src/lib/supabase.ts — [무엇을 왜 변경했는지]
 
 📝 변경 요약:
 [전체적으로 어떤 기능이 바뀌었는지 한 줄 설명]
@@ -113,7 +113,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ✅ 검토 체크리스트:
 - [ ] 시뮬레이터(또는 실기기)에서 [특정 화면]을 열어 [특정 동작] 확인
 - [ ] [특정 입력]을 해보면 [기대 결과]가 나와야 함
-- [ ] 웹 입력 페이지 변경 시: 브라우저에서 [특정 동작] 확인
 ```
 
 #### Step 3: 사용자 컨펌 대기

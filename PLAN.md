@@ -16,18 +16,17 @@
 └──────────────┬───────────────────┘
                │ supabase-js
                ▼
-┌─────────────────────────────┐      ┌──────────────────────┐
-│  Supabase (무료 티어)         │ ◀────│  웹 입력 페이지        │
-│  ├─ Postgres: fragments,    │      │  (index.html 단일 파일 │
-│  │            projects      │      │   + supabase-js CDN) │
-│  ├─ Auth: 계정 1개           │      └──────────────────────┘
+┌─────────────────────────────┐
+│  Supabase (무료 티어)         │
+│  ├─ Postgres: fragments,    │
+│  │            projects      │
+│  ├─ Auth: 계정 1개           │
 │  └─ Storage: images 버킷     │
 └─────────────────────────────┘
 ```
 
 - 서버 코드 없음. 모든 클라이언트가 Supabase REST에 직접 붙는다.
 - 동기화 개념 없음 — Supabase가 유일한 진실. 클라이언트는 캐시 없이 조회한다 (MVP).
-- 앱과 웹 페이지가 같은 언어(TS/JS) — 타입 판별 로직을 그대로 공유한다.
 
 ## 2. Supabase 설계
 
@@ -66,8 +65,13 @@ create table fragments (
   last_touched_at    timestamptz not null default now(),
   tier               text not null default 'normal'
                      check (tier in ('normal','important','pinned')),
-  archived           boolean not null default false
+  archived           boolean not null default false,
+  -- 회상 (SPEC §5-1, 2026-07-14 추가)
+  touch_count        integer not null default 0,  -- 구해낸 횟수 = 자라나는 중요도
+  let_go_at          timestamptz                  -- 흘려보낸 시각. 보여준 것만으론 안 쓴다
 );
+
+create index fragments_last_touched_idx on fragments (last_touched_at);  -- 회상 후보 탐색
 
 create index fragments_created_at_idx on fragments (created_at desc);
 ```
@@ -84,9 +88,10 @@ create index fragments_created_at_idx on fragments (created_at desc);
 
 - **Supabase Auth 이메일+비밀번호 계정 1개.** 회원가입 흐름 없음 — 대시보드에서 수동 생성.
 - RLS: 두 테이블 모두 `authenticated` 롤에만 select/insert/update/delete 허용. anon은 전부 차단.
-  (anon key는 웹 페이지 소스에 노출되므로, 로그인 없이는 아무것도 못 하게 하는 것이 방어선)
-- 앱과 웹 페이지 모두 같은 계정으로 로그인. 앱 세션은 supabase-js + AsyncStorage,
-  웹은 localStorage — 공유 저장도 앱 본체가 처리하므로 별도 세션 공유 장치가 필요 없다.
+  (anon key는 앱 번들에 박혀 나가므로, 로그인 없이는 아무것도 못 하게 하는 것이 방어선)
+- 세션은 supabase-js + AsyncStorage에 유지되므로 로그인은 기기당 한 번뿐이다.
+- **EAS 클라우드 빌드는 `.env`를 보지 못한다.** 키는 `eas env:create`로 Expo에 등록해 둔다 —
+  안 하면 TestFlight 앱이 픽스처(가짜 데이터) 모드로 뜬다.
 
 ### 2.3 Storage
 
@@ -121,9 +126,8 @@ mind/                         # = 저장소 루트 = Expo 앱 루트
 │     ├─ vividness.ts         # 선명도 계산 (순수 함수)
 │     ├─ dates.ts · confirm.ts
 │     └─ theme.ts             # 디자인 토큰 단일 파일 (§6.5)
-├─ __tests__/                 # typeDetector, vividness (jest-expo)
-├─ supabase/schema.sql
-└─ web/index.html             # (마일스톤 7)
+├─ __tests__/                 # typeDetector, vividness, dates (jest-expo)
+└─ supabase/schema.sql
 ```
 
 - 아키텍처 패턴: **없음이 패턴.** 전역 상태 라이브러리·컨텍스트 스토어 없음 — 각 화면이
@@ -170,7 +174,7 @@ trim 후 위에서부터 첫 매치:
 | 4 | 그 외 전부 | text |
 
 - 오판별은 허용한다. 타입은 표시 방식만 바꾸므로 치명적이지 않고, 수동 수정 기능은 만들지 않는다 (입력 마찰 0 유지, 필요해지면 v2).
-- 웹 입력 페이지는 같은 언어이므로 `typeDetector.ts`의 함수를 그대로 복사해 쓴다 (규칙 2~4만, 이미지 없음). 빌드 공유 인프라는 만들지 않는다 — 복붙이 더 싸다.
+- 판별은 `typeDetector.ts` **단일 구현**이다. 웹 입력 페이지가 폐기되면서(§5) 복사본을 들고 다닐 이유도 사라졌다.
 
 ### 3.5 선명도 계산 (`vividness.ts`, 순수 함수 + 유닛 테스트)
 
@@ -187,6 +191,17 @@ opacity(lastTouchedAt, tier, now):
 - DB에 저장하지 않는다. 카드/행 렌더링 시점에 계산해 opacity로 적용.
 - 수치는 SPEC §5 확정값. 변경 시 이 함수 한 곳만 고친다.
 
+**자라나는 중요도 (2026-07-14)** — 화면은 `opacity()`를 직접 부르지 않고 `vividness(fragment)`를 쓴다:
+
+```
+effectiveTier(tier, touchCount):
+  tier ≠ 'normal'   → tier          (수동 지정이 자동 추론을 이긴다)
+  touchCount ≥ 2    → 'important'   (두 번 구해낸 건 잘 안 잊힌다)
+  그 외              → 'normal'
+
+vividness(fr) = opacity(fr.last_touched_at, effectiveTier(fr.tier, fr.touch_count))
+```
+
 ### 3.6 링크 메타데이터 백필
 
 - **저장은 즉시, 메타데이터는 나중에.** insert를 막지 않는다 (입력 마찰 0).
@@ -196,6 +211,23 @@ opacity(lastTouchedAt, tier, now):
 - `link_thumbnail_url`에는 `og:image`의 외부 URL을 그대로 저장 — 버킷 업로드 불필요.
 - 웹 페이지에서 던진 링크도 이 경로로 자동 해결된다.
 - 실패한 것은 그냥 둔다 — URL 원문이 이미 있으므로 기능 손실 없음. 재시도 카운터 같은 것 안 만든다.
+
+### 3.7 회상 (`recall.ts`, SPEC §5-1)
+
+```
+후보 = archived=false
+       ∧ (let_go_at is null ∨ let_go_at < now - 60일)      ← 흘려보낸 건 쿨다운
+       ∧ vividness ≤ 0.5                                    ← 잊히기 직전만
+     (last_touched_at 오름차순 100개를 받아 클라이언트에서 판정)
+
+가중치 = 1 + touch_count × 2 + (tier = important ? 2 : 0)   ← 중요한 게 더 자주 떠오른다
+하루 2개를 가중 랜덤으로 뽑고, 그 선택을 AsyncStorage에 남긴다 (하루 안에서는 안 바뀐다)
+```
+
+- **보여주는 것만으론 DB에 아무것도 쓰지 않는다.** 쓰는 건 기억하기/흘려보내기뿐이다.
+  (`last_surfaced_at` 같은 컬럼을 두면 노출만으로 쿨다운이 걸려 "무시하면 아무 일 없음"이 깨진다.)
+- 회상 카드는 **상세로 링크하지 않는다.** 상세는 mount 시 touch하므로
+  링크를 걸면 "그냥 봤다고 선명해지면 안 된다"가 뒷문으로 깨진다.
 
 ## 4. 공유 저장 설계 — expo-share-intent (최우선 구현 대상)
 
@@ -217,13 +249,15 @@ opacity(lastTouchedAt, tier, now):
 - 리스크: 커뮤니티 플러그인 의존 — Expo SDK 업그레이드 시 깨질 수 있음.
   대응: SDK 버전 고정, 업그레이드는 공유 기능 실기기 확인과 함께만.
 
-## 5. 웹 입력 페이지 설계
+## 5. ~~웹 입력 페이지 설계~~ — 폐기 (2026-07-14)
 
-- `web/index.html` 단일 파일. supabase-js는 CDN `<script>`. 빌드 도구 없음.
-- 첫 방문: 이메일/비번 로그인 → 세션은 supabase-js가 localStorage에 유지.
-- 이후: textarea + [던지기] 버튼이 전부. Cmd/Ctrl+Enter 지원. 타입 판별(§3.3 복사본) 후 insert, 성공 시 입력창 비움.
-- 뷰 기능 없음 — 저장 결과 확인은 폰에서.
-- 호스팅: 정적 파일이므로 GitHub Pages든 로컬 `file://`이든 동작. 기본은 로컬 파일로 시작.
+`web/index.html`은 **만들지 않는다.** SPEC §3 참조.
+
+사유: 회사 데스크탑에서 던지기용이었으나, 브라우저 탭을 열어 붙여넣는 마찰이 남는다.
+데스크탑 입구가 필요해지면 **크롬 익스텐션이나 맥 공유 시트**로 간다 — 그쪽이 "입력 마찰 0"에
+실제로 부합한다. 그때는 `typeDetector.ts` 복사본을 들고 다닐 필요도 없어진다.
+
+⚠️ 다시 꺼내지 말 것. 필요해지면 웹 페이지가 아니라 **공유 익스텐션 계열**로 접근한다.
 
 ## 6. 화면별 데이터 요구사항
 
@@ -239,7 +273,8 @@ opacity(lastTouchedAt, tier, now):
 | 파편 상세 | mount 시 touch, tier 3단 토글, **프로젝트 다중 토글**, 묻기/파내기, 수정 진입, 삭제(확인 1회, image 파편은 Storage 객체도 함께 삭제) | 상세 레이아웃 |
 | 검색 | 헤더 ⌕ → 모달. 원문·링크 제목 부분일치(ilike), 무덤 포함 전부. 결과 탭→상세 | 검색 UI 스타일 |
 | 공유 저장 | 앱 열림 → 자동 저장 + 토스트 (§4) | 토스트 스타일 |
-| 웹 입력 | textarea + 던지기 | 페이지 스타일 |
+| 떠오른 것 | 데일리(오늘)에서 회상 후보 2개 + 기억하기/흘려보내기 (§3.7). **상세로 링크하지 않는다** | 회상 카드 |
+| 헤매기 | 전체를 섞어 무한히 흘려보낸다. **판단 버튼 없음.** 탭 → 상세(= 스스로 찾아간 touch) | 카드 재사용 |
 
 ### 6.1 데일리 뷰 (새 기본 뷰)
 
@@ -309,8 +344,7 @@ Design.md(Geist 시스템)는 라이트 기준으로 기술되어 있으나, SPE
 | error | #ee0000 | #ff4d4d | 삭제·오류 |
 
 - 순수 흑/백(#000/#fff)은 쓰지 않는다 — Design.md의 "잉크는 #171717" 원칙의 다크 대응.
-- 메시 그라디언트: MVP 앱 화면에는 히어로가 없으므로 **사용하지 않는다**. 유일한 후보는
-  웹 입력 페이지 상단 정도 — 그마저 선택 사항. 절제가 시스템이다.
+- 메시 그라디언트: 앱 화면에는 히어로가 없으므로 **사용하지 않는다**. 절제가 시스템이다.
 - accent 계열(violet/cyan/pink)은 chrome에 쓰지 않는다. 타입 배지도 잉크 래더로만.
 
 **타이포:** Geist Sans/Mono TTF를 `expo-font`로 번들 (오픈소스).
@@ -348,8 +382,7 @@ Geist가 실제로 그리는 것: UI 라벨, 숫자(어젠다 날짜 큰 숫자 
      묻기 → 기본 피드에서 사라지고 무덤 칩에서 보임, 파내기 → 복귀.
 6. 어젠다 뷰
    → verify: 자정 경계 파편이 로컬 타임존 기준 올바른 날짜 섹션에 표시.
-7. 웹 입력 페이지
-   → verify: 데스크탑 브라우저에서 텍스트·링크 던지기 → 폰 피드에 표시, 링크 제목 백필 확인.
+7. ~~웹 입력 페이지~~ — 폐기 (§5)
 ```
 
 - 화면 스타일은 §6.5(Design.md 다크 반전) 기준으로 구현.
@@ -365,6 +398,29 @@ B. 프로젝트 목록 + 프로젝트 상세 화면, 사이드바 단순화(4항
 C. 데일리 뷰 (주간 스트립 + 불릿 리스트), 기본 뷰로 승격
    → verify: 점 개수 = 그날 파편 수, 오래된 날의 점이 흐림. 과거 날짜에서 던지기 →
      오늘로 저장되고 화면이 오늘로 이동. 빈 날 문구 표시
+```
+
+**2026-07-14 작업 (전부 완료)**
+
+```
+D. 이미지 표시 — images 버킷이 private이므로 createSignedUrl(만료 1주).
+   Promise를 Map에 캐시해 같은 이미지를 여러 카드가 동시에 요구해도 발급은 한 번만.
+   카드 / 데일리 불릿(24px 썸네일이 불릿 점 자리) / 상세(contentFit contain + onLoad로 실제 비율)
+E. 캘린더 개편 — 스트립을 아래로 끌면 주(1행) → 2주(2행) → 월(6행)로 스냅.
+   월 그리드는 항상 6행 고정(달마다 높이가 출렁이면 스냅이 흔들린다).
+   ⚠️ 함정: "선택된 날을 따라간다"는 이펙트가 가로 스와이프에도 발동해 오늘로 튕겼다.
+      → 둘러보기(anchor)와 선택(selected)을 분리. 옆으로 넘기는 건 아무것도 고르지 않는다.
+F. "오늘로" pill — 오늘에서 벗어났을 때만 나타난다.
+   상시 버튼은 90%의 시간 동안 의미가 없다. 끌어내려 잡는 제스처는 스트립 확장과 충돌한다.
+G. 스티키 날짜 pill → 월 캘린더 → 날짜 점프 (헤더에 버튼을 늘리지 않기 위한 장치)
+H. 무한 스크롤 — 그 전까지 피드/어젠다는 **최신 100개까지만 존재하는 세계**였다
+   (fetchFragments의 page 인자를 아무도 1 이상으로 안 불렀다).
+   캘린더 점은 fetchDayIndex(원문 없이 날짜만)로 따로 받아, 아직 안 읽은 날에도 찍힌다.
+   날짜 점프는 그 날에 닿을 때까지 페이지를 이어 읽는다.
+I. 회상 루프 (SPEC §5-1, §3.7) — touch_count / let_go_at 컬럼, 떠오른 것, 헤매기, 자라나는 중요도
+J. 고정 렌즈 — 즐겨찾기는 새 개념이 아니라 tier pinned를 모아 보는 렌즈다.
+   ⚠️ 함정: 사이드바에서 렌즈를 골라도 데일리 탭에 머물면 아무 일도 안 일어난 것처럼 보인다
+      (데일리는 렌즈를 무시하고 오늘만 본다). → 렌즈 선택 시 피드로 자동 전환.
 ```
 
 ## 8. 확정된 결정 (2026-07-12 사용자 답변)

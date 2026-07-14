@@ -9,7 +9,10 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.isangmin.mind",
-      "appleTeamId": "J3LAVZ8ANM"
+      "appleTeamId": "J3LAVZ8ANM",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.isangmin.mind",
@@ -42,13 +45,23 @@
             "NSExtensionActivationSupportsImageWithMaxCount": 1,
             "NSExtensionActivationSupportsText": true
           },
-          "androidIntentFilters": ["text/*", "image/*"]
+          "androidIntentFilters": [
+            "text/*",
+            "image/*"
+          ]
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "79c553bb-d4cd-409e-81cd-da6e60a852b9"
+      }
+    },
+    "owner": "sangmin030912"
   }
 }
