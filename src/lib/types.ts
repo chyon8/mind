@@ -9,6 +9,7 @@ export interface MergedPiece {
   type: FragmentType;
   created_at: string;
   image_path: string | null;
+  note: string | null;
 }
 
 export interface Fragment {

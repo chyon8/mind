@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/lib/confirm';
 import { feedDateLabel, formatTime } from '@/lib/dates';
@@ -35,6 +35,7 @@ export default function FragmentDetail() {
   // content/note는 인라인 편집 대상 — 로컬 상태로 들고 있다가 blur 때 저장
   const [content, setContent] = useState('');
   const [note, setNote] = useState('');
+  const [selectedPiece, setSelectedPiece] = useState<MergedPiece | null>(null);
 
   // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
   // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
@@ -190,7 +191,9 @@ export default function FragmentDetail() {
             </View>
             <View style={styles.piecesList}>
               {fragment.merged_from.map((piece, i) => (
-                <MergedPieceRow key={i} piece={piece} />
+                <Pressable key={i} onPress={() => setSelectedPiece(piece)}>
+                  <MergedPieceRow piece={piece} />
+                </Pressable>
               ))}
             </View>
           </>
@@ -252,6 +255,39 @@ export default function FragmentDetail() {
           <Text style={styles.deleteLabel}>삭제</Text>
         </Pressable>
       </ScrollView>
+
+      {selectedPiece && (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setSelectedPiece(null)}
+        >
+          <SafeAreaView style={styles.screen} edges={['top']}>
+            <View style={styles.header}>
+              <Pressable onPress={() => setSelectedPiece(null)} hitSlop={12}>
+                <Text style={styles.headerBtn}>‹ 뒤로</Text>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.scroll}>
+              <Text style={styles.meta}>
+                {selectedPiece.type.toUpperCase()} · {feedDateLabel(selectedPiece.created_at)}{' '}
+                {formatTime(selectedPiece.created_at)}
+              </Text>
+              {selectedPiece.image_path && <DetailImage path={selectedPiece.image_path} />}
+              {selectedPiece.content !== '' && (
+                <Text style={styles.content}>{selectedPiece.content}</Text>
+              )}
+              {selectedPiece.note != null && selectedPiece.note !== '' && (
+                <>
+                  <Text style={styles.sectionLabel}>덧붙임</Text>
+                  <Text style={styles.noteReadonly}>{selectedPiece.note}</Text>
+                </>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -343,6 +379,11 @@ const styles = StyleSheet.create({
     padding: 0,
     minHeight: 44,
     textAlignVertical: 'top',
+  },
+  noteReadonly: {
+    ...type.bodyMd,
+    color: colors.body,
+    fontFamily: fonts.sans,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

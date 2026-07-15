@@ -359,7 +359,7 @@ export async function mergeFragments(ids: string[]): Promise<Fragment> {
 
   // 흡수되는 조각 + 그 조각이 이미 품고 있던 조각들(재합치기 시 평평하게 편다)
   const absorbed: MergedPiece[] = rest.flatMap((fr) => [
-    { content: fr.content, type: fr.type, created_at: fr.created_at, image_path: fr.image_path },
+    { content: fr.content, type: fr.type, created_at: fr.created_at, image_path: fr.image_path, note: fr.note },
     ...fr.merged_from,
   ]);
   const mergedFrom = [...representative.merged_from, ...absorbed].sort((a, b) =>
@@ -389,6 +389,7 @@ export async function unmergeFragment(fragment: Fragment): Promise<void> {
     created_at: p.created_at,
     last_touched_at: p.created_at, // 합치기 전 선명도 상태로 되돌아간다
     image_path: p.image_path,
+    note: p.note,
   }));
   const { error } = await supabase().from('fragments').insert(rows);
   if (error) throw error;
