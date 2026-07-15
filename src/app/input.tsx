@@ -21,13 +21,7 @@ import Animated, {
   ZoomIn,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import {
-  fetchProjects,
-  getFragment,
-  insertFragment,
-  setFragmentProjects,
-  updateFragment,
-} from '@/lib/supabase';
+import { fetchProjects, insertFragment } from '@/lib/supabase';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import { markThrown } from '@/lib/thrown';
 import { detectType } from '@/lib/typeDetector';
@@ -44,10 +38,11 @@ const BADGE_COLOR: Record<string, string> = {
 // 화면 3: 붙여넣기/타이핑 → 타입 자동 인식(배지) → 던지기.
 // transparentModal 위에 떠 있는 가운데 카드. 열릴 때 스프링으로 떠오르고,
 // 던지기 성공 시 카드가 위로 날아가며 사라진다.
-// ?id= 가 있으면 수정 모드. 프로젝트 선택은 접힌 옵션, 기본 Inbox (SPEC §6-3).
+// 새 파편 전용 — 수정은 파편 상세 화면에서 인라인으로 한다.
+// 프로젝트 선택은 접힌 옵션, 기본 Inbox (SPEC §6-3).
 export default function Input() {
   // draft = 공유 저장이 실패했을 때 넘어온 원문 (확정 결정 2)
-  const { id, draft } = useLocalSearchParams<{ id?: string; draft?: string }>();
+  const { draft } = useLocalSearchParams<{ draft?: string }>();
   const [text, setText] = useState(draft ?? '');
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -67,15 +62,7 @@ export default function Input() {
 
   useEffect(() => {
     fetchProjects().then(setProjects).catch(() => {});
-    if (id) {
-      getFragment(id)
-        .then((fr) => {
-          setText(fr.content);
-          setProjectIds(fr.project_ids);
-        })
-        .catch(() => {});
-    }
-  }, [id]);
+  }, []);
 
   const trimmed = text.trim();
   const detected = detectType(trimmed);
@@ -112,13 +99,8 @@ export default function Input() {
     if (!trimmed || busy) return; // 빈 입력·중복 탭 방지
     setBusy(true);
     try {
-      if (id) {
-        await updateFragment(id, { content: trimmed, type: detected });
-        await setFragmentProjects(id, projectIds);
-      } else {
-        await insertFragment({ content: trimmed, type: detected, project_ids: projectIds });
-        markThrown(); // 데일리 뷰가 오늘로 이동하도록 (PLAN §6.1)
-      }
+      await insertFragment({ content: trimmed, type: detected, project_ids: projectIds });
+      markThrown(); // 데일리 뷰가 오늘로 이동하도록 (PLAN §6.1)
       // 카드가 위로 날아가며 사라진다 — '던지기'의 마무리
       thrown.value = withTiming(1, { duration: 240, easing: Easing.in(Easing.cubic) }, (done) => {
         if (done) scheduleOnRN(goBack);
@@ -140,7 +122,7 @@ export default function Input() {
       >
         <Animated.View style={[styles.card, cardStyle]}>
           <View style={styles.cardHeader}>
-            <Text style={styles.eyebrow}>{id ? '수정' : '새 파편'}</Text>
+            <Text style={styles.eyebrow}>새 파편</Text>
             {hint != null && (
               <Animated.View
                 key={hint}
@@ -208,7 +190,7 @@ export default function Input() {
               disabled={!trimmed || busy}
               style={[styles.throwBtn, (!trimmed || busy) && styles.throwBtnDisabled]}
             >
-              <Text style={styles.throwLabel}>{id ? '수정' : '던지기'}</Text>
+              <Text style={styles.throwLabel}>던지기</Text>
             </Pressable>
           </View>
         </Animated.View>

@@ -11,6 +11,7 @@ export interface Fragment {
   link_title: string | null;
   link_thumbnail_url: string | null;
   image_path: string | null;
+  note: string | null; // 덧붙임 — 나중에 붙이는 생각. 상세 화면에서만 편집
   last_touched_at: string;
   tier: Tier;
   archived: boolean;

@@ -57,6 +57,7 @@ const f = (
   link_title: null,
   link_thumbnail_url: null,
   image_path: null,
+  note: null,
   last_touched_at: createdAt,
   tier: 'normal',
   archived: false,

@@ -12,6 +12,9 @@ create table fragments (
   link_title         text,
   link_thumbnail_url text,
   image_path         text,
+  -- 덧붙임: 파편에 나중에 붙이는 생각. 원문(content)과 분리한다 —
+  -- 링크 파편은 content가 URL이라 거기에 생각을 섞으면 링크가 깨진다.
+  note               text,
   last_touched_at    timestamptz not null default now(),
   tier               text not null default 'normal'
                      check (tier in ('normal','important','pinned')),

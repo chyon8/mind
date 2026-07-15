@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/lib/confirm';
 import { feedDateLabel, formatTime } from '@/lib/dates';
@@ -13,7 +13,7 @@ import {
   touchFragment,
   updateFragment,
 } from '@/lib/supabase';
-import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment, Project, Tier } from '@/lib/types';
 import { useImageUrl } from '@/lib/useImageUrl';
 
@@ -23,24 +23,45 @@ const TIERS: { value: Tier; label: string }[] = [
   { value: 'pinned', label: '고정' },
 ];
 
-// 화면 4: 원문 전체 + tier 토글 + 프로젝트 붙이기 + 묻기 + 삭제.
-// 열리는 순간 touch → 선명도 100% 복귀 (SPEC §6-4)
+// 화면 4: 원문 전체 + 인라인 수정 + 덧붙임 + tier 토글 + 프로젝트 + 묻기 + 삭제.
+// 열리는 순간 touch → 선명도 100% 복귀 (SPEC §6-4).
+// 수정은 여기서 바로 한다 — 원문/이미지/링크를 보면서 고치므로 type을 덮어쓸 일이 없다.
 export default function FragmentDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [fragment, setFragment] = useState<Fragment | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  // content/note는 인라인 편집 대상 — 로컬 상태로 들고 있다가 blur 때 저장
+  const [content, setContent] = useState('');
+  const [note, setNote] = useState('');
+
+  // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
+  // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
+  const latest = useRef({ content: '', note: '', fragment: null as Fragment | null });
+  latest.current = { content, note, fragment };
 
   useEffect(() => {
     if (!id) return;
     touchFragment(id).catch(() => {}); // touch 실패해도 열람은 계속
     fetchProjects().then(setProjects).catch(() => {});
+    getFragment(id)
+      .then((fr) => {
+        setFragment(fr);
+        setContent(fr.content);
+        setNote(fr.note ?? '');
+      })
+      .catch(() => {});
   }, [id]);
 
-  // 수정 화면에서 돌아올 때 최신 내용 반영
-  useFocusEffect(
-    useCallback(() => {
-      if (id) getFragment(id).then(setFragment).catch(() => {});
-    }, [id]),
+  useEffect(
+    () => () => {
+      // 언마운트 = 화면 이탈. blur 저장과 겹쳐도 diff가 없으면 아무 일 없다(멱등).
+      const { content: c, note: n, fragment: fr } = latest.current;
+      if (!fr) return;
+      if (c !== fr.content) updateFragment(fr.id, { content: c }).catch(() => {});
+      const nextNote = n.trim() === '' ? null : n;
+      if (nextNote !== fr.note) updateFragment(fr.id, { note: nextNote }).catch(() => {});
+    },
+    [],
   );
 
   if (!fragment) return <SafeAreaView style={styles.screen} />;
@@ -48,6 +69,25 @@ export default function FragmentDetail() {
   async function patch(p: Partial<Omit<Fragment, 'project_ids'>>) {
     await updateFragment(fragment!.id, p);
     setFragment({ ...fragment!, ...p });
+  }
+
+  // 원문 수정 — type은 건드리지 않는다(재판별 안 함). 안 바뀌었으면 저장도 안 한다.
+  function saveContent() {
+    if (content === fragment!.content) return;
+    patch({ content }).catch(() => {});
+  }
+
+  // 덧붙임 저장 — 빈 문자열은 null로 (안 붙인 것과 같게)
+  function saveNote() {
+    const next = note.trim() === '' ? null : note;
+    if (next === fragment!.note) return;
+    patch({ note: next }).catch(() => {});
+  }
+
+  function openLink() {
+    const raw = content.trim();
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    Linking.openURL(url).catch(() => {});
   }
 
   // 프로젝트는 태그 — 여러 개 동시에 붙는다 (PLAN.md §3.3)
@@ -69,21 +109,17 @@ export default function FragmentDetail() {
     router.back();
   }
 
+  const isLink = fragment.type === 'link';
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <Text style={styles.headerBtn}>‹ 뒤로</Text>
         </Pressable>
-        <Pressable
-          onPress={() => router.push({ pathname: '/input', params: { id: fragment.id } })}
-          hitSlop={12}
-        >
-          <Text style={styles.headerBtn}>수정</Text>
-        </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.meta}>
           {fragment.type.toUpperCase()} · {feedDateLabel(fragment.created_at)}{' '}
           {formatTime(fragment.created_at)}
@@ -91,8 +127,38 @@ export default function FragmentDetail() {
 
         {fragment.image_path && <DetailImage path={fragment.image_path} />}
 
-        <Text style={styles.content}>{fragment.content}</Text>
         {fragment.link_title && <Text style={styles.linkTitle}>{fragment.link_title}</Text>}
+
+        <TextInput
+          style={[styles.content, noFocusRing]}
+          multiline
+          value={content}
+          onChangeText={setContent}
+          onEndEditing={saveContent}
+          onBlur={saveContent}
+          placeholder={fragment.type === 'image' ? '캡션 (선택)' : '원문…'}
+          placeholderTextColor={colors.faint}
+          keyboardAppearance="dark"
+        />
+
+        {isLink && (
+          <Pressable onPress={openLink} style={styles.openBtn} hitSlop={8}>
+            <Text style={styles.openLabel}>열기 ↗</Text>
+          </Pressable>
+        )}
+
+        <Text style={styles.sectionLabel}>덧붙임</Text>
+        <TextInput
+          style={[styles.note, noFocusRing]}
+          multiline
+          value={note}
+          onChangeText={setNote}
+          onEndEditing={saveNote}
+          onBlur={saveNote}
+          placeholder="이 파편에 대한 생각을 덧붙여…"
+          placeholderTextColor={colors.faint}
+          keyboardAppearance="dark"
+        />
 
         <View style={styles.divider} />
 
@@ -191,12 +257,36 @@ const styles = StyleSheet.create({
     backgroundColor: colors.hairlineSoft,
     marginBottom: spacing.md,
   },
-  content: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sans },
+  content: {
+    ...type.bodyLg,
+    color: colors.ink,
+    fontFamily: fonts.sans,
+    padding: 0,
+    textAlignVertical: 'top',
+  },
   linkTitle: {
     ...type.bodyMd,
     color: colors.body,
     fontFamily: fonts.sansMedium,
+    marginBottom: spacing.sm,
+  },
+  openBtn: {
+    alignSelf: 'flex-start',
     marginTop: spacing.sm,
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  openLabel: { ...type.bodyMd, color: colors.link, fontFamily: fonts.sansMedium },
+  note: {
+    ...type.bodyMd,
+    color: colors.body,
+    fontFamily: fonts.sans,
+    padding: 0,
+    minHeight: 44,
+    textAlignVertical: 'top',
   },
   divider: {
     height: StyleSheet.hairlineWidth,
@@ -207,6 +297,7 @@ const styles = StyleSheet.create({
     ...type.monoEyebrow,
     color: colors.faint,
     fontFamily: fonts.mono,
+    marginTop: spacing.lg,
     marginBottom: spacing.sm,
   },
   tierRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.lg },

@@ -268,7 +268,7 @@ export default function Home() {
               }
               renderItem={({ item }) => (
                 <SwipeableRow
-                  onEdit={() => router.push({ pathname: '/input', params: { id: item.id } })}
+                  onEdit={() => router.push(`/fragment/${item.id}`)}
                   onDelete={() => removeFragment(item)}
                 >
                   <Pressable onPress={() => router.push(`/fragment/${item.id}`)}>

@@ -107,7 +107,7 @@ export function DailyView() {
           dayFragments.map((fr) => (
             <SwipeableRow
               key={fr.id}
-              onEdit={() => router.push({ pathname: '/input', params: { id: fr.id } })}
+              onEdit={() => router.push(`/fragment/${fr.id}`)}
               onDelete={() => removeFragment(fr)}
             >
               <Pressable onPress={() => router.push(`/fragment/${fr.id}`)}>
