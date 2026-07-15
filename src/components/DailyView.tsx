@@ -96,9 +96,10 @@ export function DailyView() {
   }
 
   async function handleMerge() {
-    await mergeFragments([...selection.selected]);
+    const merged = await mergeFragments([...selection.selected]);
     selection.clear();
     loadRange(...range.current);
+    router.push(`/fragment/${merged.id}`);
   }
 
   return (

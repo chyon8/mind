@@ -202,9 +202,10 @@ export default function Home() {
 
   async function handleMerge() {
     try {
-      await mergeFragments([...selection.selected]);
+      const merged = await mergeFragments([...selection.selected]);
       selection.clear();
       load();
+      router.push(`/fragment/${merged.id}`);
     } catch {
       setFailed(true);
     }
