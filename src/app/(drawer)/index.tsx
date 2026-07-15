@@ -7,6 +7,7 @@ import { FragmentCard } from '@/components/FragmentCard';
 import { MonthCalendar } from '@/components/MonthCalendar';
 import { ProjectChips } from '@/components/ProjectChips';
 import { SearchOverlay } from '@/components/SearchOverlay';
+import { SelectionBar } from '@/components/SelectionBar';
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
@@ -17,10 +18,13 @@ import {
   fetchFragments,
   fetchProjects,
   type FeedFilter,
+  mergeFragments,
   PAGE_SIZE,
 } from '@/lib/supabase';
 import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/theme';
 import { onThrown } from '@/lib/thrown';
+import { onFragmentUpdated } from '@/lib/fragmentUpdates';
+import { useMergeSelection } from '@/lib/useMergeSelection';
 import type { DayMark, Fragment, Project } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
 
@@ -47,27 +51,32 @@ export default function Home() {
   const [visibleDate, setVisibleDate] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pendingJump, setPendingJump] = useState<string | null>(null);
+  const selection = useMergeSelection();
 
   // 지금까지 읽어들인 마지막 페이지. 100개씩 끊어 읽고, 바닥에 닿으면 이어 붙인다.
   const lastPage = useRef(0);
   const [exhausted, setExhausted] = useState(false); // 더 읽을 게 없다
   const loading = useRef(false);
+  // 늦게 끝난 이전 요청이 최신 목록을 덮어쓰지 못하게 한다.
+  const loadVersion = useRef(0);
 
   // 이미 읽은 페이지 전부를 다시 읽는다 — 상세에서 돌아왔을 때 앞부분만 갱신하면
   // 뒤에 이어 붙여둔 것들과 어긋난다.
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     try {
-      setFailed(false);
       const pages = await Promise.all(
         Array.from({ length: lastPage.current + 1 }, (_, i) => fetchFragments(filter, i)),
       );
       const [prs, index] = await Promise.all([fetchProjects(), fetchDayIndex(filter)]);
+      if (version !== loadVersion.current) return;
+      setFailed(false);
       setFragments(pages.flat());
       setProjects(prs);
       setDayIndex(index);
       setExhausted(pages[pages.length - 1].length < PAGE_SIZE);
     } catch {
-      setFailed(true);
+      if (version === loadVersion.current) setFailed(true);
     }
   }, [filter]);
 
@@ -75,14 +84,16 @@ export default function Home() {
   const loadMore = useCallback(async () => {
     if (exhausted || loading.current) return;
     loading.current = true;
+    const version = loadVersion.current;
     try {
       const next = lastPage.current + 1;
       const frs = await fetchFragments(filter, next);
+      if (version !== loadVersion.current) return;
       lastPage.current = next;
       setFragments((prev) => [...prev, ...frs]);
       if (frs.length < PAGE_SIZE) setExhausted(true);
     } catch {
-      setFailed(true);
+      if (version === loadVersion.current) setFailed(true);
     } finally {
       loading.current = false;
     }
@@ -112,6 +123,10 @@ export default function Home() {
 
   // 공유 저장은 이 화면이 이미 떠 있는 채로 일어난다 — 포커스가 안 바뀌므로 직접 듣는다
   useEffect(() => onThrown(load), [load]);
+
+  // 상세 수정은 이 화면이 뒤에 남아 있는 동안 끝날 수 있다.
+  // 저장 완료 신호를 받아 다시 읽으면, 뒤로가기 직후에도 대표 텍스트가 즉시 맞춰진다.
+  useEffect(() => onFragmentUpdated(load), [load]);
 
   const now = useMemo(() => new Date(), [fragments]);
 
@@ -179,6 +194,16 @@ export default function Home() {
     if (!(await confirmDelete())) return;
     try {
       await deleteFragment(fr);
+      load();
+    } catch {
+      setFailed(true);
+    }
+  }
+
+  async function handleMerge() {
+    try {
+      await mergeFragments([...selection.selected]);
+      selection.clear();
       load();
     } catch {
       setFailed(true);
@@ -266,22 +291,43 @@ export default function Home() {
                   <AgendaHeader iso={section.date} />
                 )
               }
-              renderItem={({ item }) => (
-                <SwipeableRow
-                  onEdit={() => router.push(`/fragment/${item.id}`)}
-                  onDelete={() => removeFragment(item)}
-                >
-                  <Pressable onPress={() => router.push(`/fragment/${item.id}`)}>
-                    {mode === 'feed' ? (
-                      <View style={styles.cardWrap}>
-                        <FragmentCard fragment={item} opacity={fragmentOpacity(item)} />
-                      </View>
-                    ) : (
-                      <AgendaRow fragment={item} rowOpacity={fragmentOpacity(item)} />
-                    )}
-                  </Pressable>
-                </SwipeableRow>
-              )}
+              renderItem={({ item }) => {
+                const isSelected = selection.selected.has(item.id);
+                const inner =
+                  mode === 'feed' ? (
+                    <FragmentCard fragment={item} opacity={fragmentOpacity(item)} />
+                  ) : (
+                    <AgendaRow fragment={item} rowOpacity={fragmentOpacity(item)} />
+                  );
+                // 선택 모드에서는 스와이프를 끄고 탭이 곧 선택 토글이 된다 — 제스처 충돌 방지.
+                // 링은 카드/행을 딱 감싸고, 행 간격(margin)은 링 바깥에 둔다.
+                if (selection.active) {
+                  return (
+                    <Pressable
+                      onPress={() => selection.toggle(item.id)}
+                      style={[
+                        mode === 'feed' ? styles.selCard : styles.selRow,
+                        isSelected && styles.selOn,
+                      ]}
+                    >
+                      {inner}
+                    </Pressable>
+                  );
+                }
+                return (
+                  <SwipeableRow
+                    onEdit={() => router.push(`/fragment/${item.id}`)}
+                    onDelete={() => removeFragment(item)}
+                  >
+                    <Pressable
+                      onPress={() => router.push(`/fragment/${item.id}`)}
+                      onLongPress={() => selection.toggle(item.id)}
+                    >
+                      {mode === 'feed' ? <View style={styles.cardWrap}>{inner}</View> : inner}
+                    </Pressable>
+                  </SwipeableRow>
+                );
+              }}
             />
 
               {/* 스크롤 위치의 날짜 — 탭하면 월 캘린더가 내려온다 (헤더에 버튼을 늘리지 않는다) */}
@@ -318,9 +364,19 @@ export default function Home() {
         </>
       )}
 
-      <Pressable style={styles.fab} onPress={() => router.push('/input')}>
-        <Text style={styles.fabLabel}>＋ 던지기</Text>
-      </Pressable>
+      {!selection.active && (
+        <Pressable style={styles.fab} onPress={() => router.push('/input')}>
+          <Text style={styles.fabLabel}>＋ 던지기</Text>
+        </Pressable>
+      )}
+
+      {selection.active && (
+        <SelectionBar
+          count={selection.selected.size}
+          onMerge={handleMerge}
+          onCancel={selection.clear}
+        />
+      )}
 
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
     </SafeAreaView>
@@ -351,6 +407,9 @@ function AgendaRow({ fragment, rowOpacity }: { fragment: Fragment; rowOpacity: n
       <Text style={styles.agendaText} numberOfLines={1}>
         {line}
       </Text>
+      {fragment.merged_from.length > 0 && (
+        <Text style={styles.agendaMerged}>+{fragment.merged_from.length}</Text>
+      )}
     </View>
   );
 }
@@ -383,6 +442,21 @@ const styles = StyleSheet.create({
   toggleLabelActive: { color: colors.onInk },
   listContent: { paddingHorizontal: spacing.md, paddingBottom: 120 },
   cardWrap: { marginBottom: spacing.sm },
+  // 카드를 딱 감싸는 링. margin은 링 바깥(아래)에 둬서 빈 공간을 감싸지 않는다.
+  selCard: {
+    marginBottom: spacing.sm,
+    borderRadius: rounded.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  // 어젠다 행 — 좌우 여백을 조금 줘서 시간 텍스트가 모서리에 물리지 않게 한다.
+  selRow: {
+    borderRadius: rounded.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    paddingHorizontal: spacing.xs,
+  },
+  selOn: { borderColor: colors.link },
   feedSep: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -412,6 +486,7 @@ const styles = StyleSheet.create({
   },
   agendaTime: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, width: 42 },
   agendaText: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
+  agendaMerged: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   emptyText: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans },
   retry: {

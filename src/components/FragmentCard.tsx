@@ -17,6 +17,9 @@ export function FragmentCard({ fragment, opacity }: { fragment: Fragment; opacit
         {fragment.tier !== 'normal' && (
           <Text style={styles.eyebrow}>{TIER_LABEL[fragment.tier]}</Text>
         )}
+        {fragment.merged_from.length > 0 && (
+          <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
+        )}
         <Text style={[styles.eyebrow, styles.time]}>{formatTime(fragment.created_at)}</Text>
       </View>
     </View>

@@ -11,10 +11,12 @@ import {
   getFragment,
   setFragmentProjects,
   touchFragment,
+  unmergeFragment,
   updateFragment,
 } from '@/lib/supabase';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
-import type { Fragment, Project, Tier } from '@/lib/types';
+import { markFragmentUpdated } from '@/lib/fragmentUpdates';
+import type { Fragment, MergedPiece, Project, Tier } from '@/lib/types';
 import { useImageUrl } from '@/lib/useImageUrl';
 
 const TIERS: { value: Tier; label: string }[] = [
@@ -57,9 +59,17 @@ export default function FragmentDetail() {
       // 언마운트 = 화면 이탈. blur 저장과 겹쳐도 diff가 없으면 아무 일 없다(멱등).
       const { content: c, note: n, fragment: fr } = latest.current;
       if (!fr) return;
-      if (c !== fr.content) updateFragment(fr.id, { content: c }).catch(() => {});
+      if (c !== fr.content) {
+        updateFragment(fr.id, { content: c })
+          .then(markFragmentUpdated)
+          .catch(() => {});
+      }
       const nextNote = n.trim() === '' ? null : n;
-      if (nextNote !== fr.note) updateFragment(fr.id, { note: nextNote }).catch(() => {});
+      if (nextNote !== fr.note) {
+        updateFragment(fr.id, { note: nextNote })
+          .then(markFragmentUpdated)
+          .catch(() => {});
+      }
     },
     [],
   );
@@ -68,6 +78,7 @@ export default function FragmentDetail() {
 
   async function patch(p: Partial<Omit<Fragment, 'project_ids'>>) {
     await updateFragment(fragment!.id, p);
+    markFragmentUpdated();
     setFragment({ ...fragment!, ...p });
   }
 
@@ -100,13 +111,22 @@ export default function FragmentDetail() {
           ? current.filter((pid) => pid !== projectId)
           : [...current, projectId];
     await setFragmentProjects(fragment!.id, next);
+    markFragmentUpdated();
     setFragment({ ...fragment!, project_ids: next });
   }
 
   async function remove() {
     if (!(await confirmDelete())) return;
     await deleteFragment(fragment!);
+    markFragmentUpdated();
     router.back();
+  }
+
+  // 펼치기 — 조각들을 원래 파편으로 되살리고 대표는 조각을 비운다
+  async function unmerge() {
+    await unmergeFragment(fragment!);
+    markFragmentUpdated();
+    setFragment({ ...fragment!, merged_from: [] });
   }
 
   const isLink = fragment.type === 'link';
@@ -159,6 +179,22 @@ export default function FragmentDetail() {
           placeholderTextColor={colors.faint}
           keyboardAppearance="dark"
         />
+
+        {fragment.merged_from.length > 0 && (
+          <>
+            <View style={styles.piecesHeader}>
+              <Text style={styles.sectionLabel}>합쳐진 조각 ({fragment.merged_from.length})</Text>
+              <Pressable onPress={unmerge} hitSlop={8}>
+                <Text style={styles.unmergeLabel}>펼치기</Text>
+              </Pressable>
+            </View>
+            <View style={styles.piecesList}>
+              {fragment.merged_from.map((piece, i) => (
+                <MergedPieceRow key={i} piece={piece} />
+              ))}
+            </View>
+          </>
+        )}
 
         <View style={styles.divider} />
 
@@ -217,6 +253,26 @@ export default function FragmentDetail() {
         </Pressable>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// 합쳐진 조각 하나 — 날짜 + 원문. 이미지 조각이면 실제 이미지도 렌더한다.
+function MergedPieceRow({ piece }: { piece: MergedPiece }) {
+  const url = useImageUrl(piece.image_path);
+  return (
+    <View style={styles.pieceRow}>
+      <Text style={styles.pieceDate}>
+        {feedDateLabel(piece.created_at)} {formatTime(piece.created_at)}
+      </Text>
+      {piece.image_path && (
+        <Image source={url} style={styles.pieceImage} contentFit="cover" transition={200} />
+      )}
+      {piece.content !== '' && (
+        <Text style={styles.pieceContent} numberOfLines={4}>
+          {piece.content}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -293,6 +349,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.hairline,
     marginVertical: spacing.xl,
   },
+  piecesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  unmergeLabel: { ...type.bodyMd, color: colors.link, fontFamily: fonts.sansMedium },
+  piecesList: { gap: spacing.md },
+  pieceRow: {
+    borderLeftWidth: 2,
+    borderLeftColor: colors.hairline,
+    paddingLeft: spacing.sm,
+    gap: spacing.xs,
+  },
+  pieceDate: {
+    ...type.monoEyebrow,
+    color: colors.faint,
+    fontFamily: fonts.mono,
+  },
+  pieceImage: {
+    width: '100%',
+    height: 160,
+    borderRadius: rounded.sm,
+    backgroundColor: colors.hairlineSoft,
+  },
+  pieceContent: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
   sectionLabel: {
     ...type.monoEyebrow,
     color: colors.faint,

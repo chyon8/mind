@@ -35,6 +35,9 @@ export function FragmentBullet({
       >
         {line}
       </Text>
+      {fragment.merged_from.length > 0 && (
+        <Text style={styles.time}>+{fragment.merged_from.length}</Text>
+      )}
       <Text style={styles.time}>{formatTime(fragment.created_at)}</Text>
     </View>
   );

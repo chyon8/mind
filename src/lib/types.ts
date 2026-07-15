@@ -3,6 +3,14 @@ export type FragmentType = 'text' | 'link' | 'image' | 'quote';
 export type Tier = 'normal' | 'important' | 'pinned';
 export type ProjectStatus = 'before' | 'active' | 'paused' | 'done';
 
+// 합치기로 사라진 조각의 스냅샷. 관계가 아니라 대표 파편 내부에 흡수된 기록.
+export interface MergedPiece {
+  content: string;
+  type: FragmentType;
+  created_at: string;
+  image_path: string | null;
+}
+
 export interface Fragment {
   id: string;
   created_at: string;
@@ -12,6 +20,7 @@ export interface Fragment {
   link_thumbnail_url: string | null;
   image_path: string | null;
   note: string | null; // 덧붙임 — 나중에 붙이는 생각. 상세 화면에서만 편집
+  merged_from: MergedPiece[]; // 합치기로 흡수된 조각들 — 날짜순
   last_touched_at: string;
   tier: Tier;
   archived: boolean;

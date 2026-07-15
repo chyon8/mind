@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { DayMark, Fragment, FragmentType, Project } from './types';
+import type { DayMark, Fragment, FragmentType, MergedPiece, Project } from './types';
 
 // 키는 .env의 EXPO_PUBLIC_* — anon key는 공개 가능 전제, RLS가 방어선 (PLAN.md §2.2)
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -328,17 +328,71 @@ export async function updateFragment(
   if (error) throw error;
 }
 
-export async function deleteFragment(fragment: Fragment): Promise<void> {
+// DB 행만 지운다 — Storage는 건드리지 않는다. 합치기로 사라지는 조각은
+// image_path가 대표 파편의 merged_from에 스냅샷으로 남으므로 파일을 지우면 안 된다.
+async function deleteFragmentRow(id: string): Promise<void> {
   if (!isConfigured) {
     const { fixtureDeleteFragment } = await import('./fixtures');
-    return fixtureDeleteFragment(fragment.id);
+    return fixtureDeleteFragment(id);
   }
-  if (fragment.image_path) {
+  const { error } = await supabase().from('fragments').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteFragment(fragment: Fragment): Promise<void> {
+  if (isConfigured && fragment.image_path) {
     await supabase().storage.from('images').remove([fragment.image_path]); // 고아 파일 방지
     signedUrls.delete(fragment.image_path);
   }
-  const { error } = await supabase().from('fragments').delete().eq('id', fragment.id);
+  await deleteFragmentRow(fragment.id);
+}
+
+// 여러 파편을 하나로 합친다 — 관계를 저장하는 게 아니라 파괴적 병합이다 (SPEC §7 재검토, 2026-07-15).
+// 대표 = 가장 최근 파편. 마찰 0 — 요약/제목 입력을 요구하지 않고 대표의 content를 그대로 쓴다.
+// project_ids는 합집합(프로젝트는 렌즈이므로 필터에서 조용히 사라지면 안 된다),
+// tier·touch_count는 대표 값을 그대로 유지(새 합산 규칙을 만들지 않는다).
+export async function mergeFragments(ids: string[]): Promise<Fragment> {
+  const frs = await fetchFragmentsByIds(ids);
+  const [representative, ...rest] = [...frs].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
+
+  // 흡수되는 조각 + 그 조각이 이미 품고 있던 조각들(재합치기 시 평평하게 편다)
+  const absorbed: MergedPiece[] = rest.flatMap((fr) => [
+    { content: fr.content, type: fr.type, created_at: fr.created_at, image_path: fr.image_path },
+    ...fr.merged_from,
+  ]);
+  const mergedFrom = [...representative.merged_from, ...absorbed].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
+  const projectIds = Array.from(new Set(frs.flatMap((fr) => fr.project_ids)));
+  const lastTouchedAt = new Date().toISOString(); // 합치기는 명백히 손을 댄 행위 — touch
+
+  await updateFragment(representative.id, { merged_from: mergedFrom, last_touched_at: lastTouchedAt });
+  await setFragmentProjects(representative.id, projectIds);
+  for (const fr of rest) await deleteFragmentRow(fr.id);
+
+  return { ...representative, merged_from: mergedFrom, project_ids: projectIds, last_touched_at: lastTouchedAt };
+}
+
+// 펼치기 — 합친 걸 되돌린다. 조각들을 원래 날짜/타입/이미지로 되살리고 대표는 조각을 비운다.
+// 프로젝트·tier는 스냅샷에 없으므로 복원 안 됨(Inbox·normal로 돌아온다) — 파괴적 병합의 대가.
+export async function unmergeFragment(fragment: Fragment): Promise<void> {
+  if (fragment.merged_from.length === 0) return;
+  if (!isConfigured) {
+    const { fixtureUnmergeFragment } = await import('./fixtures');
+    return fixtureUnmergeFragment(fragment);
+  }
+  const rows = fragment.merged_from.map((p) => ({
+    content: p.content,
+    type: p.type,
+    created_at: p.created_at,
+    last_touched_at: p.created_at, // 합치기 전 선명도 상태로 되돌아간다
+    image_path: p.image_path,
+  }));
+  const { error } = await supabase().from('fragments').insert(rows);
   if (error) throw error;
+  await updateFragment(fragment.id, { merged_from: [] });
 }
 
 // ============ 프로젝트 ============

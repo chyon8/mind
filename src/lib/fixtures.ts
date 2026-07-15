@@ -58,6 +58,7 @@ const f = (
   link_thumbnail_url: null,
   image_path: null,
   note: null,
+  merged_from: [],
   last_touched_at: createdAt,
   tier: 'normal',
   archived: false,
@@ -184,6 +185,17 @@ export function fixtureSetFragmentProjects(id: string, projectIds: string[]): vo
 
 export function fixtureDeleteFragment(id: string): void {
   store = store.filter((fr) => fr.id !== id);
+}
+
+export function fixtureUnmergeFragment(fragment: Fragment): void {
+  const restored = fragment.merged_from.map((p, i) =>
+    f(`fx-unmerge-${Date.now()}-${i}`, p.created_at, p.content, p.type, {
+      last_touched_at: p.created_at,
+      image_path: p.image_path,
+    }),
+  );
+  store = [...restored, ...store];
+  fixtureUpdateFragment(fragment.id, { merged_from: [] });
 }
 
 export function fixtureInsertFragment(input: {

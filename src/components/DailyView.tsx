@@ -4,13 +4,16 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CalendarStrip } from '@/components/CalendarStrip';
 import { FragmentBullet } from '@/components/FragmentBullet';
 import { RecallSection } from '@/components/RecallSection';
+import { SelectionBar } from '@/components/SelectionBar';
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
 import { addDays, dayKey, feedDateLabel, startOfWeek } from '@/lib/dates';
-import { deleteFragment, fetchFragmentsByRange } from '@/lib/supabase';
-import { colors, fonts, spacing, type } from '@/lib/theme';
+import { deleteFragment, fetchFragmentsByRange, mergeFragments } from '@/lib/supabase';
+import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import { consumeThrown, onThrown } from '@/lib/thrown';
+import { onFragmentUpdated } from '@/lib/fragmentUpdates';
+import { useMergeSelection } from '@/lib/useMergeSelection';
 import type { Fragment } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
 
@@ -24,11 +27,15 @@ export function DailyView() {
   // 스트립이 월까지 펼쳐지면 6주치가 한 번에 필요하다 — 캐시 단위는 주가 아니라 날.
   const [byDay, setByDay] = useState<Record<string, Fragment[]>>({});
   const range = useRef<[Date, Date]>([startOfWeek(today), addDays(startOfWeek(today), 7)]);
+  const loadVersion = useRef(0);
+  const selection = useMergeSelection();
 
   const loadRange = useCallback(async (from: Date, to: Date) => {
     range.current = [from, to];
+    const version = ++loadVersion.current;
     try {
       const frs = await fetchFragmentsByRange(from.toISOString(), to.toISOString());
+      if (version !== loadVersion.current) return;
       // 범위 안의 날은 전부 새로 쓴다 — 안 그러면 삭제된 파편이 캐시에 남는다
       const fresh: Record<string, Fragment[]> = {};
       for (let d = new Date(from); d < to; d = addDays(d, 1)) {
@@ -75,6 +82,9 @@ export function DailyView() {
     [jumpToToday],
   );
 
+  // 상세에서 저장이 끝난 순간 현재 보고 있는 날짜 범위를 다시 읽는다.
+  useEffect(() => onFragmentUpdated(() => loadRange(...range.current)), [loadRange]);
+
   const now = new Date();
   const isToday = dayKey(selected.toISOString()) === dayKey(today.toISOString());
   const dayFragments = byDay[dayKey(selected.toISOString())] ?? [];
@@ -82,6 +92,12 @@ export function DailyView() {
   async function removeFragment(fr: Fragment) {
     if (!(await confirmDelete())) return;
     await deleteFragment(fr);
+    loadRange(...range.current);
+  }
+
+  async function handleMerge() {
+    await mergeFragments([...selection.selected]);
+    selection.clear();
     loadRange(...range.current);
   }
 
@@ -104,17 +120,37 @@ export function DailyView() {
         {dayFragments.length === 0 ? (
           <Text style={styles.emptyText}>이 날은 아무것도 던지지 않았다</Text>
         ) : (
-          dayFragments.map((fr) => (
-            <SwipeableRow
-              key={fr.id}
-              onEdit={() => router.push(`/fragment/${fr.id}`)}
-              onDelete={() => removeFragment(fr)}
-            >
-              <Pressable onPress={() => router.push(`/fragment/${fr.id}`)}>
-                <FragmentBullet fragment={fr} rowOpacity={vividness(fr, now)} />
-              </Pressable>
-            </SwipeableRow>
-          ))
+          dayFragments.map((fr) => {
+            const isSelected = selection.selected.has(fr.id);
+            const body = <FragmentBullet fragment={fr} rowOpacity={vividness(fr, now)} />;
+            // 선택 모드에서는 스와이프를 끄고 탭이 곧 선택 토글이 된다 — 제스처 충돌 방지.
+            // 링은 행을 딱 감싸고, 좌우 여백을 조금 줘 끝이 모서리에 물리지 않게 한다.
+            if (selection.active) {
+              return (
+                <Pressable
+                  key={fr.id}
+                  onPress={() => selection.toggle(fr.id)}
+                  style={[styles.selRow, isSelected && styles.selOn]}
+                >
+                  {body}
+                </Pressable>
+              );
+            }
+            return (
+              <SwipeableRow
+                key={fr.id}
+                onEdit={() => router.push(`/fragment/${fr.id}`)}
+                onDelete={() => removeFragment(fr)}
+              >
+                <Pressable
+                  onPress={() => router.push(`/fragment/${fr.id}`)}
+                  onLongPress={() => selection.toggle(fr.id)}
+                >
+                  {body}
+                </Pressable>
+              </SwipeableRow>
+            );
+          })
         )}
 
         {/* 오늘을 보고 있을 때만 떠오른다. 과거를 들여다보는 중엔 방해하지 않는다. */}
@@ -123,9 +159,20 @@ export function DailyView() {
 
       {/* 다른 날을 보고 있거나, 스트립이 오늘이 없는 주/달을 넘겨보고 있을 때 */}
       <TodayPill
-        visible={away || dayKey(selected.toISOString()) !== dayKey(today.toISOString())}
+        visible={
+          !selection.active &&
+          (away || dayKey(selected.toISOString()) !== dayKey(today.toISOString()))
+        }
         onPress={jumpToToday}
       />
+
+      {selection.active && (
+        <SelectionBar
+          count={selection.selected.size}
+          onMerge={handleMerge}
+          onCancel={selection.clear}
+        />
+      )}
     </View>
   );
 }
@@ -141,6 +188,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   list: { paddingHorizontal: spacing.md, paddingBottom: 120 },
+  selRow: {
+    borderRadius: rounded.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    paddingHorizontal: spacing.xs,
+  },
+  selOn: { borderColor: colors.link },
   emptyText: {
     ...type.bodyMd,
     color: colors.mute,
