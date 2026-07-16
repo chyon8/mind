@@ -9,8 +9,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { DatePickerModal } from '@/components/DatePickerModal';
 import { FragmentBullet } from '@/components/FragmentBullet';
 import { confirmDelete } from '@/lib/confirm';
+import { parseDateKey, toDateKey } from '@/lib/dates';
 import {
   deleteProject,
   fetchFragments,
@@ -35,8 +37,8 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [fragments, setFragments] = useState<Fragment[]>([]);
   const [name, setName] = useState('');
-  const [startedAt, setStartedAt] = useState('');
   const [description, setDescription] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -45,7 +47,6 @@ export default function ProjectDetail() {
         .then((p) => {
           setProject(p);
           setName(p.name);
-          setStartedAt(p.started_at ?? '');
           setDescription(p.description ?? '');
         })
         .catch(() => {});
@@ -66,13 +67,6 @@ export default function ProjectDetail() {
     else setName(project!.name);
   }
 
-  function saveStartedAt() {
-    const s = startedAt.trim();
-    if (s === '') return patch({ started_at: null });
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return patch({ started_at: s });
-    setStartedAt(project!.started_at ?? ''); // 형식이 아니면 되돌림
-  }
-
   function saveDescription() {
     const d = description.trim();
     patch({ description: d === '' ? null : d });
@@ -85,7 +79,6 @@ export default function ProjectDetail() {
   }
 
   const now = new Date();
-  const todayStr = new Date().toISOString().slice(0, 10);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -127,20 +120,18 @@ export default function ProjectDetail() {
 
         <Text style={styles.sectionLabel}>시작일</Text>
         <View style={styles.startRow}>
-          <TextInput
-            style={styles.startInput}
-            value={startedAt}
-            onChangeText={setStartedAt}
-            onBlur={saveStartedAt}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.faint}
-            keyboardAppearance="dark"
-          />
+          <Pressable onPress={() => setPickerOpen(true)} style={styles.dateTrigger}>
+            <Text style={styles.dateTriggerLabel}>
+              {project.started_at ? project.started_at.replaceAll('-', '.') : '시작일 선택'}
+            </Text>
+          </Pressable>
+          {project.started_at && (
+            <Pressable onPress={() => patch({ started_at: null })} hitSlop={8}>
+              <Text style={styles.dateClearLabel}>지우기</Text>
+            </Pressable>
+          )}
           <Pressable
-            onPress={() => {
-              setStartedAt(todayStr);
-              patch({ started_at: todayStr });
-            }}
+            onPress={() => patch({ started_at: toDateKey(new Date()) })}
             style={styles.todayBtn}
           >
             <Text style={styles.todayLabel}>오늘</Text>
@@ -187,6 +178,17 @@ export default function ProjectDetail() {
           ))
         )}
       </ScrollView>
+
+      {pickerOpen && (
+        <DatePickerModal
+          value={project.started_at ? parseDateKey(project.started_at) : null}
+          onSelect={(key) => {
+            patch({ started_at: key });
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -227,19 +229,16 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   chipLabelActive: { color: colors.onInk },
-  startRow: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
-  startInput: {
-    ...type.bodyMd,
-    color: colors.ink,
-    fontFamily: fonts.mono,
-    backgroundColor: colors.canvasElevated,
+  startRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
+  dateTrigger: {
     borderColor: colors.hairline,
     borderWidth: 1,
     borderRadius: rounded.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    width: 140,
   },
+  dateTriggerLabel: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.mono },
+  dateClearLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
   todayBtn: {
     borderColor: colors.hairline,
     borderWidth: 1,

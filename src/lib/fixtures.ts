@@ -1,6 +1,6 @@
 // Supabase 미설정(isConfigured=false) 상태에서 화면을 테스트하기 위한 하드코딩 데이터.
 // 백엔드 연결 후에도 삭제하지 않아도 됨 — supabase.ts가 자동으로 이쪽을 안 탄다.
-import type { Fragment, FragmentType, Project } from './types';
+import type { Fragment, FragmentType, Project, ProjectStatus } from './types';
 import type { FeedFilter } from './supabase';
 
 const NOW = Date.now();
@@ -234,13 +234,16 @@ export function fixtureGetProject(id: string): Project {
   return withCount(found);
 }
 
-export function fixtureCreateProject(name: string): Project {
+export function fixtureCreateProject(
+  name: string,
+  fields?: { status?: ProjectStatus; started_at?: string | null },
+): Project {
   const project: Project = {
     id: `p-new-${Date.now()}`,
     created_at: new Date().toISOString(),
     name,
-    status: 'before',
-    started_at: null,
+    status: fields?.status ?? 'before',
+    started_at: fields?.started_at ?? null,
     description: null,
   };
   projects = [...projects, project];

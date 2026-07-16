@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { DatePickerModal } from '@/components/DatePickerModal';
+import { parseDateKey, toDateKey } from '@/lib/dates';
 import { createProject, fetchProjects } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Project, ProjectStatus } from '@/lib/types';
@@ -34,6 +36,7 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'paused', label: '중단' },
   { key: 'done', label: '완료' },
 ];
+const CREATE_STATUSES: ProjectStatus[] = ['before', 'active', 'paused', 'done'];
 
 // 프로젝트 목록 — 상태 칩으로 거른다. 상태 분류는 사이드바가 아니라 여기서 (PLAN.md §6.2)
 export default function Projects() {
@@ -41,18 +44,27 @@ export default function Projects() {
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newStatus, setNewStatus] = useState<ProjectStatus>('before');
+  const [newStartedAt, setNewStartedAt] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const load = useCallback(() => {
     fetchProjects().then(setProjects).catch(() => {});
   }, []);
   useFocusEffect(load);
 
+  function resetCreateForm() {
+    setNewName('');
+    setNewStatus('before');
+    setNewStartedAt(null);
+    setCreating(false);
+  }
+
   async function create() {
     const name = newName.trim();
     if (!name) return;
-    const project = await createProject(name);
-    setNewName('');
-    setCreating(false);
+    const project = await createProject(name, { status: newStatus, started_at: newStartedAt });
+    resetCreateForm();
     load();
     router.push(`/projects/${project.id}`);
   }
@@ -72,7 +84,7 @@ export default function Projects() {
       </View>
 
       {creating && (
-        <View style={styles.createRow}>
+        <View style={styles.createCard}>
           <TextInput
             style={styles.createInput}
             value={newName}
@@ -84,6 +96,45 @@ export default function Projects() {
             onSubmitEditing={create}
             returnKeyType="done"
           />
+
+          <View style={styles.createStatusRow}>
+            {CREATE_STATUSES.map((s) => {
+              const active = newStatus === s;
+              return (
+                <Pressable
+                  key={s}
+                  onPress={() => setNewStatus(s)}
+                  style={[styles.createStatusChip, active && styles.createStatusChipActive]}
+                >
+                  <Text
+                    style={[
+                      styles.createStatusLabel,
+                      active && styles.createStatusLabelActive,
+                    ]}
+                  >
+                    {STATUS_LABEL[s]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.createDateRow}>
+            <Pressable onPress={() => setPickerOpen(true)} style={styles.dateTrigger}>
+              <Text style={styles.dateTriggerLabel}>
+                {newStartedAt ? newStartedAt.replaceAll('-', '.') : '시작일 선택 (선택)'}
+              </Text>
+            </Pressable>
+            {newStartedAt && (
+              <Pressable onPress={() => setNewStartedAt(null)} hitSlop={8}>
+                <Text style={styles.dateClearLabel}>지우기</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => setNewStartedAt(toDateKey(new Date()))} hitSlop={8}>
+              <Text style={styles.dateTodayLabel}>오늘</Text>
+            </Pressable>
+          </View>
+
           <Pressable
             onPress={create}
             disabled={!newName.trim()}
@@ -92,6 +143,17 @@ export default function Projects() {
             <Text style={styles.createBtnLabel}>만들기</Text>
           </Pressable>
         </View>
+      )}
+
+      {pickerOpen && (
+        <DatePickerModal
+          value={newStartedAt ? parseDateKey(newStartedAt) : null}
+          onSelect={(key) => {
+            setNewStartedAt(key);
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
 
       <ScrollView
@@ -167,29 +229,51 @@ const styles = StyleSheet.create({
   headerBtn: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   title: { ...type.monoEyebrow, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 2 },
   plus: { fontSize: 22, color: colors.ink },
-  createRow: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
+  createCard: {
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.md,
   },
   createInput: {
-    flex: 1,
     ...type.bodyLg,
     color: colors.ink,
     fontFamily: fonts.sans,
-    backgroundColor: colors.canvasElevated,
+    padding: 0,
+  },
+  createStatusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  createStatusChip: {
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  createStatusChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  createStatusLabel: { ...type.bodySm, color: colors.body, fontFamily: fonts.sansMedium },
+  createStatusLabelActive: { color: colors.onInk },
+  createDateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  dateTrigger: {
+    flex: 1,
     borderColor: colors.hairline,
     borderWidth: 1,
     borderRadius: rounded.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },
+  dateTriggerLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.mono },
+  dateClearLabel: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sansMedium },
+  dateTodayLabel: { ...type.bodySm, color: colors.body, fontFamily: fonts.sansMedium },
   createBtn: {
+    alignSelf: 'flex-end',
     backgroundColor: colors.ink,
     borderRadius: rounded.sm,
     paddingHorizontal: spacing.md,
-    justifyContent: 'center',
+    paddingVertical: spacing.xs,
   },
   createBtnDisabled: { opacity: 0.35 },
   createBtnLabel: { ...type.bodyMd, color: colors.onInk, fontFamily: fonts.sansMedium },

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { DayMark, Fragment, FragmentType, MergedPiece, Project } from './types';
+import type { DayMark, Fragment, FragmentType, MergedPiece, Project, ProjectStatus } from './types';
 
 // 키는 .env의 EXPO_PUBLIC_* — anon key는 공개 가능 전제, RLS가 방어선 (PLAN.md §2.2)
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -431,13 +431,20 @@ export async function getProject(id: string): Promise<Project> {
   return toProject(data);
 }
 
-// 만들 때는 이름만 — 여기서도 마찰 0 (PLAN.md §6.2)
-export async function createProject(name: string): Promise<Project> {
+// 이름만 필수, 상태·시작일은 선택 — 전부 비워도 만들어진다 (PLAN.md §6.2, 2026-07-17 개정)
+export async function createProject(
+  name: string,
+  fields?: { status?: ProjectStatus; started_at?: string | null },
+): Promise<Project> {
   if (!isConfigured) {
     const { fixtureCreateProject } = await import('./fixtures');
-    return fixtureCreateProject(name);
+    return fixtureCreateProject(name, fields);
   }
-  const { data, error } = await supabase().from('projects').insert({ name }).select().single();
+  const { data, error } = await supabase()
+    .from('projects')
+    .insert({ name, ...fields })
+    .select()
+    .single();
   if (error) throw error;
   return { ...data, fragment_count: 0 };
 }

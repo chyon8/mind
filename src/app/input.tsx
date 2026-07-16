@@ -184,8 +184,7 @@ export default function Input() {
 
           {expanded && (
             <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               style={styles.projectScroll}
             >
@@ -322,8 +321,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     paddingVertical: 0,
   },
-  projectScroll: { flexGrow: 0 },
-  projectRow: { flexDirection: 'row', gap: spacing.xs },
+  projectScroll: { flexGrow: 0, maxHeight: 92 },
+  projectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   projectChip: {
     borderColor: colors.hairline,
     borderWidth: 1,

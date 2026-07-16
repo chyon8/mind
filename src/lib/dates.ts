@@ -72,3 +72,17 @@ export function monthLabel(d: Date): string {
 }
 
 export const WEEKDAY_LABELS = WEEKDAYS;
+
+// 날짜 입력값(YYYY-MM-DD) — toISOString은 UTC라 로컬 자정 근처에서 날짜가 밀릴 수 있다.
+export function toDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// toDateKey의 역변환 — new Date("YYYY-MM-DD")는 UTC 자정으로 파싱되어 같은 문제가 생긴다.
+export function parseDateKey(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
