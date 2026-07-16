@@ -24,6 +24,13 @@ export function FragmentCard({
   return (
     <View style={[styles.card, { opacity }]}>
       <CardBody fragment={fragment} />
+      {fragment.note ? (
+        <View style={styles.noteWrap}>
+          <Text style={styles.noteText} numberOfLines={3}>
+            {fragment.note}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.meta}>
         <Text style={styles.eyebrow}>{fragment.type.toUpperCase()}</Text>
         {fragment.tier !== 'normal' && (
@@ -31,9 +38,6 @@ export function FragmentCard({
         )}
         {fragment.merged_from.length > 0 && (
           <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
-        )}
-        {fragment.note && (
-          <Text style={styles.eyebrow}>✎</Text>
         )}
         {projectNames.map((name) => (
           <View key={name} style={styles.projectTag}>
@@ -70,14 +74,16 @@ function CardBody({ fragment }: { fragment: Fragment }) {
       return (
         <View style={styles.quoteRow}>
           <View style={styles.quoteBar} />
-          <Text style={styles.quoteText}>{fragment.content}</Text>
+          <Text style={styles.quoteText} numberOfLines={5}>
+            {fragment.content}
+          </Text>
         </View>
       );
     case 'image':
       return <ImageBody fragment={fragment} />;
     default:
       return (
-        <Text style={styles.body} numberOfLines={8}>
+        <Text style={styles.body} numberOfLines={5}>
           {fragment.content}
         </Text>
       );
@@ -90,7 +96,11 @@ function ImageBody({ fragment }: { fragment: Fragment }) {
   return (
     <View>
       <Image source={url} style={styles.imageWell} contentFit="cover" transition={200} />
-      {fragment.content !== '' && <Text style={styles.body}>{fragment.content}</Text>}
+      {fragment.content !== '' && (
+        <Text style={styles.body} numberOfLines={3}>
+          {fragment.content}
+        </Text>
+      )}
     </View>
   );
 }
@@ -134,4 +144,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.hairlineSoft,
     marginBottom: spacing.xs,
   },
+  noteWrap: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.hairlineSoft,
+  },
+  noteText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
 });
