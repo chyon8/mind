@@ -8,7 +8,19 @@ import { useImageUrl } from '@/lib/useImageUrl';
 const TIER_LABEL: Record<string, string> = { important: 'IMPORTANT', pinned: 'PINNED' };
 
 // 선명도는 카드 전체(보더 포함)에 opacity로 — 다크 캔버스 속으로 가라앉는 지층감 (PLAN §6.5)
-export function FragmentCard({ fragment, opacity }: { fragment: Fragment; opacity: number }) {
+export function FragmentCard({
+  fragment,
+  opacity,
+  projectsById,
+}: {
+  fragment: Fragment;
+  opacity: number;
+  projectsById?: Record<string, string>;
+}) {
+  // 이 파편이 속한 프로젝트 이름들 — 맵이 있고 해석되는 것만 (Inbox면 빈 배열)
+  const projectNames = projectsById
+    ? fragment.project_ids.map((id) => projectsById[id]).filter(Boolean)
+    : [];
   return (
     <View style={[styles.card, { opacity }]}>
       <CardBody fragment={fragment} />
@@ -20,6 +32,11 @@ export function FragmentCard({ fragment, opacity }: { fragment: Fragment; opacit
         {fragment.merged_from.length > 0 && (
           <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
         )}
+        {projectNames.map((name) => (
+          <View key={name} style={styles.projectTag}>
+            <Text style={styles.projectTagLabel}>{name}</Text>
+          </View>
+        ))}
         <Text style={[styles.eyebrow, styles.time]}>{formatTime(fragment.created_at)}</Text>
       </View>
     </View>
@@ -92,6 +109,14 @@ const styles = StyleSheet.create({
   },
   eyebrow: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
   time: { marginLeft: 'auto' },
+  projectTag: {
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: rounded.sm,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+  },
+  projectTagLabel: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   linkRow: { flexDirection: 'row', gap: spacing.sm },
   linkTextCol: { flex: 1, gap: spacing.xxs },
   linkTitle: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansMedium },

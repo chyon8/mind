@@ -13,26 +13,29 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
-  FadeOut,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
-  ZoomIn,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { fetchProjects, insertFragment } from '@/lib/supabase';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import { markThrown } from '@/lib/thrown';
 import { detectType } from '@/lib/typeDetector';
-import type { Project } from '@/lib/types';
+import type { FragmentType, Project } from '@/lib/types';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// 타입 배지 색 — 링크는 블루, 인용은 잉크 톤. 텍스트에만, 테두리엔 쓰지 않는다.
-const BADGE_COLOR: Record<string, string> = {
-  link: colors.link,
+// 타입 드롭다운 선택지 — image는 공유(이미지 첨부)로만 들어오므로 손으로 고를 대상이 아니다.
+const TYPE_OPTIONS: FragmentType[] = ['text', 'quote', 'link'];
+
+// 타입 점 색 — 링크는 블루, 인용은 잉크 톤, 텍스트는 무채.
+const TYPE_COLOR: Record<FragmentType, string> = {
+  text: colors.mute,
   quote: colors.ink,
+  link: colors.link,
+  image: colors.mute,
 };
 
 // 화면 3: 붙여넣기/타이핑 → 타입 자동 인식(배지) → 던지기.
@@ -48,6 +51,8 @@ export default function Input() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [manualType, setManualType] = useState<FragmentType | null>(null);
+  const [typeOpen, setTypeOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   const progress = useSharedValue(0); // 0 닫힘 → 1 열림
@@ -66,8 +71,9 @@ export default function Input() {
 
   const trimmed = text.trim();
   const detected = detectType(trimmed);
-  // text는 기본값이라 배지를 띄우지 않는다 — 인식되는 순간만 특별하게
-  const hint = detected === 'text' ? null : detected;
+  // 수동 지정이 자동 인식을 이긴다 — 오판별은 드롭다운에서 손으로 고친다
+  const activeType = manualType ?? detected;
+
   const projectName =
     projectIds.length === 0
       ? 'Inbox'
@@ -90,6 +96,13 @@ export default function Input() {
   const goBack = () => router.back();
 
   function close() {
+    // 던지기를 안 눌러도 쓴 건 잃지 않는다 — 내용이 있으면 조용히 저장 (마찰 0 캡처)
+    if (trimmed && !busy) {
+      setBusy(true); // 중복 저장 방지
+      insertFragment({ content: trimmed, type: activeType, project_ids: projectIds })
+        .then(markThrown)
+        .catch(() => {});
+    }
     progress.value = withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) }, (done) => {
       if (done) scheduleOnRN(goBack);
     });
@@ -99,7 +112,7 @@ export default function Input() {
     if (!trimmed || busy) return; // 빈 입력·중복 탭 방지
     setBusy(true);
     try {
-      await insertFragment({ content: trimmed, type: detected, project_ids: projectIds });
+      await insertFragment({ content: trimmed, type: activeType, project_ids: projectIds });
       markThrown(); // 데일리 뷰가 오늘로 이동하도록 (PLAN §6.1)
       // 카드가 위로 날아가며 사라진다 — '던지기'의 마무리
       thrown.value = withTiming(1, { duration: 240, easing: Easing.in(Easing.cubic) }, (done) => {
@@ -123,17 +136,36 @@ export default function Input() {
         <Animated.View style={[styles.card, cardStyle]}>
           <View style={styles.cardHeader}>
             <Text style={styles.eyebrow}>새 파편</Text>
-            {hint != null && (
-              <Animated.View
-                key={hint}
-                entering={ZoomIn.springify().damping(14).stiffness(240)}
-                exiting={FadeOut.duration(100)}
-                style={styles.badgePill}
+            <View>
+              <Pressable
+                onPress={() => setTypeOpen((v) => !v)}
+                style={styles.typeToggle}
+                hitSlop={8}
               >
-                <View style={[styles.badgeDot, { backgroundColor: BADGE_COLOR[hint] }]} />
-                <Text style={styles.badge}>{hint.toUpperCase()}</Text>
-              </Animated.View>
-            )}
+                <View style={[styles.badgeDot, { backgroundColor: TYPE_COLOR[activeType] }]} />
+                <Text style={styles.badge}>{activeType.toUpperCase()}</Text>
+                <Text style={styles.caret}>{typeOpen ? '▴' : '▾'}</Text>
+              </Pressable>
+              {typeOpen && (
+                <View style={styles.typeMenu}>
+                  {TYPE_OPTIONS.map((t) => (
+                    <Pressable
+                      key={t}
+                      onPress={() => {
+                        setManualType(t);
+                        setTypeOpen(false);
+                      }}
+                      style={styles.typeMenuItem}
+                    >
+                      <View style={[styles.badgeDot, { backgroundColor: TYPE_COLOR[t] }]} />
+                      <Text style={[styles.badge, t === activeType && styles.badgeActive]}>
+                        {t.toUpperCase()}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
           </View>
 
           <TextInput
@@ -149,7 +181,12 @@ export default function Input() {
           />
 
           {expanded && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.projectScroll}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={styles.projectScroll}
+            >
               <View style={styles.projectRow}>
                 {[{ id: null as string | null, name: 'Inbox' }, ...projects].map((p) => {
                   const active =
@@ -236,18 +273,44 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   eyebrow: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono, letterSpacing: 2 },
-  badgePill: {
+  typeToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xxs,
     borderColor: colors.hairline,
     borderWidth: 1,
-    borderRadius: rounded.pill,
+    borderRadius: rounded.sm,
     paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
+    paddingVertical: 4,
+  },
+  caret: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono, marginLeft: 2 },
+  typeMenu: {
+    position: 'absolute',
+    top: 30,
+    right: 0,
+    minWidth: 108,
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.sm,
+    paddingVertical: spacing.xxs,
+    zIndex: 10,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  typeMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   badgeDot: { width: 6, height: 6, borderRadius: 3 },
   badge: { ...type.monoEyebrow, color: colors.body, fontFamily: fonts.mono },
+  badgeActive: { color: colors.ink },
   textarea: {
     ...type.bodyLg,
     color: colors.ink,

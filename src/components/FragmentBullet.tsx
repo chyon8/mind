@@ -29,10 +29,7 @@ export function FragmentBullet({
       ) : (
         <Text style={styles.bullet}>·</Text>
       )}
-      <Text
-        style={[styles.text, fragment.type === 'quote' && styles.quoteText]}
-        numberOfLines={2}
-      >
+      <Text style={styles.text} numberOfLines={2}>
         {line}
       </Text>
       {fragment.merged_from.length > 0 && (
@@ -60,6 +57,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.hairlineSoft,
   },
   text: { ...type.bodyMd, lineHeight: 24, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
-  quoteText: { color: colors.body },
   time: { ...type.bodySm, lineHeight: 24, color: colors.faint, fontFamily: fonts.mono },
 });

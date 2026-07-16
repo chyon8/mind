@@ -130,6 +130,12 @@ export default function Home() {
 
   const now = useMemo(() => new Date(), [fragments]);
 
+  // 파편 카드에 프로젝트 태그를 붙이기 위한 id→이름 맵
+  const projectsById = useMemo(
+    () => Object.fromEntries(projects.map((p) => [p.id, p.name])),
+    [projects],
+  );
+
   const sections = useMemo(() => {
     const groups: { key: string; date: string; data: Fragment[] }[] = [];
     for (const fr of fragments) {
@@ -296,7 +302,11 @@ export default function Home() {
                 const isSelected = selection.selected.has(item.id);
                 const inner =
                   mode === 'feed' ? (
-                    <FragmentCard fragment={item} opacity={fragmentOpacity(item)} />
+                    <FragmentCard
+                      fragment={item}
+                      opacity={fragmentOpacity(item)}
+                      projectsById={projectsById}
+                    />
                   ) : (
                     <AgendaRow fragment={item} rowOpacity={fragmentOpacity(item)} />
                   );
