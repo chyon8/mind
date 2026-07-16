@@ -45,11 +45,13 @@ const TYPE_COLOR: Record<FragmentType, string> = {
 // 프로젝트 선택은 접힌 옵션, 기본 Inbox (SPEC §6-3).
 export default function Input() {
   // draft = 공유 저장이 실패했을 때 넘어온 원문 (확정 결정 2)
-  const { draft } = useLocalSearchParams<{ draft?: string }>();
+  // project = 프로젝트 상세에서 열었을 때 미리 태그할 프로젝트 (PLAN.md §6.2, [2])
+  const { draft, project } = useLocalSearchParams<{ draft?: string; project?: string }>();
   const [text, setText] = useState(draft ?? '');
-  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>(project ? [project] : []);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [expanded, setExpanded] = useState(false);
+  // 프로젝트에서 열었으면 어디에 붙는지 보이도록 칩 줄을 펼친 채로 시작
+  const [expanded, setExpanded] = useState(!!project);
   const [busy, setBusy] = useState(false);
   const [manualType, setManualType] = useState<FragmentType | null>(null);
   const [typeOpen, setTypeOpen] = useState(false);

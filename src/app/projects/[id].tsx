@@ -161,10 +161,20 @@ export default function ProjectDetail() {
 
         <View style={styles.divider} />
 
-        <Text style={styles.sectionLabel}>FRAGMENTS · {fragments.length}</Text>
+        <View style={styles.fragmentsHeader}>
+          <Text style={[styles.sectionLabel, styles.fragmentsLabel]}>
+            FRAGMENTS · {fragments.length}
+          </Text>
+          <Pressable
+            onPress={() => router.push({ pathname: '/input', params: { project: project.id } })}
+            hitSlop={8}
+          >
+            <Text style={styles.addBtn}>+ 추가</Text>
+          </Pressable>
+        </View>
         {fragments.length === 0 ? (
           <Text style={styles.emptyText}>
-            아직 붙은 파편이 없다 — 파편 상세에서 이 프로젝트를 태그하면 여기 모인다
+            아직 붙은 파편이 없다 — 위 “+ 추가”로 던지거나, 파편 상세에서 이 프로젝트를 태그하면 여기 모인다
           </Text>
         ) : (
           fragments.map((fr) => (
@@ -257,4 +267,13 @@ const styles = StyleSheet.create({
     marginVertical: spacing.xl,
   },
   emptyText: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans },
+  fragmentsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  fragmentsLabel: { marginTop: 0, marginBottom: 0 },
+  addBtn: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
 });
