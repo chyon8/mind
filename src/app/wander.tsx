@@ -1,11 +1,11 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FragmentCard } from '@/components/FragmentCard';
-import { fetchDayIndex, fetchFragmentsByIds } from '@/lib/supabase';
-import { colors, fonts, spacing, type } from '@/lib/theme';
-import type { Fragment } from '@/lib/types';
+import { fetchDayIndex, fetchFragmentsByIds, fetchProjects, type FeedFilter } from '@/lib/supabase';
+import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import type { Fragment, Project } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
 
 // 헤매기 — 무작위로 계속 흘러나온다. 딴생각하며 머릿속을 거니는 것에 가깝다.
@@ -36,7 +36,25 @@ export default function Wander() {
   const deck = useRef<string[]>([]); // 이번 바퀴에 남은 것
   const [items, setItems] = useState<Fragment[]>([]);
   const [empty, setEmpty] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  // 어디서 헤맬지 태그로 좁힌다 — 기본은 전체 (PLAN §6.3, [13])
+  const [filter, setFilter] = useState<FeedFilter>('all');
   const loading = useRef(false);
+
+  // 프로젝트에 정리된 파편도 그대로 흐르되, 어디 소속인지 태그로 구분한다 ([13])
+  const projectsById = useMemo(
+    () => Object.fromEntries(projects.map((p) => [p.id, p.name])),
+    [projects],
+  );
+
+  const filterOptions = useMemo(
+    () => [
+      { id: 'all' as FeedFilter, name: '전체' },
+      { id: 'inbox' as FeedFilter, name: 'Inbox' },
+      ...projects.map((p) => ({ id: p.id as FeedFilter, name: p.name })),
+    ],
+    [projects],
+  );
 
   // 끝이 없다. 한 바퀴를 다 돌면 다시 섞어서 계속 흐른다 —
   // 헤매기는 끝내야 할 목록이 아니다.
@@ -70,16 +88,26 @@ export default function Wander() {
   }, [items]);
 
   useEffect(() => {
-    fetchDayIndex('all')
+    fetchProjects().then(setProjects).catch(() => {});
+  }, []);
+
+  // 태그가 바뀌면 처음부터 다시 헤맨다 — 이전 태그의 카드가 섞여 나오면 안 된다
+  useEffect(() => {
+    pool.current = [];
+    deck.current = [];
+    loading.current = false;
+    setItems([]);
+    setEmpty(false);
+    fetchDayIndex(filter)
       .then((index) => {
         pool.current = index.map((m) => m.id);
         if (pool.current.length === 0) setEmpty(true);
         else more();
       })
       .catch(() => setEmpty(true));
-    // 최초 1회만 — more는 스크롤이 부른다
+    // more는 스크롤이 부른다 — 여기선 태그 전환 시 첫 배치만
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filter]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -91,6 +119,28 @@ export default function Wander() {
         <View style={styles.spacer} />
       </View>
 
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterRow}
+      >
+        {filterOptions.map((f) => {
+          const active = f.id === filter;
+          return (
+            <Pressable
+              key={f.id}
+              onPress={() => setFilter(f.id)}
+              style={[styles.filterChip, active && styles.filterChipActive]}
+            >
+              <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>
+                {f.name}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
       <FlatList
         data={items}
         // 바퀴가 돌면 같은 파편이 다시 나온다 — id만으론 키가 겹친다
@@ -100,7 +150,11 @@ export default function Wander() {
         onEndReachedThreshold={0.6}
         renderItem={({ item }) => (
           <Pressable onPress={() => router.push(`/fragment/${item.id}`)}>
-            <FragmentCard fragment={item} opacity={Math.max(vividness(item), READABLE_FLOOR)} />
+            <FragmentCard
+              fragment={item}
+              opacity={Math.max(vividness(item), READABLE_FLOOR)}
+              projectsById={projectsById}
+            />
           </Pressable>
         )}
         ListEmptyComponent={
@@ -122,6 +176,18 @@ const styles = StyleSheet.create({
   back: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   title: { ...type.monoEyebrow, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 1 },
   spacer: { width: 44 },
+  filterScroll: { flexGrow: 0, marginBottom: spacing.sm },
+  filterRow: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md },
+  filterChip: {
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  filterChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  filterLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  filterLabelActive: { color: colors.onInk },
   list: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
   empty: {
     ...type.bodyMd,
