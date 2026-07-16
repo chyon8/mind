@@ -8,7 +8,7 @@ import { SelectionBar } from '@/components/SelectionBar';
 import { SwipeableRow } from '@/components/SwipeableRow';
 import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
-import { addDays, dayKey, feedDateLabel, startOfWeek } from '@/lib/dates';
+import { addDays, dayKey, feedDateLabel, startOfWeek, getTimeBand } from '@/lib/dates';
 import { deleteFragment, fetchFragmentsByRange, mergeFragments } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import { consumeThrown, onThrown } from '@/lib/thrown';
@@ -121,23 +121,23 @@ export function DailyView() {
         {dayFragments.length === 0 ? (
           <Text style={styles.emptyText}>이 날은 아무것도 던지지 않았다</Text>
         ) : (
-          dayFragments.map((fr) => {
+          dayFragments.map((fr, index) => {
             const isSelected = selection.selected.has(fr.id);
             const body = <FragmentBullet fragment={fr} rowOpacity={vividness(fr, now)} />;
+            const band = getTimeBand(fr.created_at);
+            const prevBand = index > 0 ? getTimeBand(dayFragments[index - 1].created_at) : null;
+
             // 선택 모드에서는 스와이프를 끄고 탭이 곧 선택 토글이 된다 — 제스처 충돌 방지.
             // 링은 행을 딱 감싸고, 좌우 여백을 조금 줘 끝이 모서리에 물리지 않게 한다.
-            if (selection.active) {
-              return (
-                <Pressable
-                  key={fr.id}
-                  onPress={() => selection.toggle(fr.id)}
-                  style={[styles.selRow, isSelected && styles.selOn]}
-                >
-                  {body}
-                </Pressable>
-              );
-            }
-            return (
+            const row = selection.active ? (
+              <Pressable
+                key={fr.id}
+                onPress={() => selection.toggle(fr.id)}
+                style={[styles.selRow, isSelected && styles.selOn]}
+              >
+                {body}
+              </Pressable>
+            ) : (
               <SwipeableRow
                 key={fr.id}
                 onEdit={() => router.push(`/fragment/${fr.id}`)}
@@ -151,6 +151,19 @@ export function DailyView() {
                 </Pressable>
               </SwipeableRow>
             );
+
+            if (band !== prevBand) {
+              return (
+                <View key={`group-${fr.id}`}>
+                  <View style={styles.bandDivider}>
+                    <Text style={styles.bandLabel}>{band}</Text>
+                    <View style={styles.bandLine} />
+                  </View>
+                  {row}
+                </View>
+              );
+            }
+            return row;
           })
         )}
 
@@ -203,4 +216,13 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xl,
     textAlign: 'center',
   },
+  bandDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xs,
+  },
+  bandLabel: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sansMedium },
+  bandLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.hairlineSoft },
 });

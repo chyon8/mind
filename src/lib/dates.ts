@@ -23,6 +23,14 @@ export function formatTime(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+export function getTimeBand(iso: string): string {
+  const h = new Date(iso).getHours();
+  if (h >= 6 && h < 12) return '아침';
+  if (h >= 12 && h < 18) return '오후';
+  if (h >= 18 && h < 24) return '저녁';
+  return '밤';
+}
+
 // ── 데일리 뷰 주간 계산 (일요일 시작, 로컬 타임존)
 
 export function startOfWeek(d: Date): Date {
