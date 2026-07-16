@@ -32,6 +32,9 @@ export function FragmentCard({
         {fragment.merged_from.length > 0 && (
           <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
         )}
+        {fragment.note && (
+          <Text style={styles.eyebrow}>✎</Text>
+        )}
         {projectNames.map((name) => (
           <View key={name} style={styles.projectTag}>
             <Text style={styles.projectTagLabel}>{name}</Text>

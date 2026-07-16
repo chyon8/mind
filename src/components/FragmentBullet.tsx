@@ -29,11 +29,14 @@ export function FragmentBullet({
       ) : (
         <Text style={styles.bullet}>·</Text>
       )}
-      <Text style={styles.text} numberOfLines={2}>
+      <Text style={styles.text} numberOfLines={1}>
         {line}
       </Text>
       {fragment.merged_from.length > 0 && (
         <Text style={styles.time}>+{fragment.merged_from.length}</Text>
+      )}
+      {fragment.note && (
+        <Text style={styles.time}>✎</Text>
       )}
       <Text style={styles.time}>{formatTime(fragment.created_at)}</Text>
     </View>

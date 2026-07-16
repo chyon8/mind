@@ -421,6 +421,9 @@ function AgendaRow({ fragment, rowOpacity }: { fragment: Fragment; rowOpacity: n
       {fragment.merged_from.length > 0 && (
         <Text style={styles.agendaMerged}>+{fragment.merged_from.length}</Text>
       )}
+      {fragment.note && (
+        <Text style={styles.agendaMerged}>✎</Text>
+      )}
     </View>
   );
 }
