@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Mind</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #141414;
+    --panel-2: #1c1c1c;
+    --border: #2a2a2a;
+    --text: #ededed;
+    --muted: #8f8f8f;
+    --accent: #ededed;
+    --accent-ink: #0a0a0a;
+    --link: #6ab0ff;
+    --chip: #202020;
+    --chip-on: #ededed;
+    --chip-on-ink: #0a0a0a;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; }
+  input, textarea { font: inherit; color: inherit; }
+
+  /* ---------- 로그인 ---------- */
+  #login {
+    max-width: 340px; margin: 18vh auto 0; padding: 0 20px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  #login h1 { font-size: 22px; margin: 0 0 8px; letter-spacing: -0.02em; }
+  #login input {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; outline: none;
+  }
+  #login input:focus { border-color: #555; }
+  #login button {
+    background: var(--accent); color: var(--accent-ink); border: 0;
+    border-radius: 10px; padding: 12px; font-weight: 600; margin-top: 4px;
+  }
+  .err { color: #ff6b6b; font-size: 13px; min-height: 16px; }
+
+  /* ---------- 레이아웃 ---------- */
+  #app { display: none; max-width: 720px; margin: 0 auto; padding: 20px 18px 80px; }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  header.top h1 { font-size: 18px; margin: 0; letter-spacing: -0.02em; }
+  .ghost {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px;
+  }
+  .ghost:hover { color: var(--text); border-color: #444; }
+
+  /* ---------- 추가 폼 ---------- */
+  .composer {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px; margin-bottom: 18px;
+  }
+  .composer textarea {
+    width: 100%; background: transparent; border: 0; outline: none; resize: vertical;
+    min-height: 62px; padding: 4px 4px 8px;
+  }
+  .composer .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 8px; flex-wrap: wrap;
+  }
+  .tagpick { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    background: var(--chip); border: 1px solid var(--border); color: var(--muted);
+    border-radius: 999px; padding: 4px 11px; font-size: 13px; white-space: nowrap;
+  }
+  .chip.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
+  .composer button.add {
+    background: var(--accent); color: var(--accent-ink); border: 0;
+    border-radius: 9px; padding: 8px 18px; font-weight: 600;
+  }
+  .composer button.add:disabled { opacity: .4; cursor: default; }
+
+  /* ---------- 필터 / 검색 ---------- */
+  .controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  #search {
+    width: 100%; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 13px; outline: none;
+  }
+  #search:focus { border-color: #555; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filters .chip { cursor: pointer; }
+
+  /* ---------- 카드 ---------- */
+  .count { color: var(--muted); font-size: 12px; margin: 4px 2px 10px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 13px 14px; margin-bottom: 10px;
+    position: relative;
+  }
+  .card .content { white-space: pre-wrap; word-break: break-word; }
+  .card a.content { color: var(--link); text-decoration: none; }
+  .card a.content:hover { text-decoration: underline; }
+  .card .note {
+    color: var(--muted); font-size: 13px; margin-top: 6px;
+    border-left: 2px solid var(--border); padding-left: 8px; white-space: pre-wrap;
+  }
+  .card .meta {
+    display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted);
+  }
+  .card .meta .ptag {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 9px; color: var(--text);
+  }
+  .card .copy {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 7px; padding: 3px 10px; font-size: 12px; margin-left: auto;
+  }
+  .card .copy:hover { color: var(--text); border-color: #444; }
+  .card .copy.done { color: #4ade80; border-color: #2f5c3f; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Mind</h1>
+  <input id="email" type="email" placeholder="이메일" autocomplete="username" />
+  <input id="password" type="password" placeholder="비밀번호" autocomplete="current-password" />
+  <div class="err" id="loginErr"></div>
+  <button id="loginBtn">로그인</button>
+</div>
+
+<div id="app">
+  <header class="top">
+    <h1>Mind</h1>
+    <button class="ghost" id="logoutBtn">로그아웃</button>
+  </header>
+
+  <div class="composer">
+    <textarea id="newContent" placeholder="파편을 남겨…"></textarea>
+    <div class="tagpick" id="composerTags"></div>
+    <div class="row">
+      <span class="err" id="addErr"></span>
+      <button class="add" id="addBtn">추가</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <input id="search" type="search" placeholder="검색…" />
+    <div class="filters" id="filters"></div>
+  </div>
+
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = 'https://ibqyqpmwqujcxlnkyizf.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlicXlxcG13cXVqY3hsbmt5aXpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzU4MDQsImV4cCI6MjA5OTUxMTgwNH0._cdX8OpSAZaPVhJdWgVVhXeu5yrKKkaBWgbx4LZkf9Q';
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+
+// ---------- 상태 ----------
+let projects = [];              // {id, name}
+let selectedTags = new Set();   // 추가 폼에서 고른 프로젝트 id
+let filter = 'all';             // 'all' | 'inbox' | 프로젝트 id
+let searchTerm = '';
+
+// ---------- 인증 ----------
+$('loginBtn').onclick = async () => {
+  $('loginErr').textContent = '';
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { $('loginErr').textContent = '로그인 실패 — 이메일/비밀번호 확인'; return; }
+  boot();
+};
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+$('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+// ---------- 데이터 ----------
+const isUrl = (s) => /^https?:\/\/\S+$/i.test(s.trim());
+
+async function loadProjects() {
+  const { data, error } = await sb.from('projects').select('id, name').order('created_at');
+  if (error) throw error;
+  projects = data;
+}
+
+async function loadFragments() {
+  let rows;
+  if (searchTerm) {
+    const q = searchTerm.replace(/[%_]/g, '\\$&');
+    const { data, error } = await sb.from('fragments')
+      .select('*, fragment_projects(project_id)')
+      .eq('archived', false)
+      .or(`content.ilike.%${q}%,link_title.ilike.%${q}%,note.ilike.%${q}%`)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    rows = data;
+  } else if (filter === 'all' || filter === 'inbox') {
+    const { data, error } = await sb.from('fragments')
+      .select('*, fragment_projects(project_id)')
+      .eq('archived', false)
+      .order('created_at', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    rows = filter === 'inbox'
+      ? data.filter((r) => (r.fragment_projects ?? []).length === 0)
+      : data;
+  } else {
+    const { data, error } = await sb.from('fragments')
+      .select('*, fragment_projects!inner(project_id)')
+      .eq('fragment_projects.project_id', filter)
+      .eq('archived', false)
+      .order('created_at', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    rows = data;
+  }
+  return rows.map((r) => ({ ...r, project_ids: (r.fragment_projects ?? []).map((m) => m.project_id) }));
+}
+
+async function addFragment() {
+  const content = $('newContent').value.trim();
+  if (!content) return;
+  $('addErr').textContent = '';
+  $('addBtn').disabled = true;
+  try {
+    const type = isUrl(content) ? 'link' : 'text';
+    const { data, error } = await sb.from('fragments').insert({ content, type }).select('id').single();
+    if (error) throw error;
+    const ids = [...selectedTags];
+    if (ids.length) {
+      const { error: e2 } = await sb.from('fragment_projects')
+        .insert(ids.map((project_id) => ({ fragment_id: data.id, project_id })));
+      if (e2) throw e2;
+    }
+    $('newContent').value = '';
+    selectedTags.clear();
+    renderComposerTags();
+    await refresh();
+  } catch (e) {
+    $('addErr').textContent = '추가 실패: ' + (e.message ?? e);
+  } finally {
+    $('addBtn').disabled = false;
+  }
+}
+$('addBtn').onclick = addFragment;
+$('newContent').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addFragment(); }
+});
+
+// ---------- 렌더 ----------
+function renderComposerTags() {
+  const box = $('composerTags');
+  box.innerHTML = '';
+  for (const p of projects) {
+    const c = el('button', 'chip' + (selectedTags.has(p.id) ? ' on' : ''));
+    c.textContent = p.name;
+    c.onclick = () => {
+      selectedTags.has(p.id) ? selectedTags.delete(p.id) : selectedTags.add(p.id);
+      renderComposerTags();
+    };
+    box.appendChild(c);
+  }
+}
+
+function renderFilters() {
+  const box = $('filters');
+  box.innerHTML = '';
+  const mk = (key, label) => {
+    const c = el('button', 'chip' + (filter === key ? ' on' : ''));
+    c.textContent = label;
+    c.onclick = () => { filter = key; searchTerm = ''; $('search').value = ''; refresh(); };
+    box.appendChild(c);
+  };
+  mk('all', '전체');
+  mk('inbox', 'Inbox');
+  for (const p of projects) mk(p.id, p.name);
+}
+
+const projName = (id) => projects.find((p) => p.id === id)?.name ?? '';
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function renderList(frs) {
+  const list = $('list');
+  list.innerHTML = '';
+  $('count').textContent = frs.length ? `${frs.length}개` : '';
+  if (!frs.length) {
+    const e = el('div', 'empty');
+    e.textContent = searchTerm ? '검색 결과 없음' : '아직 파편이 없어';
+    list.appendChild(e);
+    return;
+  }
+  for (const f of frs) {
+    const card = el('div', 'card');
+
+    if (f.type === 'link') {
+      const a = el('a', 'content');
+      a.href = f.content; a.target = '_blank'; a.rel = 'noreferrer';
+      a.textContent = f.link_title || f.content;
+      card.appendChild(a);
+    } else {
+      const c = el('div', 'content');
+      c.textContent = f.content;
+      card.appendChild(c);
+    }
+
+    if (f.note) {
+      const n = el('div', 'note');
+      n.textContent = f.note;
+      card.appendChild(n);
+    }
+
+    const meta = el('div', 'meta');
+    const date = el('span'); date.textContent = fmtDate(f.created_at);
+    meta.appendChild(date);
+    for (const pid of f.project_ids) {
+      const t = el('span', 'ptag'); t.textContent = projName(pid);
+      if (t.textContent) meta.appendChild(t);
+    }
+    const copy = el('button', 'copy'); copy.textContent = '복사';
+    copy.onclick = async () => {
+      await navigator.clipboard.writeText(f.content);
+      copy.textContent = '복사됨'; copy.classList.add('done');
+      setTimeout(() => { copy.textContent = '복사'; copy.classList.remove('done'); }, 1200);
+    };
+    meta.appendChild(copy);
+    card.appendChild(meta);
+
+    list.appendChild(card);
+  }
+}
+
+// ---------- 검색 ----------
+let searchTimer;
+$('search').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  const v = e.target.value.trim();
+  searchTimer = setTimeout(() => { searchTerm = v; refresh(); }, 250);
+});
+
+async function refresh() {
+  renderFilters();
+  try {
+    const frs = await loadFragments();
+    renderList(frs);
+  } catch (e) {
+    $('list').innerHTML = `<div class="empty">불러오기 실패: ${e.message ?? e}</div>`;
+  }
+}
+
+// ---------- 부트 ----------
+async function boot() {
+  $('login').style.display = 'none';
+  $('app').style.display = 'block';
+  await loadProjects();
+  renderComposerTags();
+  await refresh();
+}
+
+const { data: { session } } = await sb.auth.getSession();
+if (session) boot();
+</script>
+</body>
+</html>
