@@ -374,7 +374,7 @@ Geist가 실제로 그리는 것: UI 라벨, 숫자(어젠다 날짜 큰 숫자 
    → verify: schema.sql 적용 후 curl(anon)으로 조회 시 차단, 로그인 토큰으로 조회 성공.
      시뮬레이터에서 앱 부팅 성공.
 2. 모델 타입 + typeDetector + vividness + 유닛 테스트 (jest-expo)
-   → verify: 판별 규칙 표·감쇠 경계값(7/30/90일, 음수, pinned) 테스트 전부 통과.
+   → verify: 판별 규칙 표·감쇠 경계값(3/14/45일, 음수, pinned) 테스트 전부 통과.
 3. 빠른 입력 + 타임라인 피드 (선명도 시각화 포함)
    → verify: 시뮬레이터에서 저장 → 피드 최상단 표시. DB에서 last_touched_at을 과거로 조작 → opacity 감쇠 확인.
 4. expo-share-intent 통합 (prebuild + dev client, 실기기 필수)

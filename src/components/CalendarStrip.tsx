@@ -29,7 +29,7 @@ const ROWS: Record<StripMode, number> = { week: 1, biweek: 2, month: 6 };
 
 const WEEKS_BACK = 26; // 과거 26주 (반년). 더 옛날은 피드/검색으로 (PLAN §6.1)
 const MONTHS_BACK = 6;
-const MAX_DOTS = 12;
+const MAX_DOTS = 8; // 마크 박스(너비 30)에 한 줄 4개 × 2줄. 더 늘리면 셀 높이를 넘겨 격자가 깨진다.
 
 const ROW_H = 46;
 const HEADER_H = 18;

@@ -5,8 +5,8 @@ import type { FragmentType } from './types';
 // 여는 인용부호 하나만 있어도 인용으로 본다 — 닫을 때까지 기다리지 않는다.
 const QUOTE_OPENERS = ['"', '“', "'", '‘', '「', '『'];
 
-// — 출처 / - 출처 (출처 2~30자). 단독 한 줄이면 목록 글머리표일 가능성이 높아 제외.
-const ATTRIBUTION = /^[—–-]\s?\S[^\n]{0,28}$/;
+// — 출처 (출처 2~30자). 일반 하이픈(-)은 목록/대시로 흔히 쓰여 오인식이 많아 제외 — 대시(—·–)만 본다.
+const ATTRIBUTION = /^[—–]\s?\S[^\n]{0,28}$/;
 
 // 느슨한 판별 — 타이핑 도중에도 즉시 반응한다. 오판별은 허용 (표시 방식만 바뀜).
 export function detectType(content: string, hasImage = false): FragmentType {

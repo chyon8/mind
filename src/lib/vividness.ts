@@ -2,8 +2,8 @@ import type { Tier } from './types';
 
 // PLAN.md §3.4 — 선명도는 저장하지 않는다. 렌더링 시점에 계산 (SPEC §5 확정값).
 const DECAY: Record<Exclude<Tier, 'pinned'>, [start: number, floor: number]> = {
-  normal: [7, 30],
-  important: [30, 90],
+  normal: [3, 14],
+  important: [14, 45],
 };
 
 const FLOOR_OPACITY = 0.25;

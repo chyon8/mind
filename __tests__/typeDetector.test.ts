@@ -46,11 +46,11 @@ describe('detectType — PLAN.md §3.3 규칙 표', () => {
 
   test('마지막 줄이 — 출처 형태면 quote (본문이 위에 있을 때만)', () => {
     expect(detectType('신은 죽었다\n— 니체')).toBe('quote');
-    expect(detectType('신은 죽었다\n- 니체')).toBe('quote');
     expect(detectType('긴 문장이\n여러 줄\n– 어떤 책, 12쪽')).toBe('quote');
   });
 
-  test('단독 한 줄 "- xxx"는 목록으로 보고 text', () => {
+  test('일반 하이픈(-) 출처는 quote로 보지 않는다 — 목록/대시와 헷갈려 오인식이 많다', () => {
+    expect(detectType('신은 죽었다\n- 니체')).toBe('text');
     expect(detectType('- 우유 사기')).toBe('text');
   });
 

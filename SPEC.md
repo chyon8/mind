@@ -79,8 +79,8 @@
 
 | tier | 감쇠 시작 | 바닥(투명도 25%) 도달 |
 |---|---|---|
-| normal | 7일 | 30일 |
-| important | 30일 | 90일 |
+| normal | 3일 | 14일 |
+| important | 14일 | 45일 |
 | pinned | 감쇠 없음 | — |
 
 - 파편을 열면 last_touched_at 갱신 → 100% 복귀

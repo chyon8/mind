@@ -3,8 +3,8 @@ import type { FeedFilter } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Project } from '@/lib/types';
 
-// 칩은 All + 진행중(active) 프로젝트만. Inbox/무덤/나머지 프로젝트는 사이드바에서.
-// 사이드바에서 고른 필터가 칩에 없으면 임시 칩으로 붙여 현재 위치를 보여준다.
+// 칩은 All + 전체 프로젝트(상태 무관). 만들거나 지우면 곧장 반영된다.
+// 사이드바에서 고른 필터(Inbox/무덤 등)가 칩에 없으면 임시 칩으로 붙여 현재 위치를 보여준다.
 export function ProjectChips({
   projects,
   selected,
@@ -16,9 +16,7 @@ export function ProjectChips({
 }) {
   const chips: { key: FeedFilter; label: string }[] = [
     { key: 'all', label: 'All' },
-    ...projects
-      .filter((p) => p.status === 'active')
-      .map((p) => ({ key: p.id as FeedFilter, label: p.name })),
+    ...projects.map((p) => ({ key: p.id as FeedFilter, label: p.name })),
   ];
 
   if (!chips.some((c) => c.key === selected)) {
