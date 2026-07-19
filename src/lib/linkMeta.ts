@@ -30,6 +30,30 @@ function decode(s: string): string {
     .trim();
 }
 
+function isYoutubeUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return h === 'youtu.be' || h === 'youtube.com' || h.endsWith('.youtube.com');
+  } catch {
+    return false;
+  }
+}
+
+// 유튜브는 설명 없는 영상의 og:description에 사이트 홍보 문구를 채워 넣는다 — 영상마다 똑같은
+// 텍스트라 임베딩하면 무관한 영상들이 서로 유사하다는 노이즈가 된다. 대신 페이지에 그대로 박혀있는
+// 실제 재생 데이터(ytInitialPlayerResponse)의 shortDescription을 읽는다 — 진짜 없으면 빈 문자열이고
+// 그건 null로 취급한다 ("없으면 없다").
+function extractYoutubeDescription(html: string): string | null {
+  const m = html.match(/"shortDescription":"((?:\\.|[^"\\])*)"/);
+  if (!m) return null;
+  try {
+    const text = JSON.parse(`"${m[1]}"`) as string;
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchLinkMeta(
   url: string,
 ): Promise<{ title: string | null; description: string | null; thumbnail: string | null }> {
@@ -40,8 +64,10 @@ export async function fetchLinkMeta(
     const html = await res.text();
     const fallback = decode(html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '');
     const title = meta(html, 'og:title') ?? (fallback || null);
-    // 검색 신호용 — og:description 우선, 없으면 일반 description. 유튜브는 여기에 영상 설명이 통째로 온다.
-    const description = meta(html, 'og:description') ?? meta(html, 'description');
+    // 검색 신호용. 유튜브는 홍보 문구 오염 때문에 실제 재생 데이터에서 따로 뽑는다.
+    const description = isYoutubeUrl(url)
+      ? extractYoutubeDescription(html)
+      : (meta(html, 'og:description') ?? meta(html, 'description'));
     return { title, description, thumbnail: meta(html, 'og:image') };
   } finally {
     clearTimeout(timer);

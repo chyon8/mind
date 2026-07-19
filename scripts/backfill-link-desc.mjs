@@ -35,13 +35,30 @@ function meta(html, property) {
   return null;
 }
 
+function isYoutubeUrl(url) {
+  try {
+    const h = new URL(url).hostname;
+    return h === 'youtu.be' || h === 'youtube.com' || h.endsWith('.youtube.com');
+  } catch { return false; }
+}
+
+// 유튜브는 설명 없는 영상의 og:description에 사이트 홍보 문구를 채운다 (src/lib/linkMeta.ts와
+// 반드시 동일한 로직 — shortDescription을 직접 읽어 오염을 피한다).
+function extractYoutubeDescription(html) {
+  const m = html.match(/"shortDescription":"((?:\\.|[^"\\])*)"/);
+  if (!m) return null;
+  try { return JSON.parse(`"${m[1]}"`) || null; } catch { return null; }
+}
+
 async function fetchDesc(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: ctrl.signal });
     const html = await res.text();
-    return meta(html, 'og:description') ?? meta(html, 'description');
+    return isYoutubeUrl(url)
+      ? extractYoutubeDescription(html)
+      : (meta(html, 'og:description') ?? meta(html, 'description'));
   } finally { clearTimeout(timer); }
 }
 
