@@ -316,6 +316,103 @@ export async function fetchRecallPool(): Promise<Fragment[]> {
   return data.map(toFragment);
 }
 
+// 충돌 회상의 씨앗 — 최근 며칠 안에 던진 파편들. 각각이 개별 씨앗이 된다 (rudy-collision.sql).
+export async function fetchRecentThrownIds(days: number): Promise<string[]> {
+  if (!isConfigured) return [];
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data, error } = await supabase()
+    .from('fragments')
+    .select('id')
+    .eq('archived', false)
+    .gte('created_at', since);
+  if (error) throw error;
+  return data.map((r) => r.id as string);
+}
+
+export type CollisionHit = { id: string; similarity: number; seed_id: string };
+
+// 씨앗과 의미가 부딪히는 후보 + 어느 씨앗과 부딪혔는지. 선명도 판정은 하지 않는다(recall.ts).
+export async function fetchCollisionCandidates(seedIds: string[]): Promise<CollisionHit[]> {
+  if (!isConfigured || seedIds.length === 0) return [];
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .rpc('collision_candidates', { seed_ids: seedIds });
+  if (error) throw error;
+  return (data ?? []) as CollisionHit[];
+}
+
+// ── 원장 (RUDY.md §5) — 루디가 한 말의 기록. §2-2 같은 말 금지의 물리적 실체.
+// 여기 쓰는 것은 touch가 아니다(§2-3) — fragments는 건드리지 않는다.
+
+// 루디가 되살린 파편 = 쿨다운 대상. 같은 걸 또 띄우면 회상이 아니라 반복이다.
+export async function resurfacedIdsSince(days: number): Promise<string[]> {
+  if (!isConfigured) return [];
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .from('utterances')
+    .select('item_ids')
+    .eq('kind', 'resurface')
+    .gte('created_at', since);
+  if (error) throw error;
+  return (data ?? []).flatMap((r) => (r.item_ids ?? []) as string[]);
+}
+
+export async function logUtterance(u: {
+  surface: 'briefing' | 'chat' | 'recall_feed';
+  kind: 'resurface' | 'nudge' | 'pattern' | 'discovery' | 'prediction' | 'question' | 'action_proposal';
+  itemIds: string[];
+  text?: string;
+}): Promise<string | null> {
+  if (!isConfigured) return null;
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .from('utterances')
+    .insert({ surface: u.surface, kind: u.kind, item_ids: u.itemIds, text: u.text ?? null })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id as string;
+}
+
+// §6-6 응답 캡처. ignored는 안 적는다 — 무반응 + 시간 경과로 집계 때 계산한다.
+export async function recordUtteranceResponse(
+  utteranceId: string,
+  response: 'acted' | 'dismissed',
+): Promise<void> {
+  if (!isConfigured) return;
+  await supabase()
+    .schema('rudy')
+    .from('utterances')
+    .update({ user_response: response, responded_at: new Date().toISOString() })
+    .eq('id', utteranceId);
+}
+
+// §6-4: 게이트 판정은 사유와 함께 남긴다 — 임계 튜닝을 감이 아니라 데이터로 하기 위해.
+// 실패해도 조용히 삼킨다. 로그 때문에 회상이 죽으면 본말전도다.
+export async function logGate(g: {
+  surface: string;
+  kind: string;
+  gate: string;
+  passed: boolean;
+  reason?: string;
+  detail?: Record<string, unknown>;
+}): Promise<void> {
+  if (!isConfigured) return;
+  await supabase()
+    .schema('rudy')
+    .from('gate_log')
+    .insert({
+      surface: g.surface,
+      kind: g.kind,
+      gate: g.gate,
+      passed: g.passed,
+      reason: g.reason ?? null,
+      detail: g.detail ?? null,
+    })
+    .then(undefined, (e) => console.warn('[gate_log]', e));
+}
+
 export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
   if (ids.length === 0) return [];
   if (!isConfigured) {
