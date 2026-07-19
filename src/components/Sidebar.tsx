@@ -38,6 +38,16 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
         </Pressable>
 
         <View style={styles.divider} />
+        {/* 당기는 표면 (RUDY.md §7-2) — 내가 열 때만 말한다 */}
+        <Pressable
+          style={styles.row}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/chat');
+          }}
+        >
+          <Text style={styles.rowLabel}>Rudy</Text>
+        </Pressable>
         {/* 판단 없는 자리 — 그냥 무작위로 흘러나온다 */}
         <Pressable
           style={styles.row}

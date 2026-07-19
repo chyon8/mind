@@ -425,15 +425,16 @@ ignored는 벌점 없음 (Mind §5-1 "참여 안 해도 벌이 없다" 상속). 
    pg_cron           — 브리핑 스케줄, 캘린더 폴링, 임베딩 백필
    Edge Functions    — embed(트리거), chat(스트리밍), briefing, collide, digest, act
        │
-[외부] 임베딩 API · Claude API · 검색 API · Google Calendar
+[외부] OpenAI API (임베딩 + 대화) · 검색 API · Google Calendar
 [맥]   Things 브리지 스크립트 (launchd 주기 실행 → Supabase로 push)
 ```
 
 - **Mind SPEC §3 "서버 코드 직접 작성 없음"과의 관계:** Mind 앱은 그대로 무서버.
   Rudy는 층 3이므로 Edge Functions를 가진다 — 단 별도 서버 운영은 없다 (전부 Supabase 안).
-- **모델:** 임베딩 = 한국어 강한 다국어 모델 (OpenAI text-embedding-3-small 또는 voyage-3.5 계열 —
-  Anthropic은 임베딩 API 없음). 대화 = Claude (빠른 응답용 Haiku 4.5, 패턴·브리핑 등
-  판단 품질 필요한 곳 Sonnet). 유저 1명 기준 월 비용 수 달러 수준.
+- **모델:** 임베딩 = OpenAI `text-embedding-3-large` (3072차원, 확정 2026-07-19).
+  대화 = **OpenAI Chat Completions** (확정 2026-07-19 — 임베딩과 한 공급자로 통일).
+  모델 ID는 코드가 아니라 Edge Function env `OPENAI_CHAT_MODEL`에 있다(기본 `gpt-4o`) —
+  지연·품질 보고 바꿀 때 배포 없이 값만 갈아끼운다. 유저 1명 기준 월 비용 수 달러 수준.
 - **키 관리:** API 키는 Edge Function 환경변수. 앱에 키 내장 금지.
 
 ---

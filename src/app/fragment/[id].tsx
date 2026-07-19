@@ -25,6 +25,17 @@ const TIERS: { value: Tier; label: string }[] = [
   { value: 'pinned', label: '고정' },
 ];
 
+// 원탭 진입의 질문은 파편 내용을 품어야 한다 — "이거 관련 뭐 있었지"만 보내면
+// 임베딩에 주제가 없어서 RAG가 아무거나 물어온다. 화면의 "이거"를 문장에 풀어 넣는다.
+function rudyQuestions(fr: Fragment): { label: string; question: string }[] {
+  const raw = (fr.link_title || fr.content || '').replace(/\s+/g, ' ').trim();
+  const subject = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
+  return [
+    { label: '이거 관련 뭐 있었지', question: `『${subject}』 관련해서 내가 저장해둔 게 또 뭐가 있지?` },
+    { label: '이거 다음 뭐 볼까', question: `『${subject}』 다음으로 뭘 보면 좋을까?` },
+  ];
+}
+
 // 화면 4: 원문 전체 + 인라인 수정 + 덧붙임 + tier 토글 + 프로젝트 + 묻기 + 삭제.
 // 여는 것만으로는 touch되지 않는다 — 실질 편집(내용·덧붙임·tier·프로젝트 변경)이 있을 때만
 // touch된다(SPEC §5-1의 "노출≠touch, 판단이 touch" 원칙을 파편 상세로 확장, 2026-07-19).
@@ -205,6 +216,22 @@ export default function FragmentDetail() {
             </View>
           </>
         )}
+
+        <View style={styles.divider} />
+
+        {/* 원탭 진입 (RUDY.md §4-C1) — 파편 하나하나가 Rudy로 들어가는 문.
+            타이핑 마찰이 wow 사이의 평일 사용을 죽인다. */}
+        <View style={styles.askRow}>
+          {rudyQuestions(fragment).map((q) => (
+            <Pressable
+              key={q.label}
+              onPress={() => router.push(`/chat?q=${encodeURIComponent(q.question)}`)}
+              style={styles.askChip}
+            >
+              <Text style={styles.askLabel}>{q.label}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         <View style={styles.divider} />
 
@@ -458,6 +485,15 @@ const styles = StyleSheet.create({
   projectChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   projectLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
   projectLabelActive: { color: colors.onInk },
+  askRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  askChip: {
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  askLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
   graveBtn: { paddingVertical: spacing.sm },
   graveLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
   deleteBtn: { paddingVertical: spacing.sm, marginTop: spacing.sm },

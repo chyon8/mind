@@ -74,6 +74,7 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen name="fragment/[id]" />
+            <Stack.Screen name="chat" />
           </Stack>
           <ShareIntentHandler />
         </GestureHandlerRootView>
