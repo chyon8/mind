@@ -1,14 +1,30 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FragmentCard } from '@/components/FragmentCard';
 import { feedDateLabel } from '@/lib/dates';
-import { searchFragments } from '@/lib/supabase';
+import { searchFragments, type SearchType } from '@/lib/supabase';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
+
+const FILTERS: { value: SearchType; label: string }[] = [
+  { value: null, label: '전체' },
+  { value: 'text', label: '텍스트' },
+  { value: 'link', label: '링크' },
+  { value: 'image', label: '이미지' },
+  { value: 'quote', label: '인용' },
+];
 
 // 검색은 별도 화면이 아니라 홈 위에 제자리에서 열리는 레이어.
 // 헤더 자리에 검색바가 스르륵 내려오고, 결과는 같은 화면에서 바로 보인다.
@@ -16,26 +32,38 @@ import { vividness } from '@/lib/vividness';
 // 대신 원래 얼마나 흐린 파편이었는지는 카드 opacity로 남긴다.
 export function SearchOverlay({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<SearchType>(null);
   const [results, setResults] = useState<Fragment[]>([]);
+  const [loading, setLoading] = useState(false);
   // absolute 자식은 부모(SafeAreaView)의 padding을 무시하고 화면 맨 위부터 그려진다.
   // 그래서 safe area를 여기서 직접 얹어준다 — 안 그러면 상태바 밑에 깔려 터치도 안 먹는다.
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    if (!q.trim()) {
+    const query = q.trim();
+    if (!query) {
       setResults([]);
+      setLoading(false);
       return;
     }
+    setLoading(true);
+    let cancelled = false; // 느린 응답이 새 질의 결과를 덮어쓰지 못하게 (네트워크 검색이라 순서 역전 가능)
     const t = setTimeout(() => {
-      searchFragments(q).then(setResults).catch(() => setResults([]));
+      searchFragments(query, filter)
+        .then((r) => !cancelled && setResults(r))
+        .catch(() => !cancelled && setResults([]))
+        .finally(() => !cancelled && setLoading(false));
     }, 200); // 타이핑 중 과다 조회 방지
-    return () => clearTimeout(t);
-  }, [q]);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [q, filter]);
 
   const now = new Date();
 
+  // 결과를 열 때 오버레이를 닫지 않는다 — 홈 위에 살아있으므로 뒤로가기하면 검색 결과가 그대로 있다.
   function open(id: string) {
-    onClose();
     router.push(`/fragment/${id}`);
   }
 
@@ -57,12 +85,32 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
           keyboardAppearance="dark"
           returnKeyType="search"
         />
+        {loading && <ActivityIndicator size="small" color={colors.faint} />}
         <Pressable onPress={onClose} hitSlop={12}>
           <Text style={styles.close}>✕</Text>
         </Pressable>
       </Animated.View>
 
-      {q.trim() !== '' && results.length === 0 ? (
+      <View style={styles.chipRow}>
+        {FILTERS.map((f) => {
+          const active = filter === f.value;
+          return (
+            <Pressable
+              key={f.value ?? 'all'}
+              onPress={() => setFilter(f.value)}
+              style={[styles.chip, active && styles.chipActive]}
+            >
+              <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>{f.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {loading && results.length === 0 ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.mute} />
+        </View>
+      ) : q.trim() !== '' && !loading && results.length === 0 ? (
         <View style={styles.center}>
           <Text style={styles.empty}>찾지 못했다</Text>
         </View>
@@ -79,10 +127,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
                 {feedDateLabel(item.created_at)}
                 {item.archived ? ' · 무덤' : ''}
               </Text>
-              <FragmentCard
-                fragment={item}
-                opacity={vividness(item, now)}
-              />
+              <FragmentCard fragment={item} opacity={vividness(item, now)} />
             </Pressable>
           )}
         />
@@ -122,6 +167,25 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   close: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  chip: {
+    alignSelf: 'flex-start', // 세로로 늘어나지 않게 (내용 높이만)
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  chipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  chipLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  chipLabelActive: { color: colors.onInk },
   list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxxl },
   row: { marginBottom: spacing.sm },
   date: {

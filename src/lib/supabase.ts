@@ -141,22 +141,57 @@ export async function fetchFragmentsByRange(fromISO: string, toISO: string): Pro
   return data.map(toFragment);
 }
 
-// 검색: 원문 + 링크 제목. 무덤 포함 전부 뒤진다 — 찾으려고 들어온 사람에게 숨길 이유가 없다.
-export async function searchFragments(query: string): Promise<Fragment[]> {
+// 검색 타입 필터 — null = 전체 (SearchOverlay 칩과 대응)
+export type SearchType = FragmentType | null;
+
+// 키워드 부분일치 — 원본 검색. 하이브리드 검색의 폴백으로도 쓴다.
+async function keywordSearch(q: string, typeFilter: SearchType): Promise<Fragment[]> {
+  let query = supabase()
+    .from('fragments')
+    .select(EMBED)
+    .or(`content.ilike.%${q}%,link_title.ilike.%${q}%`);
+  if (typeFilter) query = query.eq('type', typeFilter);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+  if (error) throw error;
+  return data.map(toFragment);
+}
+
+// 검색: 키워드 부분일치 + 벡터 의미 유사도 하이브리드 (RUDY-BUILD Phase A). 무덤 포함 전부 뒤진다.
+// typeFilter로 링크만/텍스트만 등 좁힐 수 있다 (서버에서 필터 — 상위 결과가 특정 타입에 안 밀리게).
+// 임베딩 함수나 RPC가 실패하면 키워드 검색으로 조용히 폴백한다 — 검색이 OpenAI에 인질 잡히지 않게.
+export async function searchFragments(query: string, typeFilter: SearchType = null): Promise<Fragment[]> {
   const q = query.trim();
   if (!q) return [];
   if (!isConfigured) {
     const { fixtureSearchFragments } = await import('./fixtures');
-    return fixtureSearchFragments(q);
+    const r = fixtureSearchFragments(q);
+    return typeFilter ? r.filter((f) => f.type === typeFilter) : r;
   }
-  const { data, error } = await supabase()
-    .from('fragments')
-    .select(EMBED)
-    .or(`content.ilike.%${q}%,link_title.ilike.%${q}%`)
-    .order('created_at', { ascending: false })
-    .limit(100);
-  if (error) throw error;
-  return data.map(toFragment);
+  try {
+    const { data: emb, error: embErr } = await supabase().functions.invoke('embed-query', {
+      body: { text: q },
+    });
+    if (embErr || !emb?.embedding) throw embErr ?? new Error('no embedding');
+
+    const { data: hits, error } = await supabase()
+      .schema('rudy')
+      .rpc('search_fragments', {
+        q_text: q,
+        q_embed: emb.embedding,
+        match_count: 30,
+        type_filter: typeFilter,
+      });
+    if (error) throw error;
+
+    // RPC가 score 순으로 준 id 순서를 그대로 보존 (fetchFragmentsByIds는 순서 보장 안 함)
+    const ids = (hits as { id: string }[]).map((h) => h.id);
+    const order = new Map(ids.map((id, i) => [id, i]));
+    const frs = await fetchFragmentsByIds(ids);
+    return frs.sort((a, b) => order.get(a.id)! - order.get(b.id)!);
+  } catch (e) {
+    console.warn('[search] 하이브리드 실패 → 키워드 폴백', e); // 브링업 때 무성 실패 방지
+    return keywordSearch(q, typeFilter); // 폴백 — 임베딩/RPC가 죽어도 검색은 된다
+  }
 }
 
 export async function getFragment(id: string): Promise<Fragment> {
