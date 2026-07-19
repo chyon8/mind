@@ -26,7 +26,8 @@ const TIERS: { value: Tier; label: string }[] = [
 ];
 
 // 화면 4: 원문 전체 + 인라인 수정 + 덧붙임 + tier 토글 + 프로젝트 + 묻기 + 삭제.
-// 열리는 순간 touch → 선명도 100% 복귀 (SPEC §6-4).
+// 여는 것만으로는 touch되지 않는다 — 실질 편집(내용·덧붙임·tier·프로젝트 변경)이 있을 때만
+// touch된다(SPEC §5-1의 "노출≠touch, 판단이 touch" 원칙을 파편 상세로 확장, 2026-07-19).
 // 수정은 여기서 바로 한다 — 원문/이미지/링크를 보면서 고치므로 type을 덮어쓸 일이 없다.
 export default function FragmentDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -44,7 +45,6 @@ export default function FragmentDetail() {
 
   useEffect(() => {
     if (!id) return;
-    touchFragment(id).catch(() => {}); // touch 실패해도 열람은 계속
     fetchProjects().then(setProjects).catch(() => {});
     getFragment(id)
       .then((fr) => {
@@ -79,6 +79,7 @@ export default function FragmentDetail() {
 
   async function patch(p: Partial<Omit<Fragment, 'project_ids'>>) {
     await updateFragment(fragment!.id, p);
+    touchFragment(fragment!.id).catch(() => {}); // 실질 편집 = 판단 → 여기서만 touch
     markFragmentUpdated();
     setFragment({ ...fragment!, ...p });
   }
@@ -112,6 +113,7 @@ export default function FragmentDetail() {
           ? current.filter((pid) => pid !== projectId)
           : [...current, projectId];
     await setFragmentProjects(fragment!.id, next);
+    touchFragment(fragment!.id).catch(() => {}); // 프로젝트 지정도 실질 편집 → touch
     markFragmentUpdated();
     setFragment({ ...fragment!, project_ids: next });
   }
