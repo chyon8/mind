@@ -10,6 +10,8 @@ create table fragments (
   type               text not null default 'text'
                      check (type in ('text','link','image','quote')),
   link_title         text,
+  -- og:description. 표시엔 안 쓰고 임베딩 신호로만 (Rudy: 링크는 제목만으론 유령 파편).
+  link_description   text,
   link_thumbnail_url text,
   image_path         text,
   -- 덧붙임: 파편에 나중에 붙이는 생각. 원문(content)과 분리한다 —

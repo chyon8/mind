@@ -18,6 +18,7 @@ export interface Fragment {
   content: string;
   type: FragmentType;
   link_title: string | null;
+  link_description: string | null; // og:description — 링크 임베딩 신호. 표시 안 함, 검색용
   link_thumbnail_url: string | null;
   image_path: string | null;
   note: string | null; // 덧붙임 — 나중에 붙이는 생각. 상세 화면에서만 편집

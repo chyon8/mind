@@ -32,7 +32,7 @@ function decode(s: string): string {
 
 export async function fetchLinkMeta(
   url: string,
-): Promise<{ title: string | null; thumbnail: string | null }> {
+): Promise<{ title: string | null; description: string | null; thumbnail: string | null }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -40,7 +40,9 @@ export async function fetchLinkMeta(
     const html = await res.text();
     const fallback = decode(html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '');
     const title = meta(html, 'og:title') ?? (fallback || null);
-    return { title, thumbnail: meta(html, 'og:image') };
+    // 검색 신호용 — og:description 우선, 없으면 일반 description. 유튜브는 여기에 영상 설명이 통째로 온다.
+    const description = meta(html, 'og:description') ?? meta(html, 'description');
+    return { title, description, thumbnail: meta(html, 'og:image') };
   } finally {
     clearTimeout(timer);
   }
@@ -58,9 +60,15 @@ export async function backfillLinkMeta(): Promise<void> {
   await Promise.all(
     pending.map(async (fr) => {
       try {
-        const { title, thumbnail } = await fetchLinkMeta(fr.content);
-        if (!title && !thumbnail) return;
-        await updateFragment(fr.id, { link_title: title, link_thumbnail_url: thumbnail });
+        const { title, description, thumbnail } = await fetchLinkMeta(fr.content);
+        if (!title && !description && !thumbnail) return;
+        // 새 링크는 여기서 제목·설명을 한 번에 받는다. 기존 링크(제목 이미 있음)는 이 경로로 안 오므로
+        // 설명 백필은 일회성 scripts/backfill-link-desc.mjs가 담당한다.
+        await updateFragment(fr.id, {
+          link_title: title,
+          link_description: description,
+          link_thumbnail_url: thumbnail,
+        });
       } catch {
         // 이 링크는 그냥 둔다 (PLAN §3.6)
       }

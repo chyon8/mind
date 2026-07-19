@@ -60,6 +60,7 @@ create table fragments (
   type               text not null default 'text'
                      check (type in ('text','link','image','quote')),
   link_title         text,
+  link_description   text,           -- og:description. 화면엔 상세에서만 작게, 주 용도는 Rudy 임베딩 신호
   link_thumbnail_url text,
   image_path         text,
   last_touched_at    timestamptz not null default now(),
@@ -206,9 +207,11 @@ vividness(fr) = opacity(fr.last_touched_at, effectiveTier(fr.tier, fr.touch_coun
 
 - **저장은 즉시, 메타데이터는 나중에.** insert를 막지 않는다 (입력 마찰 0).
 - 앱이 포그라운드 진입 시: `type = 'link' and link_title is null`인 파편 최대 10개를
-  네이티브 fetch로 HTML을 받아 `og:title`/`og:image`(없으면 `<title>`)를 추출 → patch.
+  네이티브 fetch로 HTML을 받아 `og:title`/`og:description`/`og:image`(제목 없으면 `<title>`)를 추출 → patch.
   (RN의 fetch는 CORS 제약이 없어 브라우저와 달리 직접 수집 가능)
 - `link_thumbnail_url`에는 `og:image`의 외부 URL을 그대로 저장 — 버킷 업로드 불필요.
+- `link_description`은 파편 상세에 작게 표시하지만, 주 목적은 Rudy 임베딩 신호다 —
+  `link_title`만으론 유령 파편이라(RUDY.md §3-2), 설명글까지 임베딩에 포함한다.
 - 웹 페이지에서 던진 링크도 이 경로로 자동 해결된다.
 - 실패한 것은 그냥 둔다 — URL 원문이 이미 있으므로 기능 손실 없음. 재시도 카운터 같은 것 안 만든다.
 

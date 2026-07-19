@@ -55,6 +55,7 @@ const f = (
   content,
   type,
   link_title: null,
+  link_description: null,
   link_thumbnail_url: null,
   image_path: null,
   note: null,

@@ -34,6 +34,9 @@ yarn-error.*
 .env
 .env*.local
 
+# Supabase CLI local state (project ref, pooler url 등)
+supabase/.temp/
+
 # 개발 중 UI 검증용 스크린샷
 screenshots/
 

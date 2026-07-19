@@ -151,6 +151,11 @@ export default function FragmentDetail() {
         {fragment.image_path && <DetailImage path={fragment.image_path} />}
 
         {fragment.link_title && <Text style={styles.linkTitle}>{fragment.link_title}</Text>}
+        {fragment.link_description && (
+          <Text style={styles.linkDescription} numberOfLines={3}>
+            {fragment.link_description}
+          </Text>
+        )}
 
         <TextInput
           style={[styles.content, noFocusRing]}
@@ -362,6 +367,13 @@ const styles = StyleSheet.create({
     ...type.bodyMd,
     color: colors.body,
     fontFamily: fonts.sansMedium,
+    marginBottom: spacing.sm,
+  },
+  linkDescription: {
+    ...type.bodySm,
+    color: colors.mute,
+    fontFamily: fonts.sans,
+    marginTop: -spacing.xs,
     marginBottom: spacing.sm,
   },
   openBtn: {
