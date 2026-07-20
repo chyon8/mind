@@ -12,6 +12,8 @@
 - **RUDY.md** — Rudy(어시스턴트 층) 기획서. **RUDY-STATUS.md** — Rudy 빌드 진행상황·결정 기록.
   **Rudy 관련 요청("다음 뭐야", "어디까지 했어" 등)이 오면 memory를 보지 말고 RUDY-STATUS.md부터
   읽고 답한다.** 진행상황·결정은 memory에 절대 중복 저장하지 않는다 — 이 파일이 유일한 원천이다.
+- **RUDY-DISCOVERY.md** — 발견 브리핑(§10-7)의 판단 기준·렌즈·통한 예시. **발견/브리핑 작업
+  전 반드시 읽는다.** 퀄리티가 코드가 아니라 이 기준에서 나오므로 유일한 기준 문서다.
 
 스택: Expo(React Native + TypeScript) + expo-share-intent + Supabase. 사용자는 한 명.
 
