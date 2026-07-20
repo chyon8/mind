@@ -120,9 +120,15 @@ async function main() {
     .schema('rudy').from('fragment_embeddings')
     .select('*', { count: 'exact', head: true });
 
-  console.log(`최근 ${DAYS}일 살아있는 파편 ${frags.length}개 / 전체 임베딩 ${embedded}개`);
-  if (frags.length < 10) {
-    console.log('⚠️  코퍼스가 너무 작다 — 축이 안 서는 게 정상이다. --days를 늘려서 볼 것.');
+  const { data: maps } = await supabase.from('fragment_projects').select('fragment_id');
+  const grouped = new Set((maps ?? []).map((m) => m.fragment_id));
+  const ungrouped = frags.filter((f) => !grouped.has(f.id)).length;
+  console.log(
+    `최근 ${DAYS}일 살아있는 파편 ${frags.length}개 (명시적 프로젝트 소속 ${frags.length - ungrouped}개 제외 시 ${ungrouped}개) / 전체 임베딩 ${embedded}개`,
+  );
+  console.log('  ⚠️ cluster_edges RPC는 프로젝트 소속 파편을 이미 뺀다 — 위 ungrouped 수가 실제 재료다.');
+  if (ungrouped < 10) {
+    console.log('⚠️  묶이지 않은 코퍼스가 너무 작다 — 축이 안 서는 게 정상이다. --days를 늘려서 볼 것.');
   }
 
   const { data: edges, error } = await supabase.schema('rudy').rpc('cluster_edges', {
