@@ -97,7 +97,9 @@ function shape(dates) {
   const t = dates.map((d) => new Date(d).getTime()).sort((a, b) => a - b);
   const spanDays = (t.at(-1) - t[0]) / 86_400_000;
   const quietDays = (Date.now() - t.at(-1)) / 86_400_000;
-  const activeDays = new Set(dates.map((d) => d.slice(0, 10))).size;
+  // 날짜 경계는 KST (_shared/time.ts kstDate와 같은 계산) — UTC로 세면 새벽 저장분이 별개 날로 잡힌다
+  const kstDate = (iso) => new Date(new Date(iso).getTime() + 9 * 3600000).toISOString().slice(0, 10);
+  const activeDays = new Set(dates.map(kstDate)).size;
   const kind = spanDays >= 21 && activeDays >= 3 ? '지속' : spanDays <= 7 ? '단발' : '중간';
   return { spanDays, quietDays, activeDays, kind };
 }

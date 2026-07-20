@@ -8,6 +8,7 @@
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { complete } from '../_shared/openai.ts';
 import { cluster, shape, vividness, type Edge, type Shape } from '../_shared/cluster.ts';
+import { kstDate } from '../_shared/time.ts';
 
 // 실측으로 정했다 (scripts/check-clusters.mjs, 2026-07-20). 0.46이면 축이 2개로 줄고
 // 커버리지가 절반이 된다. **잠정값이다** — 충돌 임계를 0.35→0.42로 올린 것과 같은 재조정을
@@ -30,7 +31,9 @@ type Frag = {
 const FRAG_COLS =
   'id, created_at, type, content, link_title, last_touched_at, tier, touch_count';
 
-export type Axis = { label: string; items: Frag[]; weight: number } & Shape;
+// stated: 이 축의 파편들에 대해 **유저가 직접 말한 것** (§4-F1이 받아낸 자기 진술).
+// 이게 있으면 루디는 추측 화법을 벗을 수 있다 — §4-B2가 요구한 바로 그 경계선이다.
+export type Axis = { label: string; items: Frag[]; weight: number; stated: string[] } & Shape;
 
 const title = (f: Frag) =>
   ((f.type === 'link' ? f.link_title ?? f.content : f.content) ?? '').replace(/\s+/g, ' ').slice(0, 60);
@@ -92,9 +95,30 @@ export async function findAxes(supabase: SupabaseClient, now = new Date()): Prom
     .slice(0, MAX_AXES);
   if (!ranked.length) return [];
 
-  const labels = await label(ranked.map((a) => a.items));
+  // 축 파편들에 대한 자기 진술을 끌어온다 (배열 겹침). 라벨링과 병렬 — 서로 무관하다.
+  const axisIds = ranked.flatMap((a) => a.items.map((f) => f.id));
+  const [labels, statements] = await Promise.all([
+    label(ranked.map((a) => a.items)),
+    supabase
+      .schema('rudy')
+      .from('evidence')
+      .select('stated_text, related_item_ids')
+      .overlaps('related_item_ids', axisIds)
+      .then(({ data }) => (data ?? []) as { stated_text: string; related_item_ids: string[] }[]),
+  ]);
+
   // 이름을 못 붙인 묶음은 버린다. LLM이 "잡동사니"라고 한 걸 억지로 축이라 부르지 않는다.
-  return ranked.map((a, i) => ({ ...a, label: labels[i] })).filter((a) => a.label);
+  return ranked
+    .map((a, i) => {
+      const own = new Set(a.items.map((f) => f.id));
+      return {
+        ...a,
+        label: labels[i],
+        stated: statements.filter((s) => s.related_item_ids.some((id) => own.has(id)))
+          .map((s) => s.stated_text),
+      };
+    })
+    .filter((a) => a.label);
 }
 
 // 모델에 넘길 블록. 시간 모양은 **계산된 사실**로 준다 — 모델이 날짜에서 추론하게 두면
@@ -111,9 +135,13 @@ export function axesBlock(axes: Axis[]): string {
       const quiet =
         a.quietDays >= 14 ? `, 마지막 증거 이후 ${Math.round(a.quietDays)}일째 조용함` : '';
       const items = a.items
-        .map((f) => `  - ${f.created_at.slice(0, 10)} | ${title(f)} | id: ${f.id}`)
+        .map((f) => `  - ${kstDate(f.created_at)} | ${title(f)} | id: ${f.id}`)
         .join('\n');
-      return `축: ${a.label} (${a.kind} · 파편 ${a.items.length}개 · ${when}${quiet})\n${items}`;
+      // 유저가 직접 말한 것. 추측이 아니라 확인된 사실이므로 별도 줄로 구분해서 준다.
+      const stated = a.stated.length
+        ? `\n  본인 진술: ${a.stated.map((s) => `"${s.replace(/\n/g, ' ')}"`).join(' / ')}`
+        : '';
+      return `축: ${a.label} (${a.kind} · 파편 ${a.items.length}개 · ${when}${quiet})\n${items}${stated}`;
     })
     .join('\n\n');
 }

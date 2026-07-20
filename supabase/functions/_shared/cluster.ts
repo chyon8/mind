@@ -7,6 +7,8 @@
 // ⚠️ cluster()는 scripts/check-clusters.mjs와 **같은 로직**이어야 한다 (embedText 선례).
 //    임계값은 저 스크립트로 실측해서 정했다 — 로직이 갈라지면 그 숫자가 무의미해진다.
 
+import { kstDate } from './time.ts';
+
 export type Edge = { a: string; b: string; similarity: number };
 
 /**
@@ -98,7 +100,8 @@ export function shape(dates: string[], now = new Date()): Shape {
   const t = dates.map((d) => new Date(d).getTime()).sort((a, b) => a - b);
   const spanDays = (t[t.length - 1] - t[0]) / 86_400_000;
   const quietDays = (now.getTime() - t[t.length - 1]) / 86_400_000;
-  const activeDays = new Set(dates.map((d) => d.slice(0, 10))).size;
+  // 날짜 경계는 KST — UTC로 세면 KST 새벽 저장분이 별개의 "저장일"로 잡혀 지속 판정이 부풀려진다
+  const activeDays = new Set(dates.map(kstDate)).size;
   return {
     kind: spanDays >= 21 && activeDays >= 3 ? '지속' : spanDays <= 7 ? '단발' : '중간',
     spanDays,

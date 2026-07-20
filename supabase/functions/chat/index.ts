@@ -7,6 +7,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { chatStream, complete, embedMany, type ChatMessage } from '../_shared/openai.ts';
 import { systemPrompt } from './prompt.ts';
 import { axesBlock, findAxes, MIN_SIM as CLUSTER_MIN_SIM, type Axis } from './clusters.ts';
+import { captureAnswer, logQuestion, pickQuestion, questionSubject, type Target } from './intent.ts';
+import { kstDate, kstRange, kstToday, PERIOD_LABEL, type Period } from '../_shared/time.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -23,6 +25,7 @@ const CITE_COUNT = 10; // 근거로 넘길 파편 수
 const LINK_THRESHOLD = 0.34;
 const LINK_COOLDOWN_DAYS = 30; // 되살리기와 같은 쿨다운 (§4-C1 표면 간 중복 방지)
 const HISTORY_LIMIT = 20; // 맥락으로 넘길 이전 메시지 수
+const PERIOD_LIMIT = 40; // 기간 조회 상한 (하루에 40개 넘게 던지면 최신순으로 자른다)
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -44,7 +47,7 @@ const FRAG_COLS = 'id, created_at, type, content, link_title, link_description, 
 // 근거 한 조각. 모델이 [『제목』](mind://fragment/id)로 인용할 수 있게 id를 넣고,
 // 프로젝트 소속과 원본 URL도 준다 — "링크 달라", "프로젝트로 가자"에 답할 재료.
 function fragBlock(f: Frag, projects: { id: string; name: string }[]): string {
-  const date = f.created_at.slice(0, 10);
+  const date = kstDate(f.created_at); // UTC로 찍으면 새벽 저장분이 하루 전으로 보인다
   const title = f.type === 'link' ? (f.link_title ?? f.content) : f.content;
   const lines = [
     `- id: ${f.id}`,
@@ -84,10 +87,23 @@ type — 특정 종류만 찾는 질문이면 그 종류, 아니면 null:
 - "인용구/문장" → "quote"
 - 종류를 안 가리면 null
 
-JSON만 출력: {"topics":["..."],"type":null}`;
+period — **특정 기간에 저장한 것**을 묻는 질문이면 그 기간, 아니면 null:
+- "오늘 뭐 저장했지", "오늘은 무슨 생각 했지" → "today"
+- "어제 던진 거" → "yesterday"
+- "이번 주", "지난주", "요 며칠" → "week"
+- "이번 달", "최근 한 달" → "month"
+- 기간을 안 가리키면 null. "요즘 뭐에 꽂혔어?"는 기간이 아니라 경향 질문이다 → null
 
-type Extracted = { topics: string[]; type: string | null };
+intent — 이 메시지가 무엇인지:
+- "trend": 최근 경향·관심사를 묻는 질문. "요즘 뭐에 꽂혔어?", "내 관심사가 뭐야"
+- "other": 그 외 전부. 구체적인 검색, 세상 지식 질문, 그리고 **질문이 아닌 것**
+  (진술·감상·인사·잡담). 묻지 않았으면 trend가 아니다.
+
+JSON만 출력: {"topics":["..."],"type":null,"period":null,"intent":"other"}`;
+
+type Extracted = { topics: string[]; type: string | null; period: Period | null; intent: string };
 const TYPES = ['text', 'link', 'image', 'quote'];
+const PERIODS = ['today', 'yesterday', 'week', 'month'];
 
 async function searchQueries(question: string): Promise<Extracted> {
   const raw = await complete([
@@ -100,6 +116,8 @@ async function searchQueries(question: string): Promise<Extracted> {
       ? p.topics.filter((s: unknown) => typeof s === 'string' && s.trim()).slice(0, 3)
       : [],
     type: TYPES.includes(p?.type) ? p.type : null,
+    period: PERIODS.includes(p?.period) ? (p.period as Period) : null,
+    intent: p?.intent === 'trend' ? 'trend' : 'other',
   };
 }
 
@@ -177,16 +195,35 @@ Deno.serve(async (req) => {
     .order('created_at', { ascending: false })
     .limit(HISTORY_LIMIT);
 
-  // 검색어를 뽑는다. 실패하면 질문 그대로 — 재작성이 죽어도 채팅은 살아야 한다.
-  const { topics, type } = await searchQueries(question).catch((e) => {
-    console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
-    return { topics: [] as string[], type: null };
+  // 직전에 루디가 뭘 물었다면, 이 메시지가 그 답일 수 있다 (§4-F1).
+  // 대기 중인 질문이 없으면 조회 한 번으로 끝나므로 매 턴 돌려도 싸다.
+  // 검색과 병렬 — 캡처가 늦어져도 답변이 기다릴 이유가 없다.
+  const capturePromise = captureAnswer(supabase, question, (g, p, r, d) =>
+    logGate(g, p, r, d, 'question'),
+  ).catch((e) => {
+    console.warn('[chat] 자기 진술 캡처 실패', e);
+    return null;
   });
-  // ── 축 경로 (§10-6). 주제어가 안 나오는 질문이 정확히 "요즘 뭐에 꽂혔어?" 류다 —
-  // 새 분류기를 만들 필요가 없었다. 예전엔 여기서 질문 원문으로 검색했는데 그게 바로 위에
-  // 적어둔 오염된 경로라 아무거나 물어왔다. 이제 그 자리를 클러스터가 답한다.
+
+  // 검색어를 뽑는다. 실패하면 질문 그대로 — 재작성이 죽어도 채팅은 살아야 한다.
+  const { topics, type, period, intent } = await searchQueries(question).catch((e) => {
+    console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
+    return { topics: [] as string[], type: null, period: null, intent: 'other' };
+  });
+  // 캡처를 먼저 끝낸다 — 방금 받아낸 자기 진술이 아래 축 계산에 반영되게.
+  // 대기 중인 질문이 없으면 즉시 끝나므로 사실상 공짜다.
+  const answered = await capturePromise;
+
+  // ── 축 경로 (§10-6). 예전엔 여기서 질문 원문으로 검색했는데 그게 위에 적어둔 오염된
+  // 경로라 아무거나 물어왔다. 이제 그 자리를 클러스터가 답한다.
+  //
+  // ⚠️ 조건이 `topics.length === 0`뿐이었는데 **그건 너무 넓었다** (2026-07-20 실사용).
+  // 주제어가 안 나오는 건 메타 질문만이 아니다 — 진술·인사·잡담이 전부 빈 배열이다.
+  // 늦은 의도 질문에 "그냥 재밌어보여서, 나 음악 했었어"라고 답한 걸 질문으로 착각해
+  // **축 보고서를 또 냈다**(앞 턴과 거의 같은 답 = §2-2 위반).
+  // → intent를 따로 뽑아 **셋 다 만족할 때만** 축으로 간다. 프록시 신호를 질문 판정에 쓰지 않는다.
   let axes: Axis[] = [];
-  if (!topics.length) {
+  if (intent === 'trend' && !topics.length && !answered && !period) {
     try {
       axes = await findAxes(supabase);
     } catch (e) {
@@ -222,8 +259,28 @@ Deno.serve(async (req) => {
   let citedIds: string[] = [];
   let evidence = '';
   let link: Frag | null = null;
+  let periodNote = '';
 
-  if (useAxes) {
+  if (period) {
+    // ⚠️ 시간 질의는 **검색으로 답할 수 없다.** "오늘 뭐 저장했지"를 임베딩 유사도로
+    // 처리하면 오늘 저장한 게 6개 있어도 질문 문장과 의미가 안 닿으면 안 나오고,
+    // 모델은 태연히 "오늘 남긴 게 없네"라고 답한다 (2026-07-20 실사용에서 터짐).
+    // 기간이 잡히면 유사도를 아예 안 쓰고 **그 기간에 저장된 것을 날짜로 전부 가져온다.**
+    // 경계는 KST 자정 (_shared/time.ts) — UTC로 자르면 새벽에 하루가 밀린다.
+    const { since, until } = kstRange(period);
+    const { data: rows } = await supabase
+      .from('fragments')
+      .select(FRAG_COLS)
+      .eq('archived', false)
+      .gte('created_at', since)
+      .lt('created_at', until)
+      .order('created_at', { ascending: false })
+      .limit(PERIOD_LIMIT);
+    const inPeriod = (rows ?? []) as Frag[];
+    citedIds = inPeriod.map((f) => f.id);
+    evidence = inPeriod.map((f) => fragBlock(f, [])).join('\n');
+    periodNote = `${PERIOD_LABEL[period]}(${since.slice(0, 10)} 이후) 저장한 파편 ${inPeriod.length}개 — 검색 결과가 아니라 전부다`;
+  } else if (useAxes) {
     // 축 자체가 근거다. 검색도, 자발적 연결도 안 돈다 — 이 답변은 이미 통째로
     // "묻지 않은 것을 꺼내는" 일이라, 거기 또 연결을 얹으면 같은 동작의 반복이다.
     citedIds = axes.flatMap((a) => a.items.map((f) => f.id));
@@ -292,12 +349,32 @@ Deno.serve(async (req) => {
     }
   }
 
+  // 늦은 의도 (§4-F1). 축이 있으면 축에 묶인 파편을 우선한다 — 답 하나가 축 전체를
+  // 추측에서 확인으로 올리기 때문. 예산·쿨다운은 pickQuestion 안에서 걸린다.
+  let ask: Target | null = null;
+  try {
+    ask = await pickQuestion(
+      supabase,
+      new Set(axes.flatMap((a) => a.items.map((f) => f.id))),
+      (g, p, r, d) => logGate(g, p, r, d, 'question'),
+    );
+  } catch (e) {
+    console.warn('[chat] 늦은 의도 실패 → 안 묻고 진행', e);
+  }
+
   const { data: history } = await historyPromise;
 
-  const today = new Date().toISOString().slice(0, 10);
+  // ⚠️ UTC가 아니라 KST 기준 오늘. UTC로 넣으면 KST 새벽에 루디가 어제를 오늘로 안다.
+  const today = kstToday();
   const context = [
-    useAxes ? `<축>\n${evidence}\n</축>` : `<근거>\n${evidence || '(없음)'}\n</근거>`,
+    period
+      ? `<기간>\n${periodNote}\n${evidence || '(이 기간에 저장한 것 없음)'}\n</기간>`
+      : useAxes
+        ? `<축>\n${evidence}\n</축>`
+        : `<근거>\n${evidence || '(없음)'}\n</근거>`,
     link ? `<연결>\n${fragBlock(link, [])}\n</연결>` : '',
+    answered ? `<방금답함>\n${questionSubject(answered)}\n</방금답함>` : '',
+    ask ? `<물어볼것>\n${questionSubject(ask)}\n</물어볼것>` : '',
     question,
   ]
     .filter(Boolean)
@@ -322,6 +399,8 @@ Deno.serve(async (req) => {
       .single();
     utteranceId = data?.id ?? null;
   }
+  // 질문도 원장에 남긴다 — 같은 파편을 두 번 묻지 않기 위한 쿨다운이 이걸로 성립한다.
+  if (ask) await logQuestion(supabase, ask);
 
   // 클라이언트가 중단(■)하면 cancel이 불린다 — 그만 만들고, 받은 데까지 저장한다.
   let cancelled = false;
