@@ -11,7 +11,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import { colors, fonts, rounded, spacing, type } from './theme';
 
 export type Inline =
-  | { t: 'text' | 'bold' | 'code'; text: string }
+  | { t: 'text' | 'code'; text: string }
+  // 굵게는 **안에 다른 마크업을 품을 수 있다** — 모델이 링크를 굵게 감싸는 걸 막을 방법이 없다
+  | { t: 'bold'; inline: Inline[] }
   | { t: 'link'; text: string; href: string };
 
 export type Block =
@@ -26,7 +28,10 @@ export function parseInline(src: string): Inline[] {
   let last = 0;
   for (const m of src.matchAll(INLINE)) {
     if (m.index > last) out.push({ t: 'text', text: src.slice(last, m.index) });
-    if (m[1] != null) out.push({ t: 'bold', text: m[1] });
+    // ⚠️ 굵게 안을 다시 파싱한다. `**[제목](mind://…)**`에서 `[^*]+`가 링크 마크업을 통째로
+    // 삼켜서 **마크업 원문이 화면에 그대로 찍히고 탭도 안 됐다** (2026-07-20).
+    // 프롬프트로 "링크를 굵게 감싸지 마라"고 막는 건 모델 취향에 기대는 것 — 파서가 견뎌야 한다.
+    if (m[1] != null) out.push({ t: 'bold', inline: parseInline(m[1]) });
     else if (m[2] != null) out.push({ t: 'code', text: m[2] });
     else out.push({ t: 'link', text: m[3], href: m[4] });
     last = m.index + m[0].length;
@@ -89,7 +94,7 @@ function InlineRun({ inline, onLink }: { inline: Inline[]; onLink?: (href: strin
         if (seg.t === 'bold')
           return (
             <Text key={i} style={styles.bold}>
-              {seg.text}
+              <InlineRun inline={seg.inline} onLink={onLink} />
             </Text>
           );
         if (seg.t === 'code')

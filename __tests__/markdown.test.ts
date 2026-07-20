@@ -3,7 +3,7 @@ import { parseInline, parseMarkdown } from '../src/lib/markdown';
 describe('parseInline', () => {
   test('굵게·코드·링크가 섞인 줄', () => {
     expect(parseInline('**중요**한 건 `코드`와 [제목](mind://fragment/abc)이다')).toEqual([
-      { t: 'bold', text: '중요' },
+      { t: 'bold', inline: [{ t: 'text', text: '중요' }] },
       { t: 'text', text: '한 건 ' },
       { t: 'code', text: '코드' },
       { t: 'text', text: '와 ' },
@@ -18,6 +18,17 @@ describe('parseInline', () => {
 
   test('안 닫힌 굵게는 텍스트로 남는다 (스트리밍 중간)', () => {
     expect(parseInline('아직 **안 닫힘')).toEqual([{ t: 'text', text: '아직 **안 닫힘' }]);
+  });
+
+  // 회귀: 굵게가 링크를 삼켜 마크업 원문이 화면에 찍히고 탭이 안 됐다 (2026-07-20).
+  // 모델이 축을 나열할 때 링크를 굵게 감싸는 습관이 있다 — 파서가 견뎌야 한다.
+  test('굵게로 감싼 링크도 링크로 남는다', () => {
+    expect(parseInline('**[teenage engineering](mind://fragment/0f70)**')).toEqual([
+      {
+        t: 'bold',
+        inline: [{ t: 'link', text: 'teenage engineering', href: 'mind://fragment/0f70' }],
+      },
+    ]);
   });
 
   test('한글 제목 링크 (『』 포함)', () => {

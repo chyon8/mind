@@ -6,6 +6,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { chatStream, complete, embedMany, type ChatMessage } from '../_shared/openai.ts';
 import { systemPrompt } from './prompt.ts';
+import { axesBlock, findAxes, MIN_SIM as CLUSTER_MIN_SIM, type Axis } from './clusters.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -104,11 +105,17 @@ async function searchQueries(question: string): Promise<Extracted> {
 
 // 게이트 판정은 사유와 함께 남긴다 (§6-4). 실패해도 삼킨다 — 로그 때문에 채팅이 죽으면 본말전도.
 // 기다리지도 않는다(fire-and-forget) — 로그가 첫 토큰을 늦출 이유가 없다.
-function logGate(gate: string, passed: boolean, reason: string, detail: unknown) {
+function logGate(
+  gate: string,
+  passed: boolean,
+  reason: string,
+  detail: unknown,
+  kind = 'resurface',
+) {
   supabase
     .schema('rudy')
     .from('gate_log')
-    .insert({ surface: 'chat', kind: 'resurface', gate, passed, reason, detail })
+    .insert({ surface: 'chat', kind, gate, passed, reason, detail })
     .then(undefined, (e) => console.warn('[gate_log]', e));
 }
 
@@ -175,78 +182,121 @@ Deno.serve(async (req) => {
     console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
     return { topics: [] as string[], type: null };
   });
+  // ── 축 경로 (§10-6). 주제어가 안 나오는 질문이 정확히 "요즘 뭐에 꽂혔어?" 류다 —
+  // 새 분류기를 만들 필요가 없었다. 예전엔 여기서 질문 원문으로 검색했는데 그게 바로 위에
+  // 적어둔 오염된 경로라 아무거나 물어왔다. 이제 그 자리를 클러스터가 답한다.
+  let axes: Axis[] = [];
+  if (!topics.length) {
+    try {
+      axes = await findAxes(supabase);
+    } catch (e) {
+      console.warn('[chat] 클러스터 실패 → 검색으로 폴백', e);
+    }
+    // 판정을 남긴다 (§6-4). 임계 0.42는 5일치 코퍼스로 정한 잠정값이라 며칠 뒤 이 로그로
+    // 재조정한다 — 충돌 임계를 감으로 정했다가 뒤집은 것과 달리 이번엔 처음부터 근거가 쌓인다.
+    logGate(
+      'cluster',
+      axes.length > 0,
+      axes.length ? '축 성립' : '묶이는 축 없음 — 검색으로 폴백',
+      {
+        threshold: CLUSTER_MIN_SIM,
+        axes: axes.map((a) => ({
+          label: a.label,
+          size: a.items.length,
+          kind: a.kind,
+          spanDays: Math.round(a.spanDays),
+          activeDays: a.activeDays,
+          quietDays: Math.round(a.quietDays),
+        })),
+      },
+      'cluster',
+    );
+  }
+  const useAxes = axes.length > 0;
+
   // 주제어가 나오면 **그것만** 쓴다. 원문을 섞으면 메타 표현이 다시 검색을 오염시킨다
   // (실측: 원문을 섞으면 "링크 던지면 요약…"이 0.535로 1위, 빼면 "음성으로 녹음" 0.511이 1위).
-  // 주제어가 없는 질문("요즘 뭐에 꽂혔어?")만 원문으로 검색한다.
+  // 축이 안 서는 질문만 원문으로 검색해 폴백한다 — 채팅에서 침묵은 답이 아니다.
   const queries = topics.length ? topics : [question];
-  // 자발적 연결은 질문 원문 기준이라 원문 임베딩도 필요하다 — 한 번에 받는다
-  const embeds = await embedMany([...queries, question]);
-  const qEmbed = embeds[embeds.length - 1];
 
-  // 근거 검색 — 기존 하이브리드 RPC 그대로 쓴다 (검색과 채팅이 같은 랭킹을 봐야 말이 맞다).
-  // 질의별로 돌리고 파편별 최고점으로 합친다.
-  // type이 잡히면 그 종류만 (검색 UI의 타입 칩과 같은 동작).
-  // "링크 뭐 있었지"에 링크 아닌 파편을 보여주면 답이 아니다.
-  const runs = await Promise.all(
-    queries.map((q, i) =>
-      supabase.schema('rudy').rpc('search_fragments', {
-        q_text: q,
-        q_embed: embeds[i],
-        match_count: CITE_COUNT,
-        type_filter: type,
-      }),
-    ),
-  );
-  const failed = runs.find((r) => r.error);
-  if (failed?.error) throw failed.error;
-
-  const best = new Map<string, number>();
-  for (const r of runs) {
-    for (const h of (r.data ?? []) as { id: string; score: number }[]) {
-      best.set(h.id, Math.max(best.get(h.id) ?? 0, h.score));
-    }
-  }
-  const citedIds = [...best.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, CITE_COUNT)
-    .map(([id]) => id);
-
-  const { data: citedRows } = await supabase.from('fragments').select(FRAG_COLS).in('id', citedIds);
-  // RPC의 점수 순서를 보존한다 — .in()은 순서를 보장하지 않는다
-  const order = new Map(citedIds.map((id, i) => [id, i]));
-  const cited = ((citedRows ?? []) as Frag[]).sort(
-    (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
-  );
-
-  // 근거 파편의 프로젝트 소속 — "프로젝트 상세로 가자"에 답할 재료
-  const projByFrag = new Map<string, { id: string; name: string }[]>();
-  if (citedIds.length) {
-    const { data: maps } = await supabase
-      .from('fragment_projects')
-      .select('fragment_id, projects(id, name)')
-      .in('fragment_id', citedIds);
-    for (const m of (maps ?? []) as { fragment_id: string; projects: { id: string; name: string } }[]) {
-      if (!m.projects) continue;
-      const arr = projByFrag.get(m.fragment_id) ?? [];
-      arr.push(m.projects);
-      projByFrag.set(m.fragment_id, arr);
-    }
-  }
-
-  // 연결이 죽어도 대화는 살아야 한다 — 부가 기능이 본 기능을 인질로 잡지 않게.
+  let citedIds: string[] = [];
+  let evidence = '';
   let link: Frag | null = null;
-  try {
-    link = await findLink(qEmbed, citedIds);
-  } catch (e) {
-    console.warn('[chat] 자발적 연결 실패 → 연결 없이 진행', e);
+
+  if (useAxes) {
+    // 축 자체가 근거다. 검색도, 자발적 연결도 안 돈다 — 이 답변은 이미 통째로
+    // "묻지 않은 것을 꺼내는" 일이라, 거기 또 연결을 얹으면 같은 동작의 반복이다.
+    citedIds = axes.flatMap((a) => a.items.map((f) => f.id));
+    evidence = axesBlock(axes);
+  } else {
+    // 자발적 연결은 질문 원문 기준이라 원문 임베딩도 필요하다 — 한 번에 받는다
+    const embeds = await embedMany([...queries, question]);
+    const qEmbed = embeds[embeds.length - 1];
+
+    // 근거 검색 — 기존 하이브리드 RPC 그대로 쓴다 (검색과 채팅이 같은 랭킹을 봐야 말이 맞다).
+    // 질의별로 돌리고 파편별 최고점으로 합친다.
+    // type이 잡히면 그 종류만 (검색 UI의 타입 칩과 같은 동작).
+    // "링크 뭐 있었지"에 링크 아닌 파편을 보여주면 답이 아니다.
+    const runs = await Promise.all(
+      queries.map((q, i) =>
+        supabase.schema('rudy').rpc('search_fragments', {
+          q_text: q,
+          q_embed: embeds[i],
+          match_count: CITE_COUNT,
+          type_filter: type,
+        }),
+      ),
+    );
+    const failed = runs.find((r) => r.error);
+    if (failed?.error) throw failed.error;
+
+    const best = new Map<string, number>();
+    for (const r of runs) {
+      for (const h of (r.data ?? []) as { id: string; score: number }[]) {
+        best.set(h.id, Math.max(best.get(h.id) ?? 0, h.score));
+      }
+    }
+    citedIds = [...best.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, CITE_COUNT)
+      .map(([id]) => id);
+
+    const { data: citedRows } = await supabase.from('fragments').select(FRAG_COLS).in('id', citedIds);
+    // RPC의 점수 순서를 보존한다 — .in()은 순서를 보장하지 않는다
+    const order = new Map(citedIds.map((id, i) => [id, i]));
+    const cited = ((citedRows ?? []) as Frag[]).sort(
+      (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
+    );
+
+    // 근거 파편의 프로젝트 소속 — "프로젝트 상세로 가자"에 답할 재료
+    const projByFrag = new Map<string, { id: string; name: string }[]>();
+    if (citedIds.length) {
+      const { data: maps } = await supabase
+        .from('fragment_projects')
+        .select('fragment_id, projects(id, name)')
+        .in('fragment_id', citedIds);
+      for (const m of (maps ?? []) as { fragment_id: string; projects: { id: string; name: string } }[]) {
+        if (!m.projects) continue;
+        const arr = projByFrag.get(m.fragment_id) ?? [];
+        arr.push(m.projects);
+        projByFrag.set(m.fragment_id, arr);
+      }
+    }
+    evidence = cited.map((f) => fragBlock(f, projByFrag.get(f.id) ?? [])).join('\n');
+
+    // 연결이 죽어도 대화는 살아야 한다 — 부가 기능이 본 기능을 인질로 잡지 않게.
+    try {
+      link = await findLink(qEmbed, citedIds);
+    } catch (e) {
+      console.warn('[chat] 자발적 연결 실패 → 연결 없이 진행', e);
+    }
   }
 
   const { data: history } = await historyPromise;
 
   const today = new Date().toISOString().slice(0, 10);
-  const evidence = cited.map((f) => fragBlock(f, projByFrag.get(f.id) ?? [])).join('\n');
   const context = [
-    `<근거>\n${evidence || '(없음)'}\n</근거>`,
+    useAxes ? `<축>\n${evidence}\n</축>` : `<근거>\n${evidence || '(없음)'}\n</근거>`,
     link ? `<연결>\n${fragBlock(link, [])}\n</연결>` : '',
     question,
   ]
