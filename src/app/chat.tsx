@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Linking,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -15,14 +14,13 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/lib/confirm';
-import { feedDateLabel } from '@/lib/dates';
+import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import {
   askRudy,
   deleteConversation,
   fetchConversations,
   fetchMessages,
-  latestConversation,
   newConversation,
   type ChatMessage,
   type Conversation,
@@ -50,9 +48,13 @@ const SUGGESTIONS = [
 // ⚠️ 배열이다. 예전엔 한 턴만 들고 있어서, 저장이 실패한 뒤 다음 질문을 보내면
 // 이전 턴이 통째로 사라졌다("새로 보내면 텍스트가 없어진다"). 화면에 나온 글자는
 // 서버가 어떻게 되든 지우지 않는다 — 대화는 로컬에서 무조건 누적된다.
-type Turn = { key: string; q: string; a: string; cited: string[]; note?: string; web?: boolean };
+type Turn = { key: string; at: string; q: string; a: string; cited: string[]; note?: string; web?: boolean };
 
 // Rudy 채팅 (RUDY.md §7-2 당기는 표면). 미는 표면이 아니다 — 내가 열 때만 말한다.
+//
+// 열면 **대화 기록 목록**부터 보여준다 (발견 화면과 같은 홈-착지). 지난 대화를 고르거나
+// `새로 채팅`을 눌러야 대화로 들어간다 — 최근 대화를 바로 이어 띄우면 대화 경계가 안 보여
+// "이전 대화를 안 읽는다"로 읽힌다(실제로는 대화 안의 history를 읽는다).
 //
 // 상태 머신은 단순하게 유지한다: phase는 idle ↔ streaming 둘뿐이고, send의 finally가
 // 무조건 idle로 되돌린다. 이전 버전은 실패 경로에서 streaming 상태가 안 풀려
@@ -63,13 +65,14 @@ type Turn = { key: string; q: string; a: string; cited: string[]; note?: string;
 export default function Chat() {
   // 원탭 진입 (§4-C1) — 파편 상세의 칩이 질문을 들고 들어온다
   const { q } = useLocalSearchParams<{ q?: string }>();
+  const [mode, setMode] = useState<'home' | 'chat'>('home');
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [input, setInput] = useState('');
   const [phase, setPhase] = useState<'idle' | 'streaming'>('idle');
   const [turns, setTurns] = useState<Turn[]>([]); // 서버에 아직 없는 것들 (누적)
-  const [history, setHistory] = useState<Conversation[] | null>(null); // null = 시트 닫힘
+  const [history, setHistory] = useState<Conversation[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const scroll = useRef<ScrollView>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -97,11 +100,21 @@ export default function Chat() {
     [loadLabels],
   );
 
+  // 목록 조회 실패는 삼키지 않는다 — 예전 기록 시트가 `.catch(() => {})`라 눌러도
+  // 아무 일이 안 일어났다. 실패는 목록 자리에 적는다.
+  const refreshHistory = useCallback(() => {
+    fetchConversations()
+      .then((cs) => {
+        setHistory(cs);
+        setHistoryError(null);
+      })
+      .catch((e) => setHistoryError(String(e?.message ?? e)));
+  }, []);
+
+  // 열 때: 대화 목록을 읽어 보여준다. 최근 대화를 자동으로 이어 띄우지 않는다.
   useEffect(() => {
-    latestConversation()
-      .then((id) => (id ? open(id) : undefined))
-      .catch(() => {});
-  }, [open]);
+    refreshHistory();
+  }, [refreshHistory]);
 
   const send = useCallback(
     async (question: string) => {
@@ -114,7 +127,7 @@ export default function Chat() {
       const key = `${Date.now()}`;
       const patch = (p: Partial<Turn>) =>
         setTurns((prev) => prev.map((t) => (t.key === key ? { ...t, ...p } : t)));
-      setTurns((prev) => [...prev, { key, q: text, a: '', cited: [] }]);
+      setTurns((prev) => [...prev, { key, at: new Date().toISOString(), q: text, a: '', cited: [] }]);
 
       let answer = '';
       try {
@@ -182,9 +195,11 @@ export default function Chat() {
   // send를 ref로 참조해 effect가 send 재생성마다 다시 돌지 않게 한다.
   const sendRef = useRef(send);
   sendRef.current = send;
+  // 원탭 진입은 목록을 거치지 않는다 — 질문을 들고 들어온 것이므로 바로 새 대화로 간다.
   useEffect(() => {
     if (q && !autoSent.current) {
       autoSent.current = true;
+      setMode('chat');
       sendRef.current(q);
     }
   }, [q]);
@@ -214,13 +229,24 @@ export default function Chat() {
     setConversationId(null); // 행은 다음 전송 때 만들어진다
     setMessages([]);
     setTurns([]);
+    setMode('chat');
+  }
+
+  // 목록으로 나갈 때 갱신한다 — 첫 전송으로 생긴 대화와 서버가 붙인 제목이 그때 보인다.
+  function backToHome() {
+    setMode('home');
+    refreshHistory();
   }
 
   async function removeConversation(c: Conversation) {
     if (!(await confirmDelete('이 대화를 지울까? 파편은 그대로 남는다.'))) return;
     await deleteConversation(c.id);
-    setHistory((prev) => (prev ?? []).filter((x) => x.id !== c.id));
-    if (c.id === conversationId) startNew();
+    setHistory((prev) => prev.filter((x) => x.id !== c.id));
+    if (c.id === conversationId) {
+      setConversationId(null);
+      setMessages([]);
+      setTurns([]);
+    }
   }
 
   const streamingNow = phase === 'streaming';
@@ -233,179 +259,167 @@ export default function Chat() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <Text style={styles.headerBtn}>‹ 뒤로</Text>
-          </Pressable>
-          <Text style={styles.wordmark}>RUDY</Text>
-          <View style={styles.headerRight}>
-            <Pressable
-              onPress={() => {
-                // 시트를 먼저 연다 — 예전엔 조회 실패를 삼켜서 버튼을 눌러도 아무 일이
-                // 안 일어났다("대화내역이 아예 안 뜬다"). 실패는 시트 안에 적는다.
-                setHistory([]);
-                setHistoryError(null);
-                fetchConversations()
-                  .then(setHistory)
-                  .catch((e) => setHistoryError(String(e?.message ?? e)));
-              }}
-              hitSlop={12}
-            >
-              <Text style={styles.headerBtn}>기록</Text>
-            </Pressable>
-            <Pressable onPress={startNew} hitSlop={12}>
-              <Text style={styles.headerBtn}>새로</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* flex:1이 없으면 답변이 길어질 때 스크롤뷰가 컨테이너를 밀어내
-            입력창이 화면 밖으로 나간다 — 지난 버그. */}
-        <ScrollView
-          ref={scroll}
-          style={styles.flex}
-          contentContainerStyle={styles.list}
-          keyboardDismissMode="interactive"
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
-        >
-          {empty && (
-            <View style={styles.emptyWrap}>
-              <Text style={styles.empty}>던져둔 것 위에서 얘기한다.</Text>
-              {SUGGESTIONS.map((s) => (
-                <Pressable key={s} style={styles.suggestion} onPress={() => send(s)}>
-                  <Text style={styles.suggestionText}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-
-          {messages.map((m) =>
-            m.role === 'user' ? (
-              <View key={m.id} style={styles.userRow}>
-                <Text style={styles.userText}>{m.content}</Text>
-              </View>
-            ) : (
-              <View key={m.id} style={styles.rudyBlock}>
-                <Markdown text={m.content} onLink={onLink} />
-                {(m.cited_ids ?? []).length > 0 && (
-                  <View style={styles.chips}>
-                    {m.cited_ids.map((id) =>
-                      labels[id] ? (
-                        <Pressable key={id} style={styles.chip} onPress={() => openFragment(id)}>
-                          <Text style={styles.chipText}>{labels[id]}</Text>
-                        </Pressable>
-                      ) : null,
-                    )}
-                  </View>
-                )}
-              </View>
-            ),
-          )}
-
-          {turns.map((t, i) => (
-            <View key={t.key} style={styles.turn}>
-              <View style={styles.userRow}>
-                <Text style={styles.userText}>{t.q}</Text>
-              </View>
-              <View style={styles.rudyBlock}>
-                {/* 바깥을 뒤졌으면 알린다 — 답이 나오기 전엔 "찾는 중", 나온 뒤엔 작은 표시(§유저 요청) */}
-                {t.web && <Text style={styles.webNote}>{t.a ? '· 바깥에서 찾아봤어' : '바깥에서 찾아보는 중…'}</Text>}
-                {t.a ? (
-                  <Markdown text={t.a} onLink={onLink} />
-                ) : streamingNow && i === turns.length - 1 && !t.web ? (
-                  <ActivityIndicator color={colors.faint} style={styles.thinking} />
-                ) : null}
-                {/* 근거 칩은 모델이 링크를 안 걸어도 항상 보인다 — 검색과 같은 수준의 결과 노출 */}
-                {t.cited.length > 0 && (
-                  <View style={styles.chips}>
-                    {t.cited.map((id) =>
-                      labels[id] ? (
-                        <Pressable key={id} style={styles.chip} onPress={() => openFragment(id)}>
-                          <Text style={styles.chipText}>{labels[id]}</Text>
-                        </Pressable>
-                      ) : null,
-                    )}
-                  </View>
-                )}
-                {t.note && <Text style={styles.note}>{t.note}</Text>}
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-
-        <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, spacing.sm) }]}>
-          <TextInput
-            style={[styles.input, noFocusRing]}
-            value={input}
-            onChangeText={setInput}
-            placeholder="물어보기"
-            placeholderTextColor={colors.faint}
-            multiline
-          />
-          {streamingNow ? (
-            // 응답 중엔 보내기가 중단으로 바뀐다 — 긴 답을 앉아서 다 볼 이유가 없다
-            <Pressable onPress={() => abortRef.current?.abort()} style={styles.send} hitSlop={8}>
-              <Text style={styles.sendIcon}>■</Text>
+          {mode === 'home' ? (
+            <Pressable onPress={() => router.back()} hitSlop={12}>
+              <Text style={styles.headerBtn}>‹ 뒤로</Text>
             </Pressable>
           ) : (
-            <Pressable
-              onPress={() => send(input)}
-              disabled={!input.trim()}
-              style={[styles.send, !input.trim() && styles.sendOff]}
-              hitSlop={8}
-            >
-              <Text style={[styles.sendIcon, !input.trim() && styles.sendIconOff]}>↑</Text>
+            // 응답 중엔 목록으로 못 나간다 — 나갔다 다른 대화를 열면 흘러나온 턴이 남의 대화에 얹힌다
+            <Pressable onPress={backToHome} disabled={streamingNow} hitSlop={12}>
+              <Text style={[styles.headerBtn, streamingNow && styles.headerBtnOff]}>‹ 목록</Text>
             </Pressable>
           )}
+          <Text style={styles.wordmark}>RUDY</Text>
+          <View style={styles.headerRight} />
         </View>
-      </KeyboardAvoidingView>
 
-      {history !== null && (
-        <Modal
-          visible
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setHistory(null)}
-        >
-          <SafeAreaView style={styles.screen} edges={['top']}>
-            <View style={styles.header}>
-              <Pressable onPress={() => setHistory(null)} hitSlop={12}>
-                <Text style={styles.headerBtn}>닫기</Text>
-              </Pressable>
-              <Text style={styles.wordmark}>기록</Text>
-              <View style={styles.headerRight} />
-            </View>
-            <ScrollView contentContainerStyle={styles.historyList}>
-              {historyError && <Text style={styles.errorText}>불러오기 실패: {historyError}</Text>}
-              {!historyError && history.length === 0 && (
-                <Text style={styles.empty}>아직 나눈 얘기가 없다</Text>
-              )}
-              {history.map((c) => (
-                <View
-                  key={c.id}
-                  style={[styles.historyRow, c.id === conversationId && styles.historyRowActive]}
+        {mode === 'home' && (
+          <ScrollView style={styles.flex} contentContainerStyle={styles.historyList}>
+            <Pressable style={styles.startNew} onPress={startNew}>
+              <Text style={styles.startNewText}>새로 채팅</Text>
+              <Text style={styles.startNewSub}>던져둔 것 위에서 얘기한다</Text>
+            </Pressable>
+            {historyError && <Text style={styles.errorText}>불러오기 실패: {historyError}</Text>}
+            {!historyError && history.length === 0 && (
+              <Text style={styles.empty}>아직 나눈 얘기가 없다</Text>
+            )}
+            {history.map((c) => (
+              <View key={c.id} style={styles.historyRow}>
+                <Pressable
+                  style={styles.historyBody}
+                  onPress={() => {
+                    setMessages([]); // 앞 대화가 잠깐 비쳤다 바뀌지 않게
+                    setTurns([]); // 다른 대화의 로컬 턴이 따라오면 안 된다
+                    setMode('chat');
+                    open(c.id).catch(() => {});
+                  }}
                 >
-                  <Pressable
-                    style={styles.historyBody}
-                    onPress={() => {
-                      setHistory(null);
-                      if (phase === 'idle') open(c.id).catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.historyTitle} numberOfLines={1}>
-                      {c.title ?? '빈 대화'}
-                    </Text>
-                    <Text style={styles.historyDate}>{feedDateLabel(c.created_at)}</Text>
+                  <Text style={styles.historyTitle} numberOfLines={1}>
+                    {c.title ?? '빈 대화'}
+                  </Text>
+                  <Text style={styles.historyDate}>
+                    {feedDateLabel(c.created_at)} · {formatTime(c.created_at)}
+                  </Text>
+                </Pressable>
+                {/* 삭제는 보이는 버튼으로 — 롱프레스는 아무도 발견 못 한다 */}
+                <Pressable onPress={() => removeConversation(c)} hitSlop={12}>
+                  <Text style={styles.historyDelete}>지우기</Text>
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        {mode === 'chat' && (
+          <>
+          {/* flex:1이 없으면 답변이 길어질 때 스크롤뷰가 컨테이너를 밀어내
+              입력창이 화면 밖으로 나간다 — 지난 버그. */}
+          <ScrollView
+            ref={scroll}
+            style={styles.flex}
+            contentContainerStyle={styles.list}
+            keyboardDismissMode="interactive"
+            onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+          >
+            {empty && (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.empty}>던져둔 것 위에서 얘기한다.</Text>
+                {SUGGESTIONS.map((s) => (
+                  <Pressable key={s} style={styles.suggestion} onPress={() => send(s)}>
+                    <Text style={styles.suggestionText}>{s}</Text>
                   </Pressable>
-                  {/* 삭제는 보이는 버튼으로 — 롱프레스는 아무도 발견 못 한다 */}
-                  <Pressable onPress={() => removeConversation(c)} hitSlop={12}>
-                    <Text style={styles.historyDelete}>지우기</Text>
-                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {messages.map((m) =>
+              m.role === 'user' ? (
+                <View key={m.id} style={styles.userWrap}>
+                  <View style={styles.userRow}>
+                    <Text style={styles.userText}>{m.content}</Text>
+                  </View>
+                  <Text style={styles.userTime}>{formatTime(m.created_at)}</Text>
                 </View>
-              ))}
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
-      )}
+              ) : (
+                <View key={m.id} style={styles.rudyBlock}>
+                  <Markdown text={m.content} onLink={onLink} />
+                  {(m.cited_ids ?? []).length > 0 && (
+                    <View style={styles.chips}>
+                      {m.cited_ids.map((id) =>
+                        labels[id] ? (
+                          <Pressable key={id} style={styles.chip} onPress={() => openFragment(id)}>
+                            <Text style={styles.chipText}>{labels[id]}</Text>
+                          </Pressable>
+                        ) : null,
+                      )}
+                    </View>
+                  )}
+                </View>
+              ),
+            )}
+
+            {turns.map((t, i) => (
+              <View key={t.key} style={styles.turn}>
+                <View style={styles.userWrap}>
+                  <View style={styles.userRow}>
+                    <Text style={styles.userText}>{t.q}</Text>
+                  </View>
+                  <Text style={styles.userTime}>{formatTime(t.at)}</Text>
+                </View>
+                <View style={styles.rudyBlock}>
+                  {/* 바깥을 뒤졌으면 알린다 — 답이 나오기 전엔 "찾는 중", 나온 뒤엔 작은 표시(§유저 요청) */}
+                  {t.web && <Text style={styles.webNote}>{t.a ? '· 바깥에서 찾아봤어' : '바깥에서 찾아보는 중…'}</Text>}
+                  {t.a ? (
+                    <Markdown text={t.a} onLink={onLink} />
+                  ) : streamingNow && i === turns.length - 1 && !t.web ? (
+                    <ActivityIndicator color={colors.faint} style={styles.thinking} />
+                  ) : null}
+                  {/* 근거 칩은 모델이 링크를 안 걸어도 항상 보인다 — 검색과 같은 수준의 결과 노출 */}
+                  {t.cited.length > 0 && (
+                    <View style={styles.chips}>
+                      {t.cited.map((id) =>
+                        labels[id] ? (
+                          <Pressable key={id} style={styles.chip} onPress={() => openFragment(id)}>
+                            <Text style={styles.chipText}>{labels[id]}</Text>
+                          </Pressable>
+                        ) : null,
+                      )}
+                    </View>
+                  )}
+                  {t.note && <Text style={styles.note}>{t.note}</Text>}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+
+          <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, spacing.sm) }]}>
+            <TextInput
+              style={[styles.input, noFocusRing]}
+              value={input}
+              onChangeText={setInput}
+              placeholder="물어보기"
+              placeholderTextColor={colors.faint}
+              multiline
+            />
+            {streamingNow ? (
+              // 응답 중엔 보내기가 중단으로 바뀐다 — 긴 답을 앉아서 다 볼 이유가 없다
+              <Pressable onPress={() => abortRef.current?.abort()} style={styles.send} hitSlop={8}>
+                <Text style={styles.sendIcon}>■</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => send(input)}
+                disabled={!input.trim()}
+                style={[styles.send, !input.trim() && styles.sendOff]}
+                hitSlop={8}
+              >
+                <Text style={[styles.sendIcon, !input.trim() && styles.sendIconOff]}>↑</Text>
+              </Pressable>
+            )}
+          </View>
+          </>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -423,6 +437,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   headerBtn: { ...type.labelSm, color: colors.mute, fontFamily: fonts.sans },
+  headerBtnOff: { color: colors.faint },
   headerRight: { flexDirection: 'row', gap: spacing.md, minWidth: 72, justifyContent: 'flex-end' },
   wordmark: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
 
@@ -438,7 +453,9 @@ const styles = StyleSheet.create({
   },
   suggestionText: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
 
-  // 유저 말은 오른쪽 카드로 접힌다 — 지나간 것이다
+  // 유저 말은 오른쪽 카드로 접힌다 — 지나간 것이다. 시각은 카드 밑에 작게.
+  userWrap: { alignItems: 'flex-end', gap: spacing.xxs },
+  userTime: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono },
   userRow: {
     alignSelf: 'flex-end',
     maxWidth: '85%',
@@ -510,6 +527,18 @@ const styles = StyleSheet.create({
   turn: { gap: spacing.lg },
   errorText: { ...type.bodySm, color: colors.error, fontFamily: fonts.sans },
   historyList: { padding: spacing.md, gap: spacing.xxs },
+  startNew: {
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderRadius: rounded.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    gap: spacing.xxs,
+    marginBottom: spacing.sm,
+  },
+  startNewText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansSemiBold },
+  startNewSub: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   historyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -518,7 +547,6 @@ const styles = StyleSheet.create({
     borderRadius: rounded.sm,
     gap: spacing.md,
   },
-  historyRowActive: { backgroundColor: colors.canvasElevated },
   historyBody: { flex: 1, gap: spacing.xxs },
   historyTitle: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sans },
   historyDate: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans },

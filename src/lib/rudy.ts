@@ -79,6 +79,7 @@ export async function streamBriefing(h: BriefHandlers, signal?: AbortSignal): Pr
 
 export type ChatMessage = {
   id: string;
+  created_at: string;
   role: 'user' | 'assistant';
   content: string;
   cited_ids: string[];
@@ -86,7 +87,7 @@ export type ChatMessage = {
 
 export type Conversation = { id: string; created_at: string; title: string | null };
 
-// 대화 목록 — 기록 시트에서 골라 들어간다
+// 대화 목록 — 채팅 홈에서 골라 들어간다
 export async function fetchConversations(): Promise<Conversation[]> {
   const { data, error } = await supabase()
     .schema('rudy')
@@ -98,14 +99,8 @@ export async function fetchConversations(): Promise<Conversation[]> {
   return (data ?? []) as Conversation[];
 }
 
-// 가장 최근 대화. 없으면 null — 여기서 만들지 않는다.
-// 대화 행은 첫 질문을 보낼 때 만든다(지연 생성). 열 때마다 만들면
-// "새로"를 누르고 나간 것만으로 빈 대화가 기록에 쌓인다.
-export async function latestConversation(): Promise<string | null> {
-  const [latest] = await fetchConversations();
-  return latest?.id ?? null;
-}
-
+// 대화 행은 첫 질문을 보낼 때 만든다(지연 생성). 화면을 열 때 만들면
+// `새로 채팅`을 누르고 나간 것만으로 빈 대화가 기록에 쌓인다.
 export async function newConversation(): Promise<string> {
   const { data, error } = await supabase()
     .schema('rudy')
@@ -128,7 +123,7 @@ export async function fetchMessages(conversationId: string): Promise<ChatMessage
   const { data, error } = await supabase()
     .schema('rudy')
     .from('messages')
-    .select('id, role, content, cited_ids')
+    .select('id, created_at, role, content, cited_ids')
     .eq('conversation_id', conversationId)
     .order('created_at');
   if (error) throw error;
