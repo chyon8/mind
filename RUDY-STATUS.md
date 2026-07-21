@@ -4,7 +4,32 @@
 > **발견 브리핑(§10-7)은 RUDY-DISCOVERY.md가 유일한 기준 문서다 — 그 작업 전 반드시 읽는다.**
 > 마지막 갱신: 2026-07-21.
 
-## 🔖 새 세션 시작점 (2026-07-21 핸드오프)
+## 🔖 새 세션 시작점 (2026-07-21 밤 갱신 — §10-8 배포 중 막힘)
+
+**막힌 지점: EAS dev client 빌드는 됐는데 실기기 설치가 안 됨.**
+유저 증상: "빌드됐다고 QR 떴는데 이미 설치된 게 있다면서 (설치가) 안 나온다." iOS 번들ID
+(`com.isangmin.mind`) 충돌로 추정되나 **화면을 못 봐서 미확진.** 다음 세션에서 먼저 확인할 것:
+1. 지금 뜨는 화면이 정확히 뭔지(EAS 로그 / 폰의 iOS 설치 확인 팝업 / Safari QR 랜딩 페이지) 스크린샷 요청.
+2. 기존에 깔린 dev client가 있었는지(이전 세션에 빌드한 적 있는지) 확인 — 있으면 그게 충돌 후보.
+3. 최후 수단: 기존 dev client 앱 기기에서 지우고 재설치.
+
+**유저가 헷갈려한 것 (설명 완료, 재설명 불필요):**
+- dev client ≠ TestFlight. 별도 앱으로 공존, TestFlight 안 건드림.
+- `expo start`로는 네이티브 모듈(expo-notifications) 반영 안 됨 — 리빌드 필수였던 이유.
+- 시뮬레이터에선 푸시 토큰 자체가 안 나옴(Apple 정책) — 실기기 필수.
+
+**§10-8 나머지 배포 체크리스트** (dev client 설치 해결되면 이어서):
+- SQL 3개: `rudy-push.sql` → `morning-briefing` 함수 배포 → `rudy-cron.sql`(서비스롤 키 채워 실행, 커밋 금지)
+- `npx supabase functions deploy morning-briefing --project-ref ibqyqpmwqujcxlnkyizf`
+- 새 dev client 실기기 실행 → 알림 권한 허용 → `rudy.push_tokens`에 토큰 확인
+
+**직전에 고친 것 (커밋 완료 가정, 미확인시 확인):** `package-lock.json` 재생성 —
+로컬(node v25) vs EAS 빌드서버(node v22.11.0) 버전 차이로 `npm ci`가 실패했었음.
+`rm -rf node_modules package-lock.json && npm install` 후 `npm ci`로 재현·검증해서 고침.
+
+---
+
+## 🔖 새 세션 시작점 (2026-07-21 오후, §10-7 완료 시점 — 위 갱신 이전 기록)
 
 **채팅 홈 착지 완료(2026-07-21, 아래 "자유 채팅 3차").** 기기 검증 대기.
 
