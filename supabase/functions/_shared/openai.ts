@@ -35,6 +35,9 @@ export async function embedMany(texts: string[]): Promise<number[][]> {
 export const CHAT_MODEL = Deno.env.get('OPENAI_CHAT_MODEL') ?? 'gpt-4o';
 // 질의 재작성 같은 짧은 보조 작업용. 본 답변 모델과 분리한다 — 여기 지연이 첫 토큰을 늦춘다.
 export const FAST_MODEL = Deno.env.get('OPENAI_FAST_MODEL') ?? 'gpt-4o-mini';
+// 발견 각도 결정용 — 채팅과 분리한다. 실측(2026-07-21, check-angles): gpt-4o는 각도가
+// 막연한 리스티클 미끼가 되고 gpt-5.5라야 파편을 겹치고 합쳐 손 퀄에 근접한다. 하루 1회라 비용 무시.
+export const DISCOVERY_MODEL = Deno.env.get('OPENAI_DISCOVERY_MODEL') ?? 'gpt-5.5';
 
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -43,7 +46,8 @@ export async function complete(messages: ChatMessage[], model = FAST_MODEL): Pro
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, temperature: 0 }),
+    // gpt-5 계열은 temperature 고정(1)만 받는다 — 그 외 모델만 0으로 재현성 확보
+    body: JSON.stringify({ model, messages, ...(model.startsWith('gpt-5') ? {} : { temperature: 0 }) }),
   });
   if (!res.ok) throw new Error(`openai chat ${res.status}: ${await res.text()}`);
   const { choices } = await res.json();
@@ -53,11 +57,14 @@ export async function complete(messages: ChatMessage[], model = FAST_MODEL): Pro
 // 채팅 응답을 토큰 단위로 흘린다. 통째로 기다리면 "바로바로 알아듣는다"(§4-C1)가 죽는다.
 // OpenAI SSE(`data: {...}` 줄 + `[DONE]`)를 델타 문자열로만 풀어 넘긴다 — SSE 파싱을
 // 여기 한 곳에 가둬서 호출부는 텍스트 조각만 다루면 되게.
-export async function* chatStream(messages: ChatMessage[]): AsyncGenerator<string> {
+export async function* chatStream(
+  messages: ChatMessage[],
+  model = CHAT_MODEL,
+): AsyncGenerator<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: CHAT_MODEL, stream: true, messages }),
+    body: JSON.stringify({ model, stream: true, messages }),
   });
   if (!res.ok || !res.body) throw new Error(`openai chat ${res.status}: ${await res.text()}`);
 

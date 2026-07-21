@@ -48,6 +48,16 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
         >
           <Text style={styles.rowLabel}>Rudy</Text>
         </Pressable>
+        {/* 발견 피드 (RUDY.md §7-4) — 바깥에서 물어온다. 되떠오름과 분리된 능동적으로 노는 곳 */}
+        <Pressable
+          style={styles.row}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/discovery');
+          }}
+        >
+          <Text style={styles.rowLabel}>발견</Text>
+        </Pressable>
         {/* 판단 없는 자리 — 그냥 무작위로 흘러나온다 */}
         <Pressable
           style={styles.row}

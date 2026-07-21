@@ -6,6 +6,70 @@ import { lineFeeder } from './ndjson';
 import { isConfigured, supabase } from './supabase';
 
 const FUNCTIONS_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''}/functions/v1/chat`;
+const DISCOVERY_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''}/functions/v1/discovery`;
+
+// 발견 브리핑 (RUDY.md §4-E · §7-4). NDJSON 스트리밍 — 조립이 gpt-5.5 대용량이라 30~60초인데,
+// 단계(status)와 토큰(d)이 흘러나와 앱이 진행을 보여준다("너무 오래 걸려" 체감 완화).
+// done의 empty=true면 "오늘은 볼 게 없음"(§2-8 빈 브리핑 허용).
+// 지난 브리핑들 (원장에 저장된 것). 날짜별 기록·재생성 회피에 쓴다.
+// 화면을 열 때마다 새로 만들지 않고 최근 것을 읽어 온다 — 매번 60초·비용을 안 쓰게.
+export type Briefing = { id: string; created_at: string; text: string };
+export async function fetchBriefings(): Promise<Briefing[]> {
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .from('utterances')
+    .select('id, created_at, text')
+    .eq('kind', 'discovery')
+    .eq('surface', 'briefing')
+    .not('text', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(60);
+  if (error) throw error;
+  return (data ?? []).filter((b) => (b.text ?? '').trim()) as Briefing[];
+}
+
+export type BriefStage = 'reading' | 'angles' | 'search' | 'writing';
+type BriefHandlers = {
+  onStage: (stage: BriefStage, count?: number) => void;
+  onToken: (text: string) => void;
+};
+
+export async function streamBriefing(h: BriefHandlers, signal?: AbortSignal): Promise<{ empty: boolean }> {
+  if (!isConfigured) throw new Error('Supabase 미설정');
+  const { data } = await supabase().auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error('세션 없음');
+
+  const res = await streamingFetch(DISCOVERY_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: '{}',
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`discovery ${res.status}`);
+
+  let empty = false;
+  let failure = '';
+  const feeder = lineFeeder((raw) => {
+    const ev = JSON.parse(raw);
+    if (ev.t === 'status') h.onStage(ev.stage, ev.count);
+    else if (ev.t === 'd') h.onToken(ev.c);
+    else if (ev.t === 'done') empty = ev.empty;
+    else if (ev.t === 'error') failure = ev.message;
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    feeder.push(decoder.decode(value, { stream: true }));
+  }
+  feeder.end();
+
+  if (failure) throw new Error(failure);
+  return { empty };
+}
 
 export type ChatMessage = {
   id: string;
