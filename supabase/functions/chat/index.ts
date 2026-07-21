@@ -9,6 +9,7 @@ import { systemPrompt } from './prompt.ts';
 import { axesBlock, findAxes, MIN_SIM as CLUSTER_MIN_SIM, type Axis } from './clusters.ts';
 import { captureAnswer, logQuestion, pickQuestion, questionSubject, type Target } from './intent.ts';
 import { kstDate, kstRange, kstToday, PERIOD_LABEL, type Period } from '../_shared/time.ts';
+import { exaSearch } from '../discovery/search.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -73,9 +74,12 @@ function fragBlock(f: Frag, projects: { id: string; name: string }[]): string {
 // 아래 문구는 실측으로 조인 것이다 (2026-07-19). 동작어("정리","저장한 자료")가 주제어로
 // 새어나오면 그 단어의 키워드 매치가 1.0점으로 상위를 먹어 검색이 다시 망가진다.
 const EXTRACT_SYS = `사용자의 질문을 개인 메모 저장소 검색용으로 분해한다.
+<최근대화>가 주어지면 그걸 맥락으로 읽는다.
 
 topics — 검색할 주제어:
 - 구체적인 소재·분야·고유명사만. 예: "홈레코딩", "기타", "카페 창업"
+- ⚠️ **"그거/이거/저거/방금 그거/그 링크" 같은 지시어는 <최근대화>에서 실제 소재로 풀어서 넣어라.**
+  예: 루디가 "케이스랩 메모"를 말한 뒤 "그거 찾아봐" → topics=["케이스랩"]. 지시어를 그대로 두지 마라.
 - 다음은 절대 주제어가 아니다 — 버린다: 저장/기록/메모/정리/요약/링크/자료/목록,
   알려줘/보여줘/찾아줘, 최근/요즘/관심사/경향 같은 메타 표현
 - 질문에 구체적 소재가 없으면(예: "요즘 뭐에 꽂혔어?") 빈 배열
@@ -99,16 +103,36 @@ intent — 이 메시지가 무엇인지:
 - "other": 그 외 전부. 구체적인 검색, 세상 지식 질문, 그리고 **질문이 아닌 것**
   (진술·감상·인사·잡담). 묻지 않았으면 trend가 아니다.
 
-JSON만 출력: {"topics":["..."],"type":null,"period":null,"intent":"other"}`;
+outward — 바깥(웹)에서 찾는 것과의 관계. **단, 이 사람의 세계(파편·프로젝트·관심)와 연결될 때만이다.**
+루디는 만능 검색기가 아니다 — 날씨·환율·일반 사실 조회는 바깥이 아니다("no").
+- "go": **명시적으로 바깥을 요청**했고 이 사람 맥락과 연결됨. "이런 거 찾아봐", "비슷한 프로덕트 찾아줘",
+  "~ 사례 검색해줘", "그거 관련해서 바깥에 뭐 있나 찾아줘". 요청이 분명하면 바로 간다.
+- "ask": 바깥이 **도움될 순 있지만 명시적으로 요청 안 함** (애매). "케이스랩 어때?", "이거 괜찮나?".
+  → 마음대로 뒤지지 말고 물어본다.
+- "no": 바깥 불필요. 저장소 질문, 순수 지식/개념, 잡담, 그리고 **이 사람 세계와 무관한 사실 조회
+  (날씨·시세 등)**. 애매하면 no.
 
-type Extracted = { topics: string[]; type: string | null; period: Period | null; intent: string };
+JSON만 출력: {"topics":["..."],"type":null,"period":null,"intent":"other","outward":"no"}`;
+
+type OutwardMode = 'no' | 'ask' | 'go';
+type Extracted = {
+  topics: string[];
+  type: string | null;
+  period: Period | null;
+  intent: string;
+  outward: OutwardMode;
+};
+const OUTWARD: OutwardMode[] = ['no', 'ask', 'go'];
 const TYPES = ['text', 'link', 'image', 'quote'];
 const PERIODS = ['today', 'yesterday', 'week', 'month'];
 
-async function searchQueries(question: string): Promise<Extracted> {
+// recent = 최근 대화 몇 줄. "그거/이거" 같은 지시어를 여기서 실제 소재로 풀어야 검색이 조준된다.
+// 이게 없어서 "오늘 뭐 남겼지 → 그거 찾아봐"의 '그거'가 헛돌았다 (2026-07-21 유저 지적).
+async function searchQueries(question: string, recent: string): Promise<Extracted> {
+  const user = recent ? `<최근대화>\n${recent}\n</최근대화>\n\n질문: ${question}` : question;
   const raw = await complete([
     { role: 'system', content: EXTRACT_SYS },
-    { role: 'user', content: question },
+    { role: 'user', content: user },
   ]);
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
   return {
@@ -118,7 +142,24 @@ async function searchQueries(question: string): Promise<Extracted> {
     type: TYPES.includes(p?.type) ? p.type : null,
     period: PERIODS.includes(p?.period) ? (p.period as Period) : null,
     intent: p?.intent === 'trend' ? 'trend' : 'other',
+    outward: OUTWARD.includes(p?.outward) ? (p.outward as OutwardMode) : 'no',
   };
+}
+
+// 바깥(웹) 검색 결과를 모델에 넘길 블록. 채팅이 저장소를 넘어 바깥까지 뻗는 자리(§4-E 정신).
+// 저장소 근거(<근거>)와 섞이지 않게 별도 블록으로 준다 — 출처 URL로 인용하게.
+async function outwardBlock(queries: string[]): Promise<string> {
+  const q = queries.join(' ').trim();
+  if (!q) return '';
+  const results = await exaSearch(q, 6);
+  if (!results.length) return '';
+  return results
+    .map((r) => {
+      const date = r.publishedDate?.slice(0, 10) ?? '';
+      const hl = r.highlights.join(' … ').slice(0, 500);
+      return `- ${r.title ?? '(제목없음)'}${date ? ` (${date})` : ''}\n  ${r.url}\n  ${hl}`;
+    })
+    .join('\n');
 }
 
 // 게이트 판정은 사유와 함께 남긴다 (§6-4). 실패해도 삼킨다 — 로그 때문에 채팅이 죽으면 본말전도.
@@ -205,11 +246,29 @@ Deno.serve(async (req) => {
     return null;
   });
 
+  // 이력을 먼저 읽는다 — 검색어 추출이 "그거/이거"를 최근 대화에서 풀 수 있게(§유저 지적).
+  // 답변에도 쓰이므로 여기서 한 번 await하고 재사용한다.
+  const { data: history } = await historyPromise;
+  const recent = ((history ?? []) as ChatMessage[])
+    .slice(0, 4)
+    .reverse()
+    .map((m) => `${m.role === 'user' ? '나' : '루디'}: ${(m.content ?? '').replace(/\n/g, ' ').slice(0, 200)}`)
+    .join('\n');
+
   // 검색어를 뽑는다. 실패하면 질문 그대로 — 재작성이 죽어도 채팅은 살아야 한다.
-  const { topics, type, period, intent } = await searchQueries(question).catch((e) => {
+  const { topics, type, period, intent, outward } = await searchQueries(question, recent).catch((e) => {
     console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
-    return { topics: [] as string[], type: null, period: null, intent: 'other' };
+    return { topics: [] as string[], type: null, period: null, intent: 'other', outward: 'no' as OutwardMode };
   });
+
+  // 바깥 검색은 **명시적 요청(go)일 때만** 뻗는다 (§2-8 침묵 기본값 + 유저 통제). RAG와 병렬로.
+  // 'ask'면 안 뒤지고 프롬프트가 "바깥에서 찾아볼까?"를 물어보게 한다. 실패해도 채팅은 산다.
+  const outwardPromise: Promise<string> = outward === 'go'
+    ? outwardBlock(topics.length ? topics : [question]).catch((e) => {
+        console.warn('[chat] 바깥 검색 실패 → 없이 진행', e);
+        return '';
+      })
+    : Promise.resolve('');
   // 캡처를 먼저 끝낸다 — 방금 받아낸 자기 진술이 아래 축 계산에 반영되게.
   // 대기 중인 질문이 없으면 즉시 끝나므로 사실상 공짜다.
   const answered = await capturePromise;
@@ -362,7 +421,7 @@ Deno.serve(async (req) => {
     console.warn('[chat] 늦은 의도 실패 → 안 묻고 진행', e);
   }
 
-  const { data: history } = await historyPromise;
+  const web = await outwardPromise; // 바깥 검색 결과 (없으면 빈 문자열). history는 위에서 이미 읽음.
 
   // ⚠️ UTC가 아니라 KST 기준 오늘. UTC로 넣으면 KST 새벽에 루디가 어제를 오늘로 안다.
   const today = kstToday();
@@ -372,6 +431,9 @@ Deno.serve(async (req) => {
       : useAxes
         ? `<축>\n${evidence}\n</축>`
         : `<근거>\n${evidence || '(없음)'}\n</근거>`,
+    web ? `<바깥>\n${web}\n</바깥>` : '',
+    // 'ask' = 바깥이 도움될 수 있지만 안 뒤졌다. 억지 말고 도움되면 끝에 "바깥에서 찾아볼까?" 묻게.
+    outward === 'ask' ? `<바깥가능>\n바깥에서 찾으면 도움될 수 있다. 억지로 말고, 정말 도움되겠으면 답 끝에 짧게 "바깥에서 찾아볼까?"라고만 물어라.\n</바깥가능>` : '',
     link ? `<연결>\n${fragBlock(link, [])}\n</연결>` : '',
     answered ? `<방금답함>\n${questionSubject(answered)}\n</방금답함>` : '',
     ask ? `<물어볼것>\n${questionSubject(ask)}\n</물어볼것>` : '',
@@ -420,6 +482,7 @@ Deno.serve(async (req) => {
       try {
         // 근거를 먼저 흘린다 — 저장이 실패해도 앱이 근거 칩을 그릴 수 있어야 한다.
         // 모델이 링크를 안 걸어도 이 칩이 있으면 검색과 같은 수준으로 결과가 보인다.
+        if (outward === 'go') push({ t: 'web' }); // 바깥을 뒤졌다 — 앱이 "바깥에서 찾아봤다"를 표시
         push({ t: 'cite', ids: citedIds });
         if (link && utteranceId) push({ t: 'link', fragmentId: link.id, utteranceId });
         for await (const delta of chatStream(messages)) {

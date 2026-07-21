@@ -141,6 +141,8 @@ type Handlers = {
   onCite: (ids: string[]) => void;
   // 자발적 연결 — 묻지 않았는데 걸어 들어온 파편. utteranceId는 반응(§6-6)을 적을 자리.
   onLink: (fragmentId: string, utteranceId: string) => void;
+  // 바깥(웹)을 뒤졌다 — 앱이 "바깥에서 찾아봤다"를 표시한다.
+  onWeb?: () => void;
 };
 
 // 질문 하나를 보내고 토큰을 흘려받는다. 이력 저장은 서버가 한다 —
@@ -176,6 +178,7 @@ export async function askRudy(
     if (ev.t === 'd') h.onToken(ev.c);
     else if (ev.t === 'cite') h.onCite(ev.ids);
     else if (ev.t === 'link') h.onLink(ev.fragmentId, ev.utteranceId);
+    else if (ev.t === 'web') h.onWeb?.();
     else if (ev.t === 'done') saved = ev.saved;
     // 여기서 바로 throw하지 않는다 — 뒤따라올 done을 못 읽어서, 서버가 멀쩡히 저장한
     // 부분 답변까지 "저장 안 됨"으로 취급하게 된다. 다 읽고 나서 판단한다.

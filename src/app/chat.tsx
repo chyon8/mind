@@ -41,7 +41,7 @@ function chipLabel(fr: Fragment): string {
 const SUGGESTIONS = [
   '요즘 나 뭐에 꽂혀 있어?',
   '지난주에 뭐 던졌지?',
-  '읽으려고 저장해둔 링크 뭐 있었지?',
+  '내 프로젝트랑 비슷한 거 만든 사람 찾아줘',
   '음악 관련 모아둔 거 정리해줘',
 ];
 
@@ -50,7 +50,7 @@ const SUGGESTIONS = [
 // ⚠️ 배열이다. 예전엔 한 턴만 들고 있어서, 저장이 실패한 뒤 다음 질문을 보내면
 // 이전 턴이 통째로 사라졌다("새로 보내면 텍스트가 없어진다"). 화면에 나온 글자는
 // 서버가 어떻게 되든 지우지 않는다 — 대화는 로컬에서 무조건 누적된다.
-type Turn = { key: string; q: string; a: string; cited: string[]; note?: string };
+type Turn = { key: string; q: string; a: string; cited: string[]; note?: string; web?: boolean };
 
 // Rudy 채팅 (RUDY.md §7-2 당기는 표면). 미는 표면이 아니다 — 내가 열 때만 말한다.
 //
@@ -147,6 +147,7 @@ export default function Chat() {
             onLink: (fragmentId, utteranceId) => {
               linked.current[fragmentId] = utteranceId;
             },
+            onWeb: () => patch({ web: true }),
           },
           ctrl.signal,
         );
@@ -306,9 +307,11 @@ export default function Chat() {
                 <Text style={styles.userText}>{t.q}</Text>
               </View>
               <View style={styles.rudyBlock}>
+                {/* 바깥을 뒤졌으면 알린다 — 답이 나오기 전엔 "찾는 중", 나온 뒤엔 작은 표시(§유저 요청) */}
+                {t.web && <Text style={styles.webNote}>{t.a ? '· 바깥에서 찾아봤어' : '바깥에서 찾아보는 중…'}</Text>}
                 {t.a ? (
                   <Markdown text={t.a} onLink={onLink} />
-                ) : streamingNow && i === turns.length - 1 ? (
+                ) : streamingNow && i === turns.length - 1 && !t.web ? (
                   <ActivityIndicator color={colors.faint} style={styles.thinking} />
                 ) : null}
                 {/* 근거 칩은 모델이 링크를 안 걸어도 항상 보인다 — 검색과 같은 수준의 결과 노출 */}
@@ -457,6 +460,7 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md,
   },
   thinking: { alignSelf: 'flex-start' },
+  webNote: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, marginBottom: spacing.xxs },
   note: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chip: {

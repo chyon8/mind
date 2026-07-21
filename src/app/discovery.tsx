@@ -26,8 +26,11 @@ function openLink(href: string) {
   if (/^https?:\/\//.test(href)) Linking.openURL(href).catch(() => {});
 }
 
+// "버린 것/못 찾은 것" 각주 감지. ※ 가 정식이지만, 구버전 브리핑은 ※ 없이 마지막에 붙어 있어
+// 문구로도 잡는다(유저: "이걸 왜 카드에 그대로 넣어").
+const REJECT_RE = /(뺐|뺀\s|제외|리스티클|못 찾|버린\s*것|안 넣)/;
+
 // 스트리밍 마크다운을 카드로 쪼갠다 — ### 제목마다 한 장. 미완성이어도 안 죽는다.
-// ※ 로 시작하는 줄(버린 것 각주)은 카드에 섞지 않고 별도 각주로 뺀다(유저 요청).
 function parseCards(md: string): { title: string; body: string }[] {
   const cards: { title: string; body: string }[] = [];
   let cur: { title: string; body: string } | null = null;
@@ -37,14 +40,27 @@ function parseCards(md: string): { title: string; body: string }[] {
       cur = { title: h[1].trim(), body: '' };
       cards.push(cur);
     } else if (ln.trimStart().startsWith('※')) {
-      cards.push({ title: '', body: ln.replace(/^\s*※\s*/, '').trim() });
-      cur = null; // 각주 이후는 카드에 안 붙는다
+      cards.push({ title: '', body: ln.replace(/^\s*※\s*/, '').trim() }); // 정식 각주
+      cur = null;
     } else if (cur) {
       cur.body += (cur.body ? '\n' : '') + ln;
     } else if (ln.trim()) {
       cards.push({ title: '', body: ln });
     }
   }
+
+  // 구버전 대비: 마지막 카드 본문 끝에 "…뺐다/제외" 문단이 붙어 있으면 떼어 각주로.
+  const last = [...cards].reverse().find((c) => c.title);
+  if (last) {
+    const paras = last.body.split(/\n{2,}/);
+    const tail = paras[paras.length - 1] ?? '';
+    if (paras.length > 1 && REJECT_RE.test(tail) && tail.length < 220) {
+      paras.pop();
+      last.body = paras.join('\n\n');
+      cards.push({ title: '', body: tail.trim() });
+    }
+  }
+
   return cards.map((c) => ({ title: c.title, body: c.body.trim() })).filter((c) => c.title || c.body);
 }
 
