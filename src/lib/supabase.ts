@@ -210,6 +210,7 @@ export async function insertFragment(input: {
   project_ids?: string[];
   image_path?: string | null;
   link_title?: string | null;
+  note?: string | null;
 }): Promise<Fragment> {
   if (!isConfigured) {
     const { fixtureInsertFragment } = await import('./fixtures');
@@ -422,6 +423,15 @@ export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
   const { data, error } = await supabase().from('fragments').select(EMBED).in('id', ids);
   if (error) throw error;
   return data.map(toFragment);
+}
+
+// 이미 파편으로 던져진 내용들 — 발견 카드의 "던졌다" 상태를 화면 재진입 후에도 복원하는 데 쓴다.
+// content가 정확히 일치하는 것만 찾는다(던지기는 content=제목을 그대로 넣으므로 충분).
+export async function existingFragmentContents(contents: string[]): Promise<string[]> {
+  if (!isConfigured || contents.length === 0) return [];
+  const { data, error } = await supabase().from('fragments').select('content').in('content', contents);
+  if (error) throw error;
+  return (data ?? []).map((r) => r.content as string);
 }
 
 // 구해냈다 — 선명도 100% 복귀 + 중요도 한 칸. 회상에서 "기억하기"를 누를 때만.

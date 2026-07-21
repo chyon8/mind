@@ -28,6 +28,12 @@ export async function fetchBriefings(): Promise<Briefing[]> {
   return (data ?? []).filter((b) => (b.text ?? '').trim()) as Briefing[];
 }
 
+// 기록에서 지우기 — 사후 폐기. 생성 중 취소 대신 이걸 쓴다(항상 저장된다는 원칙과 안 싸운다).
+export async function deleteBriefing(id: string): Promise<void> {
+  const { error } = await supabase().schema('rudy').from('utterances').delete().eq('id', id);
+  if (error) throw error;
+}
+
 export type BriefStage = 'reading' | 'angles' | 'search' | 'writing';
 type BriefHandlers = {
   onStage: (stage: BriefStage, count?: number) => void;

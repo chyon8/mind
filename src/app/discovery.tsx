@@ -4,7 +4,8 @@ import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, Vie
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
-import { type Briefing, fetchBriefings, streamBriefing, type BriefStage } from '@/lib/rudy';
+import { type Briefing, deleteBriefing, fetchBriefings, streamBriefing, type BriefStage } from '@/lib/rudy';
+import { existingFragmentContents, insertFragment } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 
 // 발견 브리핑 (RUDY.md §4-E · §7-4). 당기는 표면 — 내가 열 때만 바깥을 물어온다.
@@ -13,7 +14,6 @@ import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 // 생성은 스트리밍(단계 스테퍼 + 카드가 차오름). **화면을 나가도 생성은 백그라운드에서 끝까지 돌아
 // 원장에 저장된다** — 다시 열면 기록에 있다(중간에 나가도 유실 없음).
 
-type Phase = 'init' | 'home' | 'loading' | 'streaming' | 'done' | 'empty' | 'error';
 
 const STAGES: { id: BriefStage; label: (n?: number) => string }[] = [
   { id: 'reading', label: () => '저장한 걸 읽는 중' },
@@ -27,6 +27,7 @@ function openLink(href: string) {
 }
 
 // 스트리밍 마크다운을 카드로 쪼갠다 — ### 제목마다 한 장. 미완성이어도 안 죽는다.
+// ※ 로 시작하는 줄(버린 것 각주)은 카드에 섞지 않고 별도 각주로 뺀다(유저 요청).
 function parseCards(md: string): { title: string; body: string }[] {
   const cards: { title: string; body: string }[] = [];
   let cur: { title: string; body: string } | null = null;
@@ -35,20 +36,33 @@ function parseCards(md: string): { title: string; body: string }[] {
     if (h) {
       cur = { title: h[1].trim(), body: '' };
       cards.push(cur);
+    } else if (ln.trimStart().startsWith('※')) {
+      cards.push({ title: '', body: ln.replace(/^\s*※\s*/, '').trim() });
+      cur = null; // 각주 이후는 카드에 안 붙는다
     } else if (cur) {
       cur.body += (cur.body ? '\n' : '') + ln;
     } else if (ln.trim()) {
-      cur = { title: '', body: ln };
-      cards.push(cur);
+      cards.push({ title: '', body: ln });
     }
   }
-  return cards.map((c) => ({ title: c.title, body: c.body.trim() }));
+  return cards.map((c) => ({ title: c.title, body: c.body.trim() })).filter((c) => c.title || c.body);
 }
 
 const firstTitle = (md: string) => parseCards(md).find((c) => c.title)?.title ?? '(제목 없음)';
 
 // 카드 하나 — 처음 나타날 때 페이드+슬라이드. index를 key로 쓰므로 마지막 카드는 자라기만 한다.
-function Card({ title, body }: { title: string; body: string }) {
+// 던지기(§4-E4 플라이휠): 발견 인사이트를 그대로 Mind 파편으로. 임베딩돼서 다음 충돌·클러스터에 참여한다.
+function Card({
+  title,
+  body,
+  thrown,
+  onThrow,
+}: {
+  title: string;
+  body: string;
+  thrown: boolean;
+  onThrow: () => void;
+}) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, {
@@ -73,6 +87,11 @@ function Card({ title, body }: { title: string; body: string }) {
     <Animated.View style={[styles.card, style]}>
       <Text style={styles.cardTitle}>{title}</Text>
       {!!body && <Markdown text={body} onLink={openLink} />}
+      <Pressable onPress={onThrow} disabled={thrown} hitSlop={6} style={styles.throw}>
+        <Text style={[styles.throwText, thrown && styles.thrownText]}>
+          {thrown ? '던졌다 ✓' : '↑ 던지기'}
+        </Text>
+      </Pressable>
     </Animated.View>
   );
 }
@@ -113,15 +132,19 @@ function Stepper({ stage, count }: { stage: BriefStage; count?: number }) {
   );
 }
 
+type Mode = 'home' | 'result';
+type ResultKind = 'live' | 'saved' | 'empty' | 'error';
+
 export default function Discovery() {
-  const [phase, setPhase] = useState<Phase>('init');
+  const [mode, setMode] = useState<Mode>('home');
+  const [gen, setGen] = useState(false); // 생성 진행 중 (화면을 나가도 유지 — 서버는 계속 돈다)
+  const [kind, setKind] = useState<ResultKind>('live');
   const [stage, setStage] = useState<BriefStage>('reading');
   const [count, setCount] = useState<number>();
   const [md, setMd] = useState('');
   const [error, setError] = useState('');
   const [list, setList] = useState<Briefing[]>([]);
-  // 화면이 떠 있는 동안만 setState 한다. 나가도 생성 자체는 백그라운드에서 계속 돌아 저장된다 —
-  // 언마운트 후의 setState 경고만 막고, abort는 하지 않는다("나가면 유실"을 없애는 핵심).
+  // 화면이 떠 있는 동안만 setState. 나가도 생성은 백그라운드에서 계속 돌아 저장된다(유실 방지).
   const alive = useRef(true);
   const started = useRef(false);
   useEffect(() => {
@@ -137,13 +160,26 @@ export default function Discovery() {
       .catch(() => {});
   }, []);
 
-  // 새 브리핑 생성 (스트리밍). ⚠️ signal을 안 넘긴다 — 화면을 나가도 서버가 끝까지 만들어 저장하게.
+  // 던지기(§4-E4) 상태. 화면을 나갔다 와도 이미 던진 카드는 "던졌다"로 뜨게 DB에서 복원한다.
+  const [thrown, setThrown] = useState<Set<string>>(new Set());
+  const syncThrown = useCallback((text: string) => {
+    const titles = parseCards(text).map((c) => c.title).filter(Boolean);
+    if (!titles.length) return;
+    existingFragmentContents(titles)
+      .then((hit) => alive.current && setThrown((s) => new Set([...s, ...hit])))
+      .catch(() => {});
+  }, []);
+
+  // 새 브리핑 생성 (스트리밍). ⚠️ signal을 안 넘긴다 — 나가도 서버가 끝까지 만들어 저장하게.
   const generate = useCallback(() => {
-    setPhase('loading');
+    if (gen) return; // 이미 생성 중이면 무시 (버튼 잠금)
+    setGen(true);
+    setKind('live');
     setStage('reading');
     setCount(undefined);
     setMd('');
     setError('');
+    setMode('result');
 
     streamBriefing({
       onStage: (s, n) => {
@@ -151,115 +187,145 @@ export default function Discovery() {
         setStage(s);
         setCount(n);
       },
-      onToken: (t) => {
-        if (!alive.current) return;
-        setPhase('streaming');
-        setMd((prev) => prev + t);
-      },
+      // md는 화면을 나가도 갱신한다(돌아오면 최신). phase(모드)는 안 건드린다 — 유저가 목록에 있으면 목록 유지.
+      onToken: (t) => alive.current && setMd((prev) => prev + t),
     })
       .then(({ empty }) => {
-        // 완성되면 서버가 이미 저장했다. 목록은 백그라운드에서도 갱신 시도.
-        fetchBriefings()
-          .then((bs) => alive.current && setList(bs))
-          .catch(() => {});
-        if (alive.current) setPhase(empty ? 'empty' : 'done');
+        if (alive.current) {
+          setGen(false);
+          setKind(empty ? 'empty' : 'live');
+          setMd((cur) => {
+            syncThrown(cur); // 완성 시 이미 던진 게 있으면 상태 복원
+            return cur;
+          });
+        }
+        refreshList(); // 완성분이 원장에 저장됐다 — 목록 갱신
       })
       .catch((e) => {
         if (alive.current) {
+          setGen(false);
           setError(String(e?.message ?? e));
-          setPhase('error');
+          setKind('error');
         }
       });
-  }, []);
+  }, [gen, refreshList, syncThrown]);
 
-  // 열 때: **기록 목록**을 읽어 보여준다. 바로 생성하지 않는다.
+  // 열 때: 기록 목록을 읽어 보여준다. 바로 생성하지 않는다.
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    fetchBriefings()
-      .then((bs) => {
-        if (!alive.current) return;
-        setList(bs);
-        setPhase('home');
-      })
-      .catch((e) => {
-        if (!alive.current) return;
-        setError(String(e?.message ?? e));
-        setPhase('error');
-      });
-  }, []);
-
-  const goHome = useCallback(() => {
-    setPhase('home');
     refreshList();
   }, [refreshList]);
 
-  const view = useCallback((b: Briefing) => {
-    setMd(b.text);
-    setPhase('done');
+  const view = useCallback(
+    (b: Briefing) => {
+      setMd(b.text);
+      setKind('saved');
+      setMode('result');
+      syncThrown(b.text);
+    },
+    [syncThrown],
+  );
+
+  const remove = useCallback(
+    (b: Briefing) => {
+      setList((cur) => cur.filter((x) => x.id !== b.id)); // 낙관적 제거
+      deleteBriefing(b.id).catch(() => refreshList()); // 실패하면 되돌린다
+    },
+    [refreshList],
+  );
+
+  // note엔 링크 마크업을 평문으로 눕혀서 넣는다 — 덧붙임은 읽는 글이지 링크가 아니다.
+  const throwCard = useCallback((title: string, body: string) => {
+    setThrown((s) => new Set(s).add(title));
+    const note = body.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1 ($2)').trim() || null;
+    insertFragment({ content: title, type: 'text', note }).catch(() =>
+      setThrown((s) => {
+        const n = new Set(s);
+        n.delete(title);
+        return n;
+      }),
+    );
   }, []);
 
-  const cards = phase === 'streaming' || phase === 'done' ? parseCards(md) : [];
-  const atHome = phase === 'home' || phase === 'init';
+  const cards = mode === 'result' && kind !== 'empty' && kind !== 'error' ? parseCards(md) : [];
+  const showStepper = mode === 'result' && kind === 'live' && !md;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        {atHome ? (
+        {mode === 'home' ? (
           <Pressable onPress={() => router.back()} hitSlop={12}>
             <Text style={styles.headerBtn}>‹ 뒤로</Text>
           </Pressable>
         ) : (
-          // 생성 중에 눌러도 abort 안 함 — 백그라운드에서 계속 만들어 저장된다.
-          <Pressable onPress={goHome} hitSlop={12}>
+          // 목록으로 가도 생성은 abort 안 함 — 백그라운드에서 계속 만들어 저장된다.
+          <Pressable onPress={() => setMode('home')} hitSlop={12}>
             <Text style={styles.headerBtn}>‹ 목록</Text>
           </Pressable>
         )}
         <Text style={styles.wordmark}>발견</Text>
-        <View style={styles.headerRight} />
+        <View style={styles.headerRight}>
+          {gen && <Text style={styles.genPill}>생성 중</Text>}
+        </View>
       </View>
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.list}>
-        {atHome && (
+        {mode === 'home' && (
           <>
-            <Pressable style={styles.generate} onPress={generate}>
-              <Text style={styles.generateText}>새로 발견하기</Text>
-              <Text style={styles.generateSub}>바깥에서 물어온다 · 30초쯤</Text>
+            <Pressable
+              style={[styles.generate, gen && styles.generateOff]}
+              onPress={generate}
+              disabled={gen}
+            >
+              <Text style={styles.generateText}>{gen ? '생성 중…' : '새로 발견하기'}</Text>
+              <Text style={styles.generateSub}>
+                {gen ? '다 되면 기록에 얹힌다 · 나가도 계속 돈다' : '바깥에서 물어온다 · 30초쯤'}
+              </Text>
             </Pressable>
-            {list.length === 0 && phase === 'home' && (
-              <Text style={styles.emptyList}>아직 기록이 없다. 위 버튼으로 시작.</Text>
-            )}
+            {list.length === 0 && <Text style={styles.emptyList}>아직 기록이 없다. 위 버튼으로 시작.</Text>}
             {list.map((b) => (
               <Pressable key={b.id} style={styles.histRow} onPress={() => view(b)}>
-                <Text style={styles.histDate}>
-                  {feedDateLabel(b.created_at)} · {formatTime(b.created_at)}
-                </Text>
-                <Text style={styles.histSnip} numberOfLines={1}>
-                  {firstTitle(b.text)}
-                </Text>
+                <View style={styles.flex}>
+                  <Text style={styles.histDate}>
+                    {feedDateLabel(b.created_at)} · {formatTime(b.created_at)}
+                  </Text>
+                  <Text style={styles.histSnip} numberOfLines={1}>
+                    {firstTitle(b.text)}
+                  </Text>
+                </View>
+                <Pressable onPress={() => remove(b)} hitSlop={10} style={styles.histDel}>
+                  <Text style={styles.histDelText}>지우기</Text>
+                </Pressable>
               </Pressable>
             ))}
           </>
         )}
 
-        {phase === 'loading' && <Stepper stage={stage} count={count} />}
+        {showStepper && <Stepper stage={stage} count={count} />}
 
         {cards.map((c, i) => (
-          <Card key={i} title={c.title} body={c.body} />
+          <Card
+            key={i}
+            title={c.title}
+            body={c.body}
+            thrown={thrown.has(c.title)}
+            onThrow={() => throwCard(c.title, c.body)}
+          />
         ))}
 
-        {phase === 'empty' && (
+        {mode === 'result' && kind === 'empty' && (
           <View style={styles.center}>
             <Text style={styles.hint}>오늘은 가져올 만한 게 없다.</Text>
             <Text style={styles.hintSmall}>없는 날은 없다고 말한다.</Text>
           </View>
         )}
 
-        {phase === 'error' && (
+        {mode === 'result' && kind === 'error' && (
           <View style={styles.center}>
             <Text style={styles.errorText}>못 가져왔다.</Text>
             <Text style={styles.hintSmall}>{error}</Text>
-            <Pressable style={styles.retry} onPress={goHome}>
+            <Pressable style={styles.retry} onPress={() => setMode('home')}>
               <Text style={styles.retryText}>목록으로</Text>
             </Pressable>
           </View>
@@ -297,6 +363,17 @@ const styles = StyleSheet.create({
   },
   cardTitle: { ...type.headingMd, color: colors.ink, fontFamily: fonts.sansSemiBold, marginBottom: spacing.xxs },
   footnote: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, fontStyle: 'italic', paddingHorizontal: spacing.xs },
+  throw: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+    paddingVertical: spacing.xxs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 999,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  throwText: { ...type.bodySm, color: colors.body, fontFamily: fonts.sansMedium },
+  thrownText: { color: colors.faint },
 
   stepper: { gap: spacing.md, paddingTop: spacing.xl, paddingHorizontal: spacing.sm },
   step: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -321,6 +398,8 @@ const styles = StyleSheet.create({
   },
   retryText: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
 
+  genPill: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 1 },
+
   generate: {
     backgroundColor: colors.canvasElevated,
     borderColor: colors.hairline,
@@ -331,16 +410,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xxs,
   },
+  generateOff: { opacity: 0.6 },
   generateText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansSemiBold },
   generateSub: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   emptyList: { ...type.bodyMd, color: colors.faint, fontFamily: fonts.sans, textAlign: 'center', paddingTop: spacing.lg },
 
   histRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingVertical: spacing.sm,
     borderBottomColor: colors.hairline,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: spacing.xxs,
   },
-  histDate: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono },
+  histDate: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono, marginBottom: spacing.xxs },
   histSnip: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
+  histDel: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xxs },
+  histDelText: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans },
 });

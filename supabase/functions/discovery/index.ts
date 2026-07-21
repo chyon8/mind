@@ -19,27 +19,44 @@ const cors = {
 
 const line = (o: unknown) => new TextEncoder().encode(`${JSON.stringify(o)}\n`);
 
+// Supabase Edge의 백그라운드 태스크 — 요청이 끝나도(클라 끊겨도) 이 프로미스가 끝날 때까지 격리를 산다.
+const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+
 Deno.serve((req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
+  // ⚠️ 클라가 끊겨도(앱 종료·화면 이탈) streamBrief를 **끝까지** 돌려 원장에 저장한다.
+  // 그래서 "생성 중 나가면 유실"이 없다. enqueue만 클라가 살아 있을 때 하고, 루프는 계속 돈다.
+  let finish!: () => void;
+  const done = new Promise<void>((r) => (finish = r));
+
   const stream = new ReadableStream({
     async start(controller) {
-      try {
-        for await (const ev of streamBrief(supabase)) {
-          controller.enqueue(line(ev));
+      let clientGone = false;
+      const push = (o: unknown) => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(line(o));
+        } catch {
+          clientGone = true; // 클라 끊김 — 이후로는 안 보내지만 생성은 계속
         }
+      };
+      try {
+        for await (const ev of streamBrief(supabase)) push(ev);
       } catch (e) {
         console.error('[discovery]', e);
-        controller.enqueue(line({ t: 'error', message: String(e) }));
+        push({ t: 'error', message: String(e) });
       } finally {
-        try {
-          controller.close();
-        } catch {
-          /* 이미 닫힘 */
+        if (!clientGone) {
+          try {
+            controller.close();
+          } catch { /* 이미 닫힘 */ }
         }
+        finish();
       }
     },
   });
 
+  rt?.waitUntil?.(done); // 클라가 끊겨도 저장까지 끝나게 격리 유지
   return new Response(stream, { headers: { ...cors, 'Content-Type': 'application/x-ndjson' } });
 });
