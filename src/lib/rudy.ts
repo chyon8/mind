@@ -13,12 +13,13 @@ const DISCOVERY_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''}/functions/v
 // done의 empty=true면 "오늘은 볼 게 없음"(§2-8 빈 브리핑 허용).
 // 지난 브리핑들 (원장에 저장된 것). 날짜별 기록·재생성 회피에 쓴다.
 // 화면을 열 때마다 새로 만들지 않고 최근 것을 읽어 온다 — 매번 60초·비용을 안 쓰게.
-export type Briefing = { id: string; created_at: string; text: string };
+// trigger: 'pull' = 화면에서 직접 생성 / 'push' = 아침 배치가 생성. 기록 목록의 구분 표시용.
+export type Briefing = { id: string; created_at: string; text: string; trigger: 'pull' | 'push' };
 export async function fetchBriefings(): Promise<Briefing[]> {
   const { data, error } = await supabase()
     .schema('rudy')
     .from('utterances')
-    .select('id, created_at, text')
+    .select('id, created_at, text, trigger')
     .eq('kind', 'discovery')
     .eq('surface', 'briefing')
     .not('text', 'is', null)

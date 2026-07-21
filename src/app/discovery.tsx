@@ -303,9 +303,17 @@ export default function Discovery() {
             {list.map((b) => (
               <Pressable key={b.id} style={styles.histRow} onPress={() => view(b)}>
                 <View style={styles.flex}>
-                  <Text style={styles.histDate}>
-                    {feedDateLabel(b.created_at)} · {formatTime(b.created_at)}
-                  </Text>
+                  <View style={styles.histMeta}>
+                    {/* 아침 배치가 만든 것과 직접 만든 것을 구분 표시 (유저 요청) */}
+                    {b.trigger === 'push' && (
+                      <View style={styles.pushBadge}>
+                        <Text style={styles.pushBadgeText}>아침</Text>
+                      </View>
+                    )}
+                    <Text style={styles.histDate}>
+                      {feedDateLabel(b.created_at)} · {formatTime(b.created_at)}
+                    </Text>
+                  </View>
                   <Text style={styles.histSnip} numberOfLines={1}>
                     {firstTitle(b.text)}
                   </Text>
@@ -439,7 +447,16 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.hairline,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  histDate: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono, marginBottom: spacing.xxs },
+  histMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xxs },
+  pushBadge: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+    borderRadius: 999,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  pushBadgeText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sansMedium, fontSize: 10 },
+  histDate: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono },
   histSnip: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
   histDel: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xxs },
   histDelText: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans },

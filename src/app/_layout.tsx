@@ -16,6 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Login } from '@/components/Login';
 import { ShareIntentHandler } from '@/components/ShareIntentHandler';
 import { backfillLinkMeta } from '@/lib/linkMeta';
+import { registerForPush, subscribePushTaps } from '@/lib/push';
 import { hasSession, onAuthChange } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
 
@@ -47,6 +48,13 @@ export default function RootLayout() {
       if (state === 'active') backfillLinkMeta();
     });
     return () => sub.remove();
+  }, [signedIn]);
+
+  // 아침 푸시 등록 + 탭 라우팅 (§7-3). 로그인 후에만 — 세션 있어야 토큰을 저장할 수 있다.
+  useEffect(() => {
+    if (!signedIn) return;
+    registerForPush();
+    return subscribePushTaps();
   }, [signedIn]);
 
   if (!fontsLoaded || signedIn === null) return null;

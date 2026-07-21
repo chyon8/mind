@@ -80,9 +80,20 @@ export type BriefEvent =
   | { t: 'd'; c: string } // 조립 토큰
   | { t: 'done'; empty: boolean };
 
+export type BriefOptions = {
+  // 'push' = 아침 푸시가 만든 것, 'pull' = 유저가 화면에서 직접 만든 것 (기본).
+  // 원장에 남겨서 목록 화면이 "아침 브리핑"으로 구분 표시한다(유저 요청) — 새 표면 없이 태그만.
+  trigger?: 'pull' | 'push';
+  // 아침 버전은 관찰 한 줄(§4-F5 거울 정신)을 카드 앞에 붙인다. 여기서 문자열로 받아 조립 앞에 얹는다.
+  prelude?: string;
+};
+
 // 재료 → 각도 → 검색 → 조립(스트리밍). 각 단계 앞에서 status를 흘려 앱이 "지금 뭐 하는 중"을 보여준다.
 // 30~60초를 못 줄이는 대신, 진행이 보이면 체감이 확 낫다 (유저: "너무 오래 걸려").
-export async function* streamBrief(supabase: SupabaseClient): AsyncGenerator<BriefEvent> {
+export async function* streamBrief(
+  supabase: SupabaseClient,
+  opts: BriefOptions = {},
+): AsyncGenerator<BriefEvent> {
   yield { t: 'status', stage: 'reading' };
   const [material, prior] = await Promise.all([loadMaterial(supabase), recentBriefContext(supabase)]);
 
@@ -141,7 +152,10 @@ export async function* streamBrief(supabase: SupabaseClient): AsyncGenerator<Bri
     .join('\n\n');
 
   yield { t: 'status', stage: 'writing' };
-  let full = '';
+  // 관찰 한 줄이 있으면 카드 앞에 먼저 흘린다 — parseCards가 헤딩 이전 줄을 각주(제목 없음)로
+  // 렌더하므로 클라 변경 없이 "관찰"이 조용히 얹힌다.
+  let full = opts.prelude ? `${opts.prelude}\n\n` : '';
+  if (opts.prelude) yield { t: 'd', c: full };
   for await (const delta of chatStream(
     [
       { role: 'system', content: ASSEMBLE_SYS },
@@ -157,7 +171,7 @@ export async function* streamBrief(supabase: SupabaseClient): AsyncGenerator<Bri
   await supabase
     .schema('rudy')
     .from('utterances')
-    .insert({ surface: 'briefing', kind: 'discovery', text: full })
+    .insert({ surface: 'briefing', kind: 'discovery', text: full, trigger: opts.trigger ?? 'pull' })
     .then(undefined, (e) => console.warn('[brief] 원장 기록 실패', e));
 
   yield { t: 'done', empty: !full.trim() };
