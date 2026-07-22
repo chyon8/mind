@@ -116,6 +116,7 @@ export async function captureAnswer(
   message: string,
   log: (gate: string, passed: boolean, reason: string, detail: unknown) => void,
   onUsage?: UsageSink,
+  meta?: Record<string, string>,
 ): Promise<Target | null> {
   const since = new Date(Date.now() - CAPTURE_HOURS * 3_600_000).toISOString();
   const { data: pending } = await supabase
@@ -148,6 +149,7 @@ export async function captureAnswer(
     ],
     undefined,
     onUsage,
+    meta,
   );
   const isAnswer = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim())?.isAnswer === true;
   log('confidence', isAnswer, isAnswer ? '자기 진술 포착' : '질문의 답이 아님', {

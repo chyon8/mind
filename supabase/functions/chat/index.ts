@@ -137,7 +137,12 @@ const PERIODS = ['today', 'yesterday', 'week', 'month'];
 
 // recent = 최근 대화 몇 줄. "그거/이거" 같은 지시어를 여기서 실제 소재로 풀어야 검색이 조준된다.
 // 이게 없어서 "오늘 뭐 남겼지 → 그거 찾아봐"의 '그거'가 헛돌았다 (2026-07-21 유저 지적).
-async function searchQueries(question: string, recent: string, onUsage?: UsageSink): Promise<Extracted> {
+async function searchQueries(
+  question: string,
+  recent: string,
+  onUsage?: UsageSink,
+  meta?: Record<string, string>,
+): Promise<Extracted> {
   const user = recent ? `<최근대화>\n${recent}\n</최근대화>\n\n질문: ${question}` : question;
   const raw = await complete(
     [
@@ -146,6 +151,7 @@ async function searchQueries(question: string, recent: string, onUsage?: UsageSi
     ],
     FAST_MODEL,
     onUsage,
+    meta,
   );
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
   return {
@@ -261,6 +267,7 @@ Deno.serve(async (req) => {
     question,
     (g, p, r, d) => logGate(g, p, r, d, 'question'),
     cost.track('chat.question_judge', FAST_MODEL),
+    cost.meta('chat.question_judge'),
   ).catch((e) => {
     console.warn('[chat] 자기 진술 캡처 실패', e);
     return null;
@@ -280,6 +287,7 @@ Deno.serve(async (req) => {
     question,
     recent,
     cost.track('chat.rewrite', FAST_MODEL),
+    cost.meta('chat.rewrite'),
   ).catch((e) => {
     console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
     return { topics: [] as string[], type: null, period: null, intent: 'other', outward: 'no' as OutwardMode };
@@ -308,7 +316,12 @@ Deno.serve(async (req) => {
   let axes: Axis[] = [];
   if (intent === 'trend' && !topics.length && !answered && !period) {
     try {
-      axes = await findAxes(supabase, new Date(), cost.track('chat.axis_label', FAST_MODEL));
+      axes = await findAxes(
+        supabase,
+        new Date(),
+        cost.track('chat.axis_label', FAST_MODEL),
+        cost.meta('chat.axis_label'),
+      );
     } catch (e) {
       console.warn('[chat] 클러스터 실패 → 검색으로 폴백', e);
     }
@@ -509,7 +522,12 @@ Deno.serve(async (req) => {
         if (outward === 'go') push({ t: 'web' }); // 바깥을 뒤졌다 — 앱이 "바깥에서 찾아봤다"를 표시
         push({ t: 'cite', ids: citedIds });
         if (link && utteranceId) push({ t: 'link', fragmentId: link.id, utteranceId });
-        for await (const delta of chatStream(messages, CHAT_MODEL, cost.track('chat.answer', CHAT_MODEL))) {
+        for await (const delta of chatStream(
+          messages,
+          CHAT_MODEL,
+          cost.track('chat.answer', CHAT_MODEL),
+          cost.meta('chat.answer'),
+        )) {
           if (cancelled) break; // 중단 — OpenAI 스트림도 여기서 놓는다
           answer += delta;
           push({ t: 'd', c: delta });

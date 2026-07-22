@@ -4,9 +4,33 @@
 > **발견 브리핑(§10-7)은 RUDY-DISCOVERY.md가 유일한 기준 문서다 — 그 작업 전 반드시 읽는다.**
 > 마지막 갱신: 2026-07-22.
 
-## 🔖 새 세션 시작점 (2026-07-22 — 감쇠 재설계 + 비용 추적, 배포·기기 검증 대기)
+## 🔖 새 세션 시작점 (2026-07-22 밤 — 모닝 브리핑 버튼 + OpenAI 로그 가시성, 배포·검증 대기)
 
-**§10-8 아침 푸시는 유저 결정으로 폐기했다.** pg_cron이 `morning-briefing`을 못 부르고 있던 원인
+**usage 추적(SQL·chat·discovery 배포)은 유저가 이미 완료.** 이어서 두 가지 추가:
+
+1. **§10-8 아침 푸시를 수동 버튼으로 대체.** 발견 홈에 `모닝 브리핑 만들기` 버튼 신설(`새로 발견하기`
+   와 별개). 어제 관찰 한 줄 계산 + 하루 1회 상한 로직을 `discovery/observation.ts`(신규)로 뽑아
+   `morning-briefing`(cron, 폐기했지만 함수는 유저 지시로 남김)과 `discovery/index.ts`가 공유한다
+   — 상한이 갈라지면 나중에 크론을 다시 켜도 하루 2번 나가는 구멍이 생기기 때문. 버튼은 `list`에서
+   오늘자 `trigger='push'`가 있으면 미리 비활성화(왕복 없이), 서버도 같은 검사를 다시 한다(이중 방어
+   — 어제 12번 눌러서 $4.93 나온 게 이 버튼 자리였다).
+2. **OpenAI Platform 로그(platform.openai.com/logs)에서 호출별로 보이게.** `complete()`·`chatStream()`에
+   `store:true` + `metadata`(call_site·request_id·conversation_id, 문자열만·파편 원문 없음)를
+   추가(`_shared/usage.ts`의 `costTracker.meta()`). 이미 만든 5개 호출부 태그를 그대로 재사용.
+
+⚠️ **배포 필요 (이번 것만, 위 usage 배포는 이미 끝남):**
+```bash
+npx supabase functions deploy chat --project-ref ibqyqpmwqujcxlnkyizf
+npx supabase functions deploy discovery --project-ref ibqyqpmwqujcxlnkyizf
+npx supabase functions deploy morning-briefing --project-ref ibqyqpmwqujcxlnkyizf
+```
+SQL 변경 없음(observation.ts는 순수 코드 리팩터). 배포 후 확인: 발견 홈에서 `모닝 브리핑 만들기`
+누르면 정상 스트리밍되고 기록에 "아침" 배지로 뜨는지, 같은 날 두 번째로 누르면 비활성화/에러
+메시지가 뜨는지, `platform.openai.com/logs`에서 `call_site` 메타데이터로 필터링되는지.
+
+---
+
+**직전 배경 (§10-8 원래 문제):** pg_cron이 `morning-briefing`을 못 부르고 있던 원인
 (유력: `rudy-cron.sql`의 `<SERVICE_ROLE_KEY>` 미채움 → 401, pg_net은 "요청 보냄"만 성공으로
 쳐서 에러가 안 남음)을 진단하던 중, 유저가 **"아침 푸시도 cron 없애자 그냥 내가 수동으로 할래"**로
 결정. `select cron.unschedule('rudy-morning-briefing');`를 유저가 SQL Editor에서 실행 완료.

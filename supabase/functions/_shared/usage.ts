@@ -64,6 +64,13 @@ export function costTracker(supabase: SupabaseClient, ctx: { requestId: string; 
       if (cost == null) unknown = true;
       else total += cost;
     },
+    // OpenAI Platform 로그(platform.openai.com/logs)에서 이 호출을 찾을 수 있게 태그.
+    // complete()/chatStream()의 meta 인자로 그대로 넘긴다 — store:true를 같이 켠다.
+    meta: (callSite: string): Record<string, string> => ({
+      call_site: callSite,
+      request_id: ctx.requestId,
+      ...(ctx.conversationId ? { conversation_id: ctx.conversationId } : {}),
+    }),
     result: (): { usd: number | null; unknown: boolean } => ({
       usd: unknown && total === 0 ? null : total,
       unknown,

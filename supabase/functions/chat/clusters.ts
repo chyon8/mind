@@ -50,7 +50,11 @@ const LABEL_SYS = `각 묶음은 한 사람의 메모 저장소에서 의미가 
 
 JSON만 출력: {"labels":["...","..."]}  (묶음 순서 그대로, 개수 일치)`;
 
-async function label(groups: Frag[][], onUsage?: UsageSink): Promise<string[]> {
+async function label(
+  groups: Frag[][],
+  onUsage?: UsageSink,
+  meta?: Record<string, string>,
+): Promise<string[]> {
   const listing = groups
     .map((g, i) => `[${i + 1}]\n${g.map((f) => `- ${title(f)}`).join('\n')}`)
     .join('\n\n');
@@ -61,6 +65,7 @@ async function label(groups: Frag[][], onUsage?: UsageSink): Promise<string[]> {
     ],
     FAST_MODEL,
     onUsage,
+    meta,
   );
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
   const labels = Array.isArray(p?.labels) ? p.labels : [];
@@ -75,6 +80,7 @@ export async function findAxes(
   supabase: SupabaseClient,
   now = new Date(),
   onUsage?: UsageSink,
+  meta?: Record<string, string>,
 ): Promise<Axis[]> {
   const { data: edges, error } = await supabase
     .schema('rudy')
@@ -106,7 +112,7 @@ export async function findAxes(
   // 축 파편들에 대한 자기 진술을 끌어온다 (배열 겹침). 라벨링과 병렬 — 서로 무관하다.
   const axisIds = ranked.flatMap((a) => a.items.map((f) => f.id));
   const [labels, statements] = await Promise.all([
-    label(ranked.map((a) => a.items), onUsage),
+    label(ranked.map((a) => a.items), onUsage, meta),
     supabase
       .schema('rudy')
       .from('evidence')

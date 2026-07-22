@@ -105,7 +105,12 @@ export async function* streamBrief(
   const block =
     materialBlock(material) +
     (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
-  const angles = await anglesFromBlock(block, DISCOVERY_MODEL, cost.track('discovery.angles', DISCOVERY_MODEL));
+  const angles = await anglesFromBlock(
+    block,
+    DISCOVERY_MODEL,
+    cost.track('discovery.angles', DISCOVERY_MODEL),
+    cost.meta('discovery.angles'),
+  );
   if (!angles.length) {
     yield { t: 'done', empty: true }; // 볼 게 없으면 빈 브리핑 (§2-8)
     return;
@@ -167,6 +172,7 @@ export async function* streamBrief(
     ],
     DISCOVERY_MODEL,
     cost.track('discovery.assemble', DISCOVERY_MODEL),
+    cost.meta('discovery.assemble'),
   )) {
     full += delta;
     yield { t: 'd', c: delta };

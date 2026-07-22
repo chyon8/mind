@@ -46,17 +46,30 @@ export const DISCOVERY_MODEL = Deno.env.get('OPENAI_DISCOVERY_MODEL') ?? 'gpt-5.
 
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
+// store:true + metadata — OpenAI Platform 대시보드(platform.openai.com/logs)에서 호출 하나하나를
+// call_site·request_id로 찾아볼 수 있게 한다 (2026-07-22 유저 요청). metadata는 문자열 키/값만
+// 받는다(최대 16쌍, 키 64자·값 512자) — 파편 내용 원문은 안 넣는다, 어디서/무엇 때문인지 태그만.
+function storeOpts(meta?: Record<string, string>) {
+  return meta ? { store: true, metadata: meta } : {};
+}
+
 // 스트리밍 없는 단발 호출 (보조 작업용).
 export async function complete(
   messages: ChatMessage[],
   model = FAST_MODEL,
   onUsage?: UsageSink,
+  meta?: Record<string, string>,
 ): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
     // gpt-5 계열은 temperature 고정(1)만 받는다 — 그 외 모델만 0으로 재현성 확보
-    body: JSON.stringify({ model, messages, ...(model.startsWith('gpt-5') ? {} : { temperature: 0 }) }),
+    body: JSON.stringify({
+      model,
+      messages,
+      ...(model.startsWith('gpt-5') ? {} : { temperature: 0 }),
+      ...storeOpts(meta),
+    }),
   });
   if (!res.ok) throw new Error(`openai chat ${res.status}: ${await res.text()}`);
   const { choices, usage } = await res.json();
@@ -77,13 +90,20 @@ export async function* chatStream(
   messages: ChatMessage[],
   model = CHAT_MODEL,
   onUsage?: UsageSink,
+  meta?: Record<string, string>,
 ): AsyncGenerator<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
     // include_usage — 스트리밍은 원래 usage가 안 온다. 켜면 [DONE] 직전에 choices:[]·usage만
     // 있는 청크가 하나 더 온다 (본문 파싱엔 안 걸린다, delta.content가 없어서 그냥 스킵됨).
-    body: JSON.stringify({ model, stream: true, messages, stream_options: { include_usage: true } }),
+    body: JSON.stringify({
+      model,
+      stream: true,
+      messages,
+      stream_options: { include_usage: true },
+      ...storeOpts(meta),
+    }),
   });
   if (!res.ok || !res.body) throw new Error(`openai chat ${res.status}: ${await res.text()}`);
 

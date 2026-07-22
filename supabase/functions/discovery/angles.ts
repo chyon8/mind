@@ -80,6 +80,7 @@ export function anglesFromBlock(
   block: string,
   model = DISCOVERY_MODEL,
   onUsage?: UsageSink,
+  meta?: Record<string, string>,
 ): Promise<Angle[]> {
   return complete(
     [
@@ -88,6 +89,7 @@ export function anglesFromBlock(
     ],
     model,
     onUsage,
+    meta,
   ).then((raw) => {
     const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
     const angles = Array.isArray(p?.angles) ? p.angles : [];
