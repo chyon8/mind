@@ -15,6 +15,11 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
+// pg_net의 http_post는 기본 5초에 응답을 포기하고 연결을 끊는다. 브리핑은 30~60초짜리라
+// 그대로 두면 호출자가 먼저 끊고, 발견 화면에서 겪었던 것과 같은 이유로 작업이 중간에 죽는다.
+// → 응답은 즉시 돌려주고 실제 일은 격리에 남긴다 (discovery/index.ts와 같은 수법).
+const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+
 function logGate(passed: boolean, reason: string, detail: unknown) {
   supabase
     .schema('rudy')
@@ -78,7 +83,7 @@ function firstTitle(md: string): string {
   return m ? m[1].trim() : '오늘의 발견';
 }
 
-Deno.serve(async (req) => {
+async function run(): Promise<string> {
   try {
     // 하루 1회 상한 (§2-6 발화 예산). cron이 중복 호출되거나 재시도해도 두 번 안 보낸다.
     const { since } = kstRange('today');
@@ -93,7 +98,7 @@ Deno.serve(async (req) => {
       .limit(1);
     if (already?.length) {
       logGate(false, '오늘 이미 보냈다', { date: kstToday() });
-      return new Response(JSON.stringify({ skipped: 'already_sent_today' }), { status: 200 });
+      return 'already_sent_today';
     }
 
     const prelude = await observationLine();
@@ -107,15 +112,27 @@ Deno.serve(async (req) => {
 
     if (empty) {
       logGate(false, '볼 게 없다 — 빈 브리핑 (§2-8)', { hadObservation: !!prelude });
-      return new Response(JSON.stringify({ skipped: 'empty' }), { status: 200 });
+      return 'empty';
     }
 
     logGate(true, '발송', { hadObservation: !!prelude, chars: full.length });
     await sendPush('발견', firstTitle(full));
 
-    return new Response(JSON.stringify({ sent: true }), { status: 200 });
+    return 'sent';
   } catch (e) {
+    // 호출자(cron)는 이미 떠났다 — 실패는 로그와 gate_log에만 남는다.
     console.error('[morning-briefing]', e);
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500 });
+    logGate(false, '실패', { error: String(e) });
+    return 'error';
   }
+}
+
+Deno.serve(() => {
+  const work = run().then((r) => console.log('[morning-briefing]', r));
+  if (rt?.waitUntil) {
+    rt.waitUntil(work);
+    return new Response(JSON.stringify({ started: true }), { status: 202 });
+  }
+  // waitUntil이 없는 런타임(로컬 등)에선 예전처럼 끝까지 기다린다.
+  return work.then(() => new Response(JSON.stringify({ done: true }), { status: 200 }));
 });
