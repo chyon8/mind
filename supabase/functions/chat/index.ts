@@ -16,6 +16,7 @@ import {
 import { costTracker } from '../_shared/usage.ts';
 import { systemPrompt } from './prompt.ts';
 import { axesBlock, findAxes, MIN_SIM as CLUSTER_MIN_SIM, type Axis } from './clusters.ts';
+import { buildOrient, orientBlock, type OrientResult } from './orient.ts';
 import { captureAnswer, logQuestion, pickQuestion, questionSubject, type Target } from './intent.ts';
 import { kstDate, kstRange, kstToday, PERIOD_LABEL, type Period } from '../_shared/time.ts';
 import { exaSearch } from '../discovery/search.ts';
@@ -109,8 +110,13 @@ period — **특정 기간에 저장한 것**을 묻는 질문이면 그 기간,
 
 intent — 이 메시지가 무엇인지:
 - "trend": 최근 경향·관심사를 묻는 질문. "요즘 뭐에 꽂혔어?", "내 관심사가 뭐야"
+- "orient": **오늘 뭘 보면/하면 좋을지 판단을 구하는 질문.** "오늘 뭐 봐야 할까", "오늘 뭐 하면
+  좋을까", "놓치고 있는 거 있나", "내가 오늘 생각해야 할 거 있나". **어미가 핵심이다** —
+  "-할까/-하면 좋을까/-있나"처럼 앞으로의 판단을 구하면 orient다.
+  ⚠️ period와 헷갈리지 마라: "오늘 뭐 저장했지", "오늘은 무슨 생각을 했지"처럼 **과거형으로
+  이미 한 일을 묻는 건 period다**(사실 조회). orient는 지금부터 뭘 볼지 판단을 구하는 것.
 - "other": 그 외 전부. 구체적인 검색, 세상 지식 질문, 그리고 **질문이 아닌 것**
-  (진술·감상·인사·잡담). 묻지 않았으면 trend가 아니다.
+  (진술·감상·인사·잡담). 묻지 않았으면 trend·orient가 아니다.
 
 outward — 바깥(웹)에서 찾는 것과의 관계. **단, 이 사람의 세계(파편·프로젝트·관심)와 연결될 때만이다.**
 루디는 만능 검색기가 아니다 — 날씨·환율·일반 사실 조회는 바깥이 아니다("no").
@@ -160,7 +166,7 @@ async function searchQueries(
       : [],
     type: TYPES.includes(p?.type) ? p.type : null,
     period: PERIODS.includes(p?.period) ? (p.period as Period) : null,
-    intent: p?.intent === 'trend' ? 'trend' : 'other',
+    intent: p?.intent === 'trend' || p?.intent === 'orient' ? p.intent : 'other',
     outward: OUTWARD.includes(p?.outward) ? (p.outward as OutwardMode) : 'no',
   };
 }
@@ -347,6 +353,29 @@ Deno.serve(async (req) => {
   }
   const useAxes = axes.length > 0;
 
+  // ── orient 경로 (§10-9, 2026-07-22) — "오늘 뭐 봐야 할까" 류. period(사실 조회)와 다르다 —
+  // 판단을 구하는 질문이라 저장소 전체에서 축×흐림 교집합을 본다. axes와 배타적(같은 intent 필드).
+  let orient: OrientResult | null = null;
+  if (intent === 'orient' && !topics.length && !answered && !period) {
+    try {
+      orient = await buildOrient(
+        supabase,
+        new Date(),
+        cost.track('chat.orient', FAST_MODEL),
+        cost.meta('chat.orient'),
+      );
+    } catch (e) {
+      console.warn('[chat] orient 실패 → 근거 없이 진행', e);
+    }
+    logGate(
+      'orient',
+      !!orient,
+      orient ? '볼 것 있음' : '볼 것 없음',
+      { axisPicks: orient?.axisPicks.length ?? 0, projectPicks: orient?.projectPicks.length ?? 0 },
+      'orient',
+    );
+  }
+
   // 주제어가 나오면 **그것만** 쓴다. 원문을 섞으면 메타 표현이 다시 검색을 오염시킨다
   // (실측: 원문을 섞으면 "링크 던지면 요약…"이 0.535로 1위, 빼면 "음성으로 녹음" 0.511이 1위).
   // 축이 안 서는 질문만 원문으로 검색해 폴백한다 — 채팅에서 침묵은 답이 아니다.
@@ -376,6 +405,17 @@ Deno.serve(async (req) => {
     citedIds = inPeriod.map((f) => f.id);
     evidence = inPeriod.map((f) => fragBlock(f, [])).join('\n');
     periodNote = `${PERIOD_LABEL[period]}(${since.slice(0, 10)} 이후) 저장한 파편 ${inPeriod.length}개 — 검색 결과가 아니라 전부다`;
+  } else if (intent === 'orient') {
+    // orient는 검색으로 폴백하지 않는다 — "오늘 뭐 봐야 할까"는 메타 질문이라 원문으로
+    // 검색하면 3차 사고(질문 문장이 메타 표현으로 검색을 오염시킴)가 재현된다.
+    // 볼 게 없으면(orient===null) 근거 없이 진행 — 모델이 "지금은 딱히 없다"고 정직하게 말한다.
+    if (orient) {
+      citedIds = [
+        ...orient.axisPicks.flatMap((a) => a.items.map((i) => i.id)),
+        ...orient.projectPicks.flatMap((p) => p.items.map((i) => i.id)),
+      ];
+      evidence = orientBlock(orient);
+    }
   } else if (useAxes) {
     // 축 자체가 근거다. 검색도, 자발적 연결도 안 돈다 — 이 답변은 이미 통째로
     // "묻지 않은 것을 꺼내는" 일이라, 거기 또 연결을 얹으면 같은 동작의 반복이다.
@@ -465,9 +505,11 @@ Deno.serve(async (req) => {
   const context = [
     period
       ? `<기간>\n${periodNote}\n${evidence || '(이 기간에 저장한 것 없음)'}\n</기간>`
-      : useAxes
-        ? `<축>\n${evidence}\n</축>`
-        : `<근거>\n${evidence || '(없음)'}\n</근거>`,
+      : intent === 'orient'
+        ? `<오늘>\n${orient ? evidence : '오늘 딱히 다시 볼 만한 게 없다.'}\n</오늘>`
+        : useAxes
+          ? `<축>\n${evidence}\n</축>`
+          : `<근거>\n${evidence || '(없음)'}\n</근거>`,
     web ? `<바깥>\n${web}\n</바깥>` : '',
     // 'ask' = 바깥이 도움될 수 있지만 안 뒤졌다. 억지 말고 도움되면 끝에 "바깥에서 찾아볼까?" 묻게.
     outward === 'ask' ? `<바깥가능>\n바깥에서 찾으면 도움될 수 있다. 억지로 말고, 정말 도움되겠으면 답 끝에 짧게 "바깥에서 찾아볼까?"라고만 물어라.\n</바깥가능>` : '',

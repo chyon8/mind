@@ -294,6 +294,23 @@ export async function setFragmentProjects(fragmentId: string, projectIds: string
   if (error) throw error;
 }
 
+// 파편 여러 개의 프로젝트 소속을 한 번에 (발견 던지기 칩 복원용, PLAN §3.3 확장)
+export async function fetchFragmentProjectMap(
+  fragmentIds: string[],
+): Promise<Record<string, string[]>> {
+  if (!isConfigured || fragmentIds.length === 0) return {};
+  const { data, error } = await supabase()
+    .from('fragment_projects')
+    .select('fragment_id, project_id')
+    .in('fragment_id', fragmentIds);
+  if (error) throw error;
+  const map: Record<string, string[]> = {};
+  for (const row of (data ?? []) as { fragment_id: string; project_id: string }[]) {
+    (map[row.fragment_id] ??= []).push(row.project_id);
+  }
+  return map;
+}
+
 // ============ 회상 (SPEC §5의 없어진 반쪽) ============
 
 const LET_GO_COOLDOWN_DAYS = 60;
@@ -427,11 +444,13 @@ export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
 
 // 이미 파편으로 던져진 내용들 — 발견 카드의 "던졌다" 상태를 화면 재진입 후에도 복원하는 데 쓴다.
 // content가 정확히 일치하는 것만 찾는다(던지기는 content=제목을 그대로 넣으므로 충분).
-export async function existingFragmentContents(contents: string[]): Promise<string[]> {
+export async function existingFragmentContents(
+  contents: string[],
+): Promise<{ id: string; content: string }[]> {
   if (!isConfigured || contents.length === 0) return [];
-  const { data, error } = await supabase().from('fragments').select('content').in('content', contents);
+  const { data, error } = await supabase().from('fragments').select('id, content').in('content', contents);
   if (error) throw error;
-  return (data ?? []).map((r) => r.content as string);
+  return (data ?? []) as { id: string; content: string }[];
 }
 
 // 구해냈다 — 선명도 100% 복귀 + 중요도 한 칸. 회상에서 "기억하기"를 누를 때만.

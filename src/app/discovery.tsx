@@ -6,8 +6,16 @@ import { formatCost } from '@/lib/cost';
 import { dayKey, feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import { type Briefing, deleteBriefing, fetchBriefings, streamBriefing, type BriefStage } from '@/lib/rudy';
-import { existingFragmentContents, insertFragment } from '@/lib/supabase';
+import {
+  existingFragmentContents,
+  fetchFragmentProjectMap,
+  fetchProjects,
+  insertFragment,
+  setFragmentProjects,
+  touchFragment,
+} from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import type { Project } from '@/lib/types';
 
 // 발견 브리핑 (RUDY.md §4-E · §7-4). 당기는 표면 — 내가 열 때만 바깥을 물어온다.
 //
@@ -74,11 +82,19 @@ function Card({
   body,
   thrown,
   onThrow,
+  projects,
+  assignedIds,
+  onToggleProject,
 }: {
   title: string;
   body: string;
   thrown: boolean;
   onThrow: () => void;
+  // 던진 뒤에만 펼쳐지는 프로젝트 칩 (유저 요청, 2026-07-22) — 던지기 자체는 마찰 0 유지,
+  // 프로젝트 지정은 완전히 선택. projects가 빈 배열이면 칩 자체가 안 뜬다(지을 곳이 없다).
+  projects: Project[];
+  assignedIds: string[];
+  onToggleProject: (projectId: string) => void;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -109,6 +125,24 @@ function Card({
           {thrown ? '던졌다 ✓' : '↑ 던지기'}
         </Text>
       </Pressable>
+      {thrown && projects.length > 0 && (
+        <View style={styles.projectRow}>
+          {projects.map((p) => {
+            const active = assignedIds.includes(p.id);
+            return (
+              <Pressable
+                key={p.id}
+                onPress={() => onToggleProject(p.id)}
+                style={[styles.projectChip, active && styles.projectChipActive]}
+              >
+                <Text style={[styles.projectChipText, active && styles.projectChipTextActive]}>
+                  {p.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -177,15 +211,56 @@ export default function Discovery() {
       .catch(() => {});
   }, []);
 
+  // 프로젝트 칩(던진 뒤 지정용) — 목록 한 번만 읽어둔다
+  const [projects, setProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    fetchProjects()
+      .then((ps) => alive.current && setProjects(ps))
+      .catch(() => {});
+  }, []);
+
   // 던지기(§4-E4) 상태. 화면을 나갔다 와도 이미 던진 카드는 "던졌다"로 뜨게 DB에서 복원한다.
+  // title → fragment id (프로젝트 칩을 누르려면 어느 파편인지 알아야 한다).
   const [thrown, setThrown] = useState<Set<string>>(new Set());
+  const [thrownIds, setThrownIds] = useState<Record<string, string>>({});
+  const [cardProjects, setCardProjects] = useState<Record<string, string[]>>({});
   const syncThrown = useCallback((text: string) => {
     const titles = parseCards(text).map((c) => c.title).filter(Boolean);
     if (!titles.length) return;
     existingFragmentContents(titles)
-      .then((hit) => alive.current && setThrown((s) => new Set([...s, ...hit])))
+      .then(async (hit) => {
+        if (!alive.current || !hit.length) return;
+        setThrown((s) => new Set([...s, ...hit.map((h) => h.content)]));
+        setThrownIds((prev) => ({
+          ...prev,
+          ...Object.fromEntries(hit.map((h) => [h.content, h.id])),
+        }));
+        // 이미 지정돼 있던 프로젝트가 있으면 칩 활성 상태로 복원
+        const byFrag = await fetchFragmentProjectMap(hit.map((h) => h.id));
+        if (!alive.current) return;
+        setCardProjects((prev) => ({
+          ...prev,
+          ...Object.fromEntries(hit.map((h) => [h.content, byFrag[h.id] ?? []])),
+        }));
+      })
       .catch(() => {});
   }, []);
+
+  const toggleCardProject = useCallback(
+    (title: string, projectId: string) => {
+      const id = thrownIds[title];
+      if (!id) return;
+      const current = cardProjects[title] ?? [];
+      const next = current.includes(projectId)
+        ? current.filter((pid) => pid !== projectId)
+        : [...current, projectId];
+      setCardProjects((prev) => ({ ...prev, [title]: next })); // 낙관적 반영
+      setFragmentProjects(id, next)
+        .then(() => touchFragment(id))
+        .catch(() => setCardProjects((prev) => ({ ...prev, [title]: current }))); // 실패하면 되돌린다
+    },
+    [thrownIds, cardProjects],
+  );
 
   // 새 브리핑 생성 (스트리밍). ⚠️ signal을 안 넘긴다 — 나가도 서버가 끝까지 만들어 저장하게.
   // morning=true — '모닝 브리핑' 버튼. 관찰 한 줄이 붙고 trigger='push'로 남는다(하루 1회,
@@ -269,13 +344,19 @@ export default function Discovery() {
   const throwCard = useCallback((title: string, body: string) => {
     setThrown((s) => new Set(s).add(title));
     const note = body.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1 ($2)').trim() || null;
-    insertFragment({ content: title, type: 'text', note }).catch(() =>
-      setThrown((s) => {
-        const n = new Set(s);
-        n.delete(title);
-        return n;
-      }),
-    );
+    insertFragment({ content: title, type: 'text', note })
+      .then((fr) => {
+        // id를 잡아둬야 던진 뒤 프로젝트 칩을 누를 수 있다 (유저 요청, 2026-07-22)
+        setThrownIds((prev) => ({ ...prev, [title]: fr.id }));
+        setCardProjects((prev) => ({ ...prev, [title]: [] }));
+      })
+      .catch(() =>
+        setThrown((s) => {
+          const n = new Set(s);
+          n.delete(title);
+          return n;
+        }),
+      );
   }, []);
 
   const cards = mode === 'result' && kind !== 'empty' && kind !== 'error' ? parseCards(md) : [];
@@ -364,6 +445,9 @@ export default function Discovery() {
             body={c.body}
             thrown={thrown.has(c.title)}
             onThrow={() => throwCard(c.title, c.body)}
+            projects={projects}
+            assignedIds={cardProjects[c.title] ?? []}
+            onToggleProject={(pid) => toggleCardProject(c.title, pid)}
           />
         ))}
 
@@ -427,6 +511,18 @@ const styles = StyleSheet.create({
   },
   throwText: { ...type.bodySm, color: colors.body, fontFamily: fonts.sansMedium },
   thrownText: { color: colors.faint },
+  // 던진 뒤 펼쳐지는 프로젝트 칩 (유저 요청, 2026-07-22) — fragment/[id].tsx의 프로젝트 칩과 같은 결
+  projectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xxs, marginTop: spacing.xs },
+  projectChip: {
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingVertical: spacing.xxs,
+    paddingHorizontal: spacing.sm,
+  },
+  projectChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  projectChipText: { ...type.bodySm, color: colors.body, fontFamily: fonts.sans },
+  projectChipTextActive: { color: colors.onInk },
 
   stepper: { gap: spacing.md, paddingTop: spacing.xl, paddingHorizontal: spacing.sm },
   step: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

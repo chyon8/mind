@@ -62,19 +62,21 @@ export function cluster(edges: Edge[], minAvg: number, minSize = 3): string[][] 
   return [...groups.values()].filter((g) => g.length >= minSize);
 }
 
-// vividness.ts와 같은 감쇠 법칙. 앱의 원천은 vividness.ts다 —
-// 여기선 순위 가중에만 쓴다(§6-2: 흐려진 증거는 약하게 반영). 선명도를 저장하지는 않는다.
+// vividness.ts와 같은 감쇠 법칙이어야 한다 — 앱의 원천은 vividness.ts다, 여기는 복제본.
+// ⚠️ 2026-07-22 감쇠 재설계([3,14]/[14,45]·floor .25 → [1,7]/[7,21]·floor .15) 때 이 복제본을
+// 놓쳤었다 — 축·orient 순위가 며칠간 예전 곡선으로 계산됐을 것. 두 값이 갈라지면 조용히 갈라져서
+// 다음에 또 놓치기 쉽다. 손으로 고칠 땐 vividness.ts와 나란히 봐라.
 export function vividness(
   fr: { last_touched_at: string; tier: string; touch_count: number },
   now = new Date(),
 ): number {
   if (fr.tier === 'pinned') return 1;
   const tier = fr.tier === 'normal' && fr.touch_count >= 2 ? 'important' : fr.tier;
-  const [start, floor] = tier === 'important' ? [14, 45] : [3, 14];
+  const [start, floor] = tier === 'important' ? [7, 21] : [1, 7];
   const days = Math.max(0, (now.getTime() - new Date(fr.last_touched_at).getTime()) / 86_400_000);
   if (days <= start) return 1;
-  if (days >= floor) return 0.25;
-  return 1 - 0.75 * ((days - start) / (floor - start));
+  if (days >= floor) return 0.15;
+  return 1 - 0.85 * ((days - start) / (floor - start));
 }
 
 export type Shape = {
