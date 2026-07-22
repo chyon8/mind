@@ -6,6 +6,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { streamBrief } from './brief.ts';
+import { alreadyMorningToday, observationLine } from './observation.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -22,8 +23,12 @@ const line = (o: unknown) => new TextEncoder().encode(`${JSON.stringify(o)}\n`);
 // Supabase Edge의 백그라운드 태스크 — 요청이 끝나도(클라 끊겨도) 이 프로미스가 끝날 때까지 격리를 산다.
 const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
 
-Deno.serve((req) => {
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+
+  // morning=true — 파편 상세가 아니라 발견 홈의 '모닝 브리핑' 버튼(§10-8, cron 폐기 후 유저가
+  // 수동으로 대체). trigger='push'로 남아 기록에 "아침" 배지가 붙고, 관찰 한 줄이 앞에 붙는다.
+  const { morning } = await req.json().catch(() => ({ morning: false }));
 
   // ⚠️ 클라가 끊겨도(앱 종료·화면 이탈) streamBrief를 **끝까지** 돌려 원장에 저장한다.
   // 그래서 "생성 중 나가면 유실"이 없다. enqueue만 클라가 살아 있을 때 하고, 루프는 계속 돈다.
@@ -42,7 +47,15 @@ Deno.serve((req) => {
         }
       };
       try {
-        for await (const ev of streamBrief(supabase)) push(ev);
+        // 하루 1회 상한 — cron과 같은 검사(observation.ts). 버튼 연타·중복 탭 방어.
+        if (morning && (await alreadyMorningToday(supabase))) {
+          push({ t: 'error', message: '오늘 이미 아침 브리핑을 만들었다' });
+          return;
+        }
+        const opts = morning
+          ? { trigger: 'push' as const, prelude: (await observationLine(supabase)) || undefined }
+          : {};
+        for await (const ev of streamBrief(supabase, opts)) push(ev);
       } catch (e) {
         console.error('[discovery]', e);
         push({ t: 'error', message: String(e) });

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatCost } from '@/lib/cost';
-import { feedDateLabel, formatTime } from '@/lib/dates';
+import { dayKey, feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import { type Briefing, deleteBriefing, fetchBriefings, streamBriefing, type BriefStage } from '@/lib/rudy';
 import { existingFragmentContents, insertFragment } from '@/lib/supabase';
@@ -188,44 +188,57 @@ export default function Discovery() {
   }, []);
 
   // 새 브리핑 생성 (스트리밍). ⚠️ signal을 안 넘긴다 — 나가도 서버가 끝까지 만들어 저장하게.
-  const generate = useCallback(() => {
-    if (gen) return; // 이미 생성 중이면 무시 (버튼 잠금)
-    setGen(true);
-    setKind('live');
-    setStage('reading');
-    setCount(undefined);
-    setMd('');
-    setError('');
-    setMode('result');
+  // morning=true — '모닝 브리핑' 버튼. 관찰 한 줄이 붙고 trigger='push'로 남는다(하루 1회,
+  // 서버가 다시 확인한다 — observation.ts를 cron과 공유).
+  const generate = useCallback(
+    (morning = false) => {
+      if (gen) return; // 이미 생성 중이면 무시 (버튼 잠금)
+      setGen(true);
+      setKind('live');
+      setStage('reading');
+      setCount(undefined);
+      setMd('');
+      setError('');
+      setMode('result');
 
-    streamBriefing({
-      onStage: (s, n) => {
-        if (!alive.current) return;
-        setStage(s);
-        setCount(n);
-      },
-      // md는 화면을 나가도 갱신한다(돌아오면 최신). phase(모드)는 안 건드린다 — 유저가 목록에 있으면 목록 유지.
-      onToken: (t) => alive.current && setMd((prev) => prev + t),
-    })
-      .then(({ empty }) => {
-        if (alive.current) {
-          setGen(false);
-          setKind(empty ? 'empty' : 'live');
-          setMd((cur) => {
-            syncThrown(cur); // 완성 시 이미 던진 게 있으면 상태 복원
-            return cur;
-          });
-        }
-        refreshList(); // 완성분이 원장에 저장됐다 — 목록 갱신
-      })
-      .catch((e) => {
-        if (alive.current) {
-          setGen(false);
-          setError(String(e?.message ?? e));
-          setKind('error');
-        }
-      });
-  }, [gen, refreshList, syncThrown]);
+      streamBriefing(
+        {
+          onStage: (s, n) => {
+            if (!alive.current) return;
+            setStage(s);
+            setCount(n);
+          },
+          // md는 화면을 나가도 갱신한다(돌아오면 최신). phase(모드)는 안 건드린다 — 유저가 목록에 있으면 목록 유지.
+          onToken: (t) => alive.current && setMd((prev) => prev + t),
+        },
+        undefined,
+        morning,
+      )
+        .then(({ empty }) => {
+          if (alive.current) {
+            setGen(false);
+            setKind(empty ? 'empty' : 'live');
+            setMd((cur) => {
+              syncThrown(cur); // 완성 시 이미 던진 게 있으면 상태 복원
+              return cur;
+            });
+          }
+          refreshList(); // 완성분이 원장에 저장됐다 — 목록 갱신
+        })
+        .catch((e) => {
+          if (alive.current) {
+            setGen(false);
+            setError(String(e?.message ?? e));
+            setKind('error');
+          }
+        });
+    },
+    [gen, refreshList, syncThrown],
+  );
+
+  // 오늘 이미 모닝 브리핑을 만들었는지 — 목록에서 바로 판단(왕복 없음). 서버도 다시 확인하지만
+  // 버튼 단계에서 미리 보여주면 눌러서 헛수고하는 일이 없다.
+  const morningDoneToday = list.some((b) => b.trigger === 'push' && dayKey(b.created_at) === dayKey(new Date().toISOString()));
 
   // 열 때: 기록 목록을 읽어 보여준다. 바로 생성하지 않는다.
   useEffect(() => {
@@ -292,12 +305,25 @@ export default function Discovery() {
           <>
             <Pressable
               style={[styles.generate, gen && styles.generateOff]}
-              onPress={generate}
+              onPress={() => generate()}
               disabled={gen}
             >
               <Text style={styles.generateText}>{gen ? '생성 중…' : '새로 발견하기'}</Text>
               <Text style={styles.generateSub}>
                 {gen ? '다 되면 기록에 얹힌다 · 나가도 계속 돈다' : '바깥에서 물어온다 · 30초쯤'}
+              </Text>
+            </Pressable>
+            {/* 모닝 브리핑 (§10-8, cron 폐기 후 수동 대체) — 하루 1회, 관찰 한 줄 + "아침" 배지 */}
+            <Pressable
+              style={[styles.morning, (gen || morningDoneToday) && styles.generateOff]}
+              onPress={() => generate(true)}
+              disabled={gen || morningDoneToday}
+            >
+              <Text style={styles.morningText}>
+                {morningDoneToday ? '오늘 모닝 브리핑 완료' : '모닝 브리핑 만들기'}
+              </Text>
+              <Text style={styles.generateSub}>
+                {morningDoneToday ? '내일 다시' : '어제 뭘 남겼는지 한 줄 + 발견 · 하루 1번'}
               </Text>
             </Pressable>
             {list.length === 0 && <Text style={styles.emptyList}>아직 기록이 없다. 위 버튼으로 시작.</Text>}
@@ -438,6 +464,18 @@ const styles = StyleSheet.create({
     gap: spacing.xxs,
   },
   generateOff: { opacity: 0.6 },
+  morning: {
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: rounded.md ?? 14,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    gap: spacing.xxs,
+    marginTop: spacing.sm,
+  },
+  morningText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansSemiBold },
   generateText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansSemiBold },
   generateSub: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   emptyList: { ...type.bodyMd, color: colors.faint, fontFamily: fonts.sans, textAlign: 'center', paddingTop: spacing.lg },

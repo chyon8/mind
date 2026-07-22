@@ -47,9 +47,13 @@ type BriefHandlers = {
   onToken: (text: string) => void;
 };
 
+// morning=true — 발견 홈의 '모닝 브리핑' 버튼(§10-8). 하루 1회, 관찰 한 줄이 앞에 붙고
+// 기록 목록에 "아침" 배지로 뜬다. 서버가 상한을 다시 확인하지만(observation.ts), 버튼도
+// 오늘 이미 있으면 눌러도 헛수고임을 미리 보여준다(discovery.tsx).
 export async function streamBriefing(
   h: BriefHandlers,
   signal?: AbortSignal,
+  morning = false,
 ): Promise<{ empty: boolean; costUsd: number | null }> {
   if (!isConfigured) throw new Error('Supabase 미설정');
   const { data } = await supabase().auth.getSession();
@@ -59,7 +63,7 @@ export async function streamBriefing(
   const res = await streamingFetch(DISCOVERY_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify({ morning }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`discovery ${res.status}`);
