@@ -1,7 +1,12 @@
 // OpenAI 임베딩 호출 — embed(웹훅) · embed-query · chat이 공유한다.
 // 키는 Edge Function 시크릿. 앱에 절대 내장하지 않는다 (RUDY-BUILD.md 0).
 
+import type { Usage } from './usage.ts';
+
 const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY')!;
+// 호출부가 원하면 usage(토큰 수)를 받는다 — 비용 계산·원장 기록은 _shared/usage.ts 몫.
+// 여긴 OpenAI와의 통신만 안다 (단일 책임).
+export type UsageSink = (u: Usage) => void;
 export const EMBED_MODEL = 'text-embedding-3-large'; // 3072차원 (유저 지시: 최상 퀄리티)
 
 // 단일 텍스트 → 임베딩 벡터. 빈 문자열은 호출 전에 걸러야 한다.
@@ -42,7 +47,11 @@ export const DISCOVERY_MODEL = Deno.env.get('OPENAI_DISCOVERY_MODEL') ?? 'gpt-5.
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 // 스트리밍 없는 단발 호출 (보조 작업용).
-export async function complete(messages: ChatMessage[], model = FAST_MODEL): Promise<string> {
+export async function complete(
+  messages: ChatMessage[],
+  model = FAST_MODEL,
+  onUsage?: UsageSink,
+): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
@@ -50,7 +59,14 @@ export async function complete(messages: ChatMessage[], model = FAST_MODEL): Pro
     body: JSON.stringify({ model, messages, ...(model.startsWith('gpt-5') ? {} : { temperature: 0 }) }),
   });
   if (!res.ok) throw new Error(`openai chat ${res.status}: ${await res.text()}`);
-  const { choices } = await res.json();
+  const { choices, usage } = await res.json();
+  if (usage) {
+    onUsage?.({
+      promptTokens: usage.prompt_tokens ?? 0,
+      completionTokens: usage.completion_tokens ?? 0,
+      cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+    });
+  }
   return (choices?.[0]?.message?.content ?? '').trim();
 }
 
@@ -60,11 +76,14 @@ export async function complete(messages: ChatMessage[], model = FAST_MODEL): Pro
 export async function* chatStream(
   messages: ChatMessage[],
   model = CHAT_MODEL,
+  onUsage?: UsageSink,
 ): AsyncGenerator<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, stream: true, messages }),
+    // include_usage — 스트리밍은 원래 usage가 안 온다. 켜면 [DONE] 직전에 choices:[]·usage만
+    // 있는 청크가 하나 더 온다 (본문 파싱엔 안 걸린다, delta.content가 없어서 그냥 스킵됨).
+    body: JSON.stringify({ model, stream: true, messages, stream_options: { include_usage: true } }),
   });
   if (!res.ok || !res.body) throw new Error(`openai chat ${res.status}: ${await res.text()}`);
 
@@ -76,7 +95,15 @@ export async function* chatStream(
     if (!line.startsWith('data: ')) return undefined;
     const payload = line.slice(6).trim();
     if (payload === '[DONE]') return null;
-    return JSON.parse(payload).choices?.[0]?.delta?.content ?? undefined;
+    const json = JSON.parse(payload);
+    if (json.usage) {
+      onUsage?.({
+        promptTokens: json.usage.prompt_tokens ?? 0,
+        completionTokens: json.usage.completion_tokens ?? 0,
+        cachedTokens: json.usage.prompt_tokens_details?.cached_tokens ?? 0,
+      });
+    }
+    return json.choices?.[0]?.delta?.content ?? undefined;
   }
 
   while (true) {

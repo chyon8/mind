@@ -143,7 +143,7 @@ mind/                         # = 저장소 루트 = Expo 앱 루트
 
 - **조회**: `fragments`를 `created_at desc`로 페이지당 100개 range 페이징.
   필터: All(전체) / Inbox(매핑 없는 파편) / 프로젝트(`fragment_projects`로 조인).
-  기본 조회는 `archived = false`만. 감쇠로 바닥(25%)에 도달한 파편은 archived가 아니므로
+  기본 조회는 `archived = false`만. 감쇠로 바닥(15%)에 도달한 파편은 archived가 아니므로
   리스트에 계속 남는다 (SPEC §5) — 감쇠와 무덤은 무관하다.
 - **무덤(archived)**: 자동으로 묻히는 일은 없다. 사용자가 상세 화면에서 수동으로 "묻기" →
   모든 기본 뷰에서 사라지고, 사이드바의 **무덤**으로만 열람.
@@ -151,8 +151,10 @@ mind/                         # = 저장소 루트 = Expo 앱 루트
 - **던지기(저장)**: 로컬에서 타입 판별 → insert → 성공 시 목록 맨 위에 낙관적 반영.
   **던지기는 언제나 "지금"이다** — 데일리 뷰에서 과거 날짜를 보고 있어도 오늘로 들어간다.
   `created_at`은 "실제로 떠오른 순간"이라는 사실이고, 그 진실을 흐리지 않는다.
-- **touch**: 상세 화면 mount 시 `last_touched_at = now()` patch — 유일한 갱신 시점.
-  리스트에서 스쳐 지나가는 것은 touch가 아니다.
+- **touch** (2026-07-22 확정, SPEC §5): 내용·덧붙임 수정, **프로젝트 지정/해제**, 회상의
+  `기억하기`, 파편 상세의 `기억하기` 버튼(흐려진 것에만 노출). **tier 변경과 상세를 여는
+  것만은 touch가 아니다** — tier는 그 자체로 감쇠 속도를 바꾸는 신호라 중복이고,
+  리스트에서 스쳐 지나가는 것은 당연히 아니다.
 - **어젠다 뷰**: 피드와 동일 데이터를 기기 로컬 타임존 기준 날짜로 그룹핑만 다르게.
 
 ### 3.3 파편 ↔ 프로젝트 매핑 (다대다)
@@ -183,10 +185,10 @@ trim 후 위에서부터 첫 매치:
 opacity(lastTouchedAt, tier, now):
   pinned                        → 1.0
   d = (now - lastTouchedAt) 일 단위 (음수면 0으로 clamp — 시계 오차 방어)
-  (start, floor) = normal: (7, 30) / important: (30, 90)
+  (start, floor) = normal: (1, 7) / important: (7, 21)   ← SPEC §5 (2026-07-22 개정)
   d ≤ start                     → 1.0
-  d ≥ floor                     → 0.25
-  그 외                          → 1.0 − 0.75 × (d − start) / (floor − start)
+  d ≥ floor                     → 0.15
+  그 외                          → 1.0 − 0.85 × (d − start) / (floor − start)
 ```
 
 - DB에 저장하지 않는다. 카드/행 렌더링 시점에 계산해 opacity로 적용.
@@ -377,13 +379,14 @@ Geist가 실제로 그리는 것: UI 라벨, 숫자(어젠다 날짜 큰 숫자 
    → verify: schema.sql 적용 후 curl(anon)으로 조회 시 차단, 로그인 토큰으로 조회 성공.
      시뮬레이터에서 앱 부팅 성공.
 2. 모델 타입 + typeDetector + vividness + 유닛 테스트 (jest-expo)
-   → verify: 판별 규칙 표·감쇠 경계값(3/14/45일, 음수, pinned) 테스트 전부 통과.
+   → verify: 판별 규칙 표·감쇠 경계값(1/7/21일, 음수, pinned) 테스트 전부 통과.
 3. 빠른 입력 + 타임라인 피드 (선명도 시각화 포함)
    → verify: 시뮬레이터에서 저장 → 피드 최상단 표시. DB에서 last_touched_at을 과거로 조작 → opacity 감쇠 확인.
 4. expo-share-intent 통합 (prebuild + dev client, 실기기 필수)
    → verify: 실기기에서 Safari URL·사진·선택 텍스트 각각 2탭 저장 → 피드에 등장.
 5. 파편 상세 (touch / tier / 프로젝트 / 묻기 / 삭제)
-   → verify: 바닥(25%) 파편을 열면 피드 복귀 시 100%. tier 변경이 감쇠 커브에 반영.
+   → verify: 바닥(15%) 파편은 열어도 그대로다(보는 건 touch 아님). `기억하기`를 누르거나
+     프로젝트를 지정하면 100% 복귀. tier만 바꾸면 감쇠 커브만 바뀌고 시계는 안 건드린다.
      묻기 → 기본 피드에서 사라지고 무덤 칩에서 보임, 파내기 → 복귀.
 6. 어젠다 뷰
    → verify: 자정 경계 파편이 로컬 타임존 기준 올바른 날짜 섹션에 표시.

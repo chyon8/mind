@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { formatCost } from '@/lib/cost';
 import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import { type Briefing, deleteBriefing, fetchBriefings, streamBriefing, type BriefStage } from '@/lib/rudy';
@@ -313,6 +314,8 @@ export default function Discovery() {
                     <Text style={styles.histDate}>
                       {feedDateLabel(b.created_at)} · {formatTime(b.created_at)}
                     </Text>
+                    {/* 이 브리핑이 태운 gpt-5.5 비용 (2026-07-22 유저 요청) */}
+                    <Text style={styles.histCost}>{formatCost(b.cost_usd)}</Text>
                   </View>
                   <Text style={styles.histSnip} numberOfLines={1}>
                     {firstTitle(b.text)}
@@ -457,6 +460,7 @@ const styles = StyleSheet.create({
   },
   pushBadgeText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sansMedium, fontSize: 10 },
   histDate: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono },
+  histCost: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, marginLeft: spacing.xxs },
   histSnip: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
   histDel: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xxs },
   histDelText: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans },

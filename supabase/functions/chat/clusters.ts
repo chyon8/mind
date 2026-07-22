@@ -6,7 +6,7 @@
 //   3. 시간 모양을 안다 — "그 축, 3주째 조용해"를 말할 수 있다. 검색은 없는 것을 영원히 못 말한다.
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { complete } from '../_shared/openai.ts';
+import { complete, FAST_MODEL, type UsageSink } from '../_shared/openai.ts';
 import { cluster, shape, vividness, type Edge, type Shape } from '../_shared/cluster.ts';
 import { kstDate } from '../_shared/time.ts';
 
@@ -50,14 +50,18 @@ const LABEL_SYS = `각 묶음은 한 사람의 메모 저장소에서 의미가 
 
 JSON만 출력: {"labels":["...","..."]}  (묶음 순서 그대로, 개수 일치)`;
 
-async function label(groups: Frag[][]): Promise<string[]> {
+async function label(groups: Frag[][], onUsage?: UsageSink): Promise<string[]> {
   const listing = groups
     .map((g, i) => `[${i + 1}]\n${g.map((f) => `- ${title(f)}`).join('\n')}`)
     .join('\n\n');
-  const raw = await complete([
-    { role: 'system', content: LABEL_SYS },
-    { role: 'user', content: listing },
-  ]);
+  const raw = await complete(
+    [
+      { role: 'system', content: LABEL_SYS },
+      { role: 'user', content: listing },
+    ],
+    FAST_MODEL,
+    onUsage,
+  );
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
   const labels = Array.isArray(p?.labels) ? p.labels : [];
   return groups.map((_, i) => (typeof labels[i] === 'string' ? labels[i].trim() : ''));
@@ -67,7 +71,11 @@ async function label(groups: Frag[][]): Promise<string[]> {
  * 지금 서 있는 축들을 계산한다. **결과는 어디에도 저장하지 않는다** — 실행 시점 계산, 휘발.
  * 축이 하나도 안 서면 빈 배열 (억지로 만들지 않는다, §2-8).
  */
-export async function findAxes(supabase: SupabaseClient, now = new Date()): Promise<Axis[]> {
+export async function findAxes(
+  supabase: SupabaseClient,
+  now = new Date(),
+  onUsage?: UsageSink,
+): Promise<Axis[]> {
   const { data: edges, error } = await supabase
     .schema('rudy')
     .rpc('cluster_edges', { days: WINDOW_DAYS, min_sim: MIN_SIM });
@@ -98,7 +106,7 @@ export async function findAxes(supabase: SupabaseClient, now = new Date()): Prom
   // 축 파편들에 대한 자기 진술을 끌어온다 (배열 겹침). 라벨링과 병렬 — 서로 무관하다.
   const axisIds = ranked.flatMap((a) => a.items.map((f) => f.id));
   const [labels, statements] = await Promise.all([
-    label(ranked.map((a) => a.items)),
+    label(ranked.map((a) => a.items), onUsage),
     supabase
       .schema('rudy')
       .from('evidence')

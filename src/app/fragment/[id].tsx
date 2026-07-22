@@ -9,11 +9,13 @@ import {
   deleteFragment,
   fetchProjects,
   getFragment,
+  rememberFragment,
   setFragmentProjects,
   touchFragment,
   unmergeFragment,
   updateFragment,
 } from '@/lib/supabase';
+import { vividness } from '@/lib/vividness';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import { markFragmentUpdated } from '@/lib/fragmentUpdates';
 import type { Fragment, MergedPiece, Project, Tier } from '@/lib/types';
@@ -27,13 +29,18 @@ const TIERS: { value: Tier; label: string }[] = [
 
 // 원탭 진입의 질문은 파편 내용을 품어야 한다 — "이거 관련 뭐 있었지"만 보내면
 // 임베딩에 주제가 없어서 RAG가 아무거나 물어온다. 화면의 "이거"를 문장에 풀어 넣는다.
-function rudyQuestions(fr: Fragment): { label: string; question: string }[] {
+function rudyQuestions(fr: Fragment): { label: string; question?: string }[] {
   const raw = (fr.link_title || fr.content || '').replace(/\s+/g, ' ').trim();
   const subject = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
-  return [
+  const chips: { label: string; question?: string }[] = [
     { label: '이거 관련 뭐 있었지', question: `『${subject}』 관련해서 내가 저장해둔 게 또 뭐가 있지?` },
     { label: '이거 다음 뭐 볼까', question: `『${subject}』 다음으로 뭘 보면 좋을까?` },
   ];
+  // ⚠️ 자리만 잡아둔 칩이다 (question 없음 = 아직 동작 안 함).
+  // Exa findSimilar를 실측해보니 같은 제품 파는 쇼핑몰·미러 사이트만 나와서 배선을 뺐다.
+  // 무엇으로 채울지는 미정 — RUDY-STATUS.md "more like this" 항목 참고.
+  chips.push({ label: 'more like this' });
+  return chips;
 }
 
 // 화면 4: 원문 전체 + 인라인 수정 + 덧붙임 + tier 토글 + 프로젝트 + 묻기 + 삭제.
@@ -48,11 +55,20 @@ export default function FragmentDetail() {
   const [content, setContent] = useState('');
   const [note, setNote] = useState('');
   const [selectedPiece, setSelectedPiece] = useState<MergedPiece | null>(null);
+  // 아직 동작 안 하는 칩을 눌렀을 때 그 칩만 잠깐 "아직 준비중"으로 바뀐다
+  const [soon, setSoon] = useState<string | null>(null);
 
   // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
   // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
   const latest = useRef({ content: '', note: '', fragment: null as Fragment | null });
   latest.current = { content, note, fragment };
+
+  // "아직 준비중"은 잠깐 보였다가 원래 라벨로 돌아온다
+  useEffect(() => {
+    if (!soon) return;
+    const t = setTimeout(() => setSoon(null), 1600);
+    return () => clearTimeout(t);
+  }, [soon]);
 
   useEffect(() => {
     if (!id) return;
@@ -88,9 +104,12 @@ export default function FragmentDetail() {
 
   if (!fragment) return <SafeAreaView style={styles.screen} />;
 
-  async function patch(p: Partial<Omit<Fragment, 'project_ids'>>) {
+  // touch는 **내용에 손댔을 때만** 한다 (2026-07-22). 예전엔 tier·프로젝트 변경도 touch였는데,
+  // 인박스를 정리하다가 54개 시계가 한꺼번에 리셋됐다 — 파일링은 "이게 아직 중요해"라는
+  // 판단이 아니다. tier는 그 자체로 감쇠 속도를 바꾸므로 touch까지 하면 중복이기도 하다.
+  async function patch(p: Partial<Omit<Fragment, 'project_ids'>>, touch = false) {
     await updateFragment(fragment!.id, p);
-    touchFragment(fragment!.id).catch(() => {}); // 실질 편집 = 판단 → 여기서만 touch
+    if (touch) touchFragment(fragment!.id).catch(() => {});
     markFragmentUpdated();
     setFragment({ ...fragment!, ...p });
   }
@@ -98,14 +117,27 @@ export default function FragmentDetail() {
   // 원문 수정 — type은 건드리지 않는다(재판별 안 함). 안 바뀌었으면 저장도 안 한다.
   function saveContent() {
     if (content === fragment!.content) return;
-    patch({ content }).catch(() => {});
+    patch({ content }, true).catch(() => {}); // 내용을 고쳤다 = 다시 들여다봤다
   }
 
   // 덧붙임 저장 — 빈 문자열은 null로 (안 붙인 것과 같게)
   function saveNote() {
     const next = note.trim() === '' ? null : note;
     if (next === fragment!.note) return;
-    patch({ note: next }).catch(() => {});
+    patch({ note: next }, true).catch(() => {});
+  }
+
+  // 살리기 (2026-07-22) — 흐려지는 걸 멈추는 유일한 명시 행동.
+  // 열어보는 것만으로는 아무 일도 안 일어난다("그냥 봤다고 선명해지면 안 된다").
+  // 회상의 `기억하기`와 같은 처리 = 100% 복귀 + 중요도 한 칸.
+  async function revive() {
+    await rememberFragment(fragment!);
+    markFragmentUpdated();
+    setFragment({
+      ...fragment!,
+      last_touched_at: new Date().toISOString(),
+      touch_count: fragment!.touch_count + 1,
+    });
   }
 
   function openLink() {
@@ -124,7 +156,7 @@ export default function FragmentDetail() {
           ? current.filter((pid) => pid !== projectId)
           : [...current, projectId];
     await setFragmentProjects(fragment!.id, next);
-    touchFragment(fragment!.id).catch(() => {}); // 프로젝트 지정도 실질 편집 → touch
+    touchFragment(fragment!.id).catch(() => {}); // 프로젝트 지정 = 지금 그걸 다시 붙잡은 것 (2026-07-22 유저 확정)
     markFragmentUpdated();
     setFragment({ ...fragment!, project_ids: next });
   }
@@ -217,6 +249,17 @@ export default function FragmentDetail() {
           </>
         )}
 
+        {/* 살리기 — 이미 선명한 것엔 안 뜬다. AI 칩(원탭 진입)과 다른 종류의 행동이라
+            구간을 나눈다 — 이건 루디에게 묻는 게 아니라 선명도 자체를 되돌리는 것. */}
+        {vividness(fragment) < 1 && (
+          <>
+            <View style={styles.divider} />
+            <Pressable onPress={() => revive().catch(() => {})} style={styles.reviveBtn}>
+              <Text style={styles.reviveLabel}>기억하기</Text>
+            </Pressable>
+          </>
+        )}
+
         <View style={styles.divider} />
 
         {/* 원탭 진입 (RUDY.md §4-C1) — 파편 하나하나가 Rudy로 들어가는 문.
@@ -225,10 +268,14 @@ export default function FragmentDetail() {
           {rudyQuestions(fragment).map((q) => (
             <Pressable
               key={q.label}
-              onPress={() => router.push(`/chat?q=${encodeURIComponent(q.question)}`)}
+              onPress={() =>
+                q.question
+                  ? router.push(`/chat?q=${encodeURIComponent(q.question)}`)
+                  : setSoon(q.label)
+              }
               style={styles.askChip}
             >
-              <Text style={styles.askLabel}>{q.label}</Text>
+              <Text style={styles.askLabel}>{soon === q.label ? '아직 준비중' : q.label}</Text>
             </Pressable>
           ))}
         </View>
@@ -494,6 +541,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxs,
   },
   askLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  // 살리기는 칩들과 같은 결이되 혼자 있는 행동이라 한 줄을 차지한다
+  reviveBtn: {
+    alignSelf: 'flex-start',
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    marginBottom: spacing.sm,
+  },
+  reviveLabel: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
   graveBtn: { paddingVertical: spacing.sm },
   graveLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
   deleteBtn: { paddingVertical: spacing.sm, marginTop: spacing.sm },

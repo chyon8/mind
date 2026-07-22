@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/lib/confirm';
+import { formatCost } from '@/lib/cost';
 import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import {
@@ -354,6 +355,8 @@ export default function Chat() {
                       )}
                     </View>
                   )}
+                  {/* 이 답변 하나가 태운 gpt 비용 (2026-07-22 유저 요청) */}
+                  <Text style={styles.costLabel}>{formatCost(m.cost_usd)}</Text>
                 </View>
               ),
             )}
@@ -456,6 +459,7 @@ const styles = StyleSheet.create({
   // 유저 말은 오른쪽 카드로 접힌다 — 지나간 것이다. 시각은 카드 밑에 작게.
   userWrap: { alignItems: 'flex-end', gap: spacing.xxs },
   userTime: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono },
+  costLabel: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, marginTop: spacing.xxs },
   userRow: {
     alignSelf: 'flex-end',
     maxWidth: '85%',

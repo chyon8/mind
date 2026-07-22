@@ -1,12 +1,15 @@
 import type { Tier } from './types';
 
 // PLAN.md §3.4 — 선명도는 저장하지 않는다. 렌더링 시점에 계산 (SPEC §5 확정값).
+// 2026-07-22 조정: [3,14]/[14,45]·floor .25는 실사용에서 "애초에 흐려지질 않는다"였다.
+// 실측(파편 127개, 코퍼스 6.5일): 바닥에 닿은 게 0개, 제일 오래된 것도 0.76이라
+// 100%와 눈으로 구분이 안 됐다. 일주일이면 흐려지는 게 체감되게 낮춘 값.
 const DECAY: Record<Exclude<Tier, 'pinned'>, [start: number, floor: number]> = {
-  normal: [3, 14],
-  important: [14, 45],
+  normal: [1, 7],
+  important: [7, 21],
 };
 
-const FLOOR_OPACITY = 0.25;
+const FLOOR_OPACITY = 0.15;
 const MS_PER_DAY = 86_400_000;
 
 export function opacity(lastTouchedAt: Date, tier: Tier, now: Date = new Date()): number {

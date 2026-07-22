@@ -9,7 +9,7 @@
 //    한쪽만 고치면 진단과 실물이 갈라진다 — check-clusters.mjs의 cluster()와 같은 약속이다.
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { complete, DISCOVERY_MODEL } from '../_shared/openai.ts';
+import { complete, DISCOVERY_MODEL, type UsageSink } from '../_shared/openai.ts';
 import { loadMaterial, materialBlock } from './material.ts';
 
 export type Angle = {
@@ -76,13 +76,18 @@ const SLOTS = ['expansion', 'new', 'resurface'];
 
 // 재료 블록 → 각도. brief.ts가 재료를 한 번만 로드해 넘길 수 있게 블록을 받는다.
 // resurface는 query가 비어 있어도 통과시킨다(검색이 아니라 되꺼냄이라서).
-export function anglesFromBlock(block: string, model = DISCOVERY_MODEL): Promise<Angle[]> {
+export function anglesFromBlock(
+  block: string,
+  model = DISCOVERY_MODEL,
+  onUsage?: UsageSink,
+): Promise<Angle[]> {
   return complete(
     [
       { role: 'system', content: ANGLE_SYS },
       { role: 'user', content: block },
     ],
     model,
+    onUsage,
   ).then((raw) => {
     const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
     const angles = Array.isArray(p?.angles) ? p.angles : [];

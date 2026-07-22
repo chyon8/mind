@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { chatStream, DISCOVERY_MODEL } from '../_shared/openai.ts';
+import { costTracker } from '../_shared/usage.ts';
 import { loadMaterial, materialBlock, type Frag } from './material.ts';
 import { anglesFromBlock } from './angles.ts';
 import { exaSearch } from './search.ts';
@@ -78,7 +79,7 @@ async function recentBriefContext(
 export type BriefEvent =
   | { t: 'status'; stage: 'reading' | 'angles' | 'search' | 'writing'; count?: number }
   | { t: 'd'; c: string } // 조립 토큰
-  | { t: 'done'; empty: boolean };
+  | { t: 'done'; empty: boolean; costUsd?: number | null };
 
 export type BriefOptions = {
   // 'push' = 아침 푸시가 만든 것, 'pull' = 유저가 화면에서 직접 만든 것 (기본).
@@ -94,6 +95,9 @@ export async function* streamBrief(
   supabase: SupabaseClient,
   opts: BriefOptions = {},
 ): AsyncGenerator<BriefEvent> {
+  // 비용 추적 (2026-07-22) — 브리핑 하나가 gpt-5.5를 2번(각도·조립) 태운다. request_id로 묶는다.
+  const cost = costTracker(supabase, { requestId: crypto.randomUUID() });
+
   yield { t: 'status', stage: 'reading' };
   const [material, prior] = await Promise.all([loadMaterial(supabase), recentBriefContext(supabase)]);
 
@@ -101,7 +105,7 @@ export async function* streamBrief(
   const block =
     materialBlock(material) +
     (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
-  const angles = await anglesFromBlock(block);
+  const angles = await anglesFromBlock(block, DISCOVERY_MODEL, cost.track('discovery.angles', DISCOVERY_MODEL));
   if (!angles.length) {
     yield { t: 'done', empty: true }; // 볼 게 없으면 빈 브리핑 (§2-8)
     return;
@@ -162,19 +166,28 @@ export async function* streamBrief(
       { role: 'user', content: user },
     ],
     DISCOVERY_MODEL,
+    cost.track('discovery.assemble', DISCOVERY_MODEL),
   )) {
     full += delta;
     yield { t: 'd', c: delta };
   }
 
+  const { usd: costUsd } = cost.result();
+
   // 원장 기록 (§5·§6-4 ②) — 실패해도 브리핑은 살아야 한다. URL은 text에서 다시 뽑으므로 따로 안 넣는다.
   await supabase
     .schema('rudy')
     .from('utterances')
-    .insert({ surface: 'briefing', kind: 'discovery', text: full, trigger: opts.trigger ?? 'pull' })
+    .insert({
+      surface: 'briefing',
+      kind: 'discovery',
+      text: full,
+      trigger: opts.trigger ?? 'pull',
+      cost_usd: costUsd,
+    })
     .then(undefined, (e) => console.warn('[brief] 원장 기록 실패', e));
 
-  yield { t: 'done', empty: !full.trim() };
+  yield { t: 'done', empty: !full.trim(), costUsd };
 }
 
 type SearchLine = { title: string | null; url: string; date: string | null; highlights: string };

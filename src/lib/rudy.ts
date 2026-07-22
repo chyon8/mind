@@ -14,12 +14,18 @@ const DISCOVERY_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''}/functions/v
 // 지난 브리핑들 (원장에 저장된 것). 날짜별 기록·재생성 회피에 쓴다.
 // 화면을 열 때마다 새로 만들지 않고 최근 것을 읽어 온다 — 매번 60초·비용을 안 쓰게.
 // trigger: 'pull' = 화면에서 직접 생성 / 'push' = 아침 배치가 생성. 기록 목록의 구분 표시용.
-export type Briefing = { id: string; created_at: string; text: string; trigger: 'pull' | 'push' };
+export type Briefing = {
+  id: string;
+  created_at: string;
+  text: string;
+  trigger: 'pull' | 'push';
+  cost_usd: number | null; // 2026-07-22 — 이 브리핑이 gpt-5.5를 2번(각도·조립) 태운 실제 비용
+};
 export async function fetchBriefings(): Promise<Briefing[]> {
   const { data, error } = await supabase()
     .schema('rudy')
     .from('utterances')
-    .select('id, created_at, text, trigger')
+    .select('id, created_at, text, trigger, cost_usd')
     .eq('kind', 'discovery')
     .eq('surface', 'briefing')
     .not('text', 'is', null)
@@ -41,7 +47,10 @@ type BriefHandlers = {
   onToken: (text: string) => void;
 };
 
-export async function streamBriefing(h: BriefHandlers, signal?: AbortSignal): Promise<{ empty: boolean }> {
+export async function streamBriefing(
+  h: BriefHandlers,
+  signal?: AbortSignal,
+): Promise<{ empty: boolean; costUsd: number | null }> {
   if (!isConfigured) throw new Error('Supabase 미설정');
   const { data } = await supabase().auth.getSession();
   const token = data.session?.access_token;
@@ -56,13 +65,16 @@ export async function streamBriefing(h: BriefHandlers, signal?: AbortSignal): Pr
   if (!res.ok || !res.body) throw new Error(`discovery ${res.status}`);
 
   let empty = false;
+  let costUsd: number | null = null;
   let failure = '';
   const feeder = lineFeeder((raw) => {
     const ev = JSON.parse(raw);
     if (ev.t === 'status') h.onStage(ev.stage, ev.count);
     else if (ev.t === 'd') h.onToken(ev.c);
-    else if (ev.t === 'done') empty = ev.empty;
-    else if (ev.t === 'error') failure = ev.message;
+    else if (ev.t === 'done') {
+      empty = ev.empty;
+      costUsd = ev.costUsd ?? null;
+    } else if (ev.t === 'error') failure = ev.message;
   });
 
   const reader = res.body.getReader();
@@ -75,7 +87,7 @@ export async function streamBriefing(h: BriefHandlers, signal?: AbortSignal): Pr
   feeder.end();
 
   if (failure) throw new Error(failure);
-  return { empty };
+  return { empty, costUsd };
 }
 
 export type ChatMessage = {
@@ -84,6 +96,7 @@ export type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
   cited_ids: string[];
+  cost_usd: number | null; // 2026-07-22 — 이 답변 하나가 태운 gpt 호출 전부(재작성·판정·라벨·본답변) 합계
 };
 
 export type Conversation = { id: string; created_at: string; title: string | null };
@@ -124,7 +137,7 @@ export async function fetchMessages(conversationId: string): Promise<ChatMessage
   const { data, error } = await supabase()
     .schema('rudy')
     .from('messages')
-    .select('id, created_at, role, content, cited_ids')
+    .select('id, created_at, role, content, cited_ids, cost_usd')
     .eq('conversation_id', conversationId)
     .order('created_at');
   if (error) throw error;

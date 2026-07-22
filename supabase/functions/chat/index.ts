@@ -4,7 +4,16 @@
 //    근거로 읽었다는 이유로 파편이 선명해지면 "그냥 봤다고 선명해지면 안 된다"가 뒷문으로 깨진다.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { chatStream, complete, embedMany, type ChatMessage } from '../_shared/openai.ts';
+import {
+  CHAT_MODEL,
+  chatStream,
+  complete,
+  embedMany,
+  FAST_MODEL,
+  type ChatMessage,
+  type UsageSink,
+} from '../_shared/openai.ts';
+import { costTracker } from '../_shared/usage.ts';
 import { systemPrompt } from './prompt.ts';
 import { axesBlock, findAxes, MIN_SIM as CLUSTER_MIN_SIM, type Axis } from './clusters.ts';
 import { captureAnswer, logQuestion, pickQuestion, questionSubject, type Target } from './intent.ts';
@@ -128,12 +137,16 @@ const PERIODS = ['today', 'yesterday', 'week', 'month'];
 
 // recent = 최근 대화 몇 줄. "그거/이거" 같은 지시어를 여기서 실제 소재로 풀어야 검색이 조준된다.
 // 이게 없어서 "오늘 뭐 남겼지 → 그거 찾아봐"의 '그거'가 헛돌았다 (2026-07-21 유저 지적).
-async function searchQueries(question: string, recent: string): Promise<Extracted> {
+async function searchQueries(question: string, recent: string, onUsage?: UsageSink): Promise<Extracted> {
   const user = recent ? `<최근대화>\n${recent}\n</최근대화>\n\n질문: ${question}` : question;
-  const raw = await complete([
-    { role: 'system', content: EXTRACT_SYS },
-    { role: 'user', content: user },
-  ]);
+  const raw = await complete(
+    [
+      { role: 'system', content: EXTRACT_SYS },
+      { role: 'user', content: user },
+    ],
+    FAST_MODEL,
+    onUsage,
+  );
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
   return {
     topics: Array.isArray(p?.topics)
@@ -227,6 +240,10 @@ Deno.serve(async (req) => {
     });
   }
 
+  // 비용 추적 (2026-07-22) — 이 턴에서 도는 모든 gpt 호출(재작성·캡처판정·축라벨·본답변)을
+  // 하나의 request_id로 묶는다. "각 응답마다 얼마" 표시의 원천.
+  const cost = costTracker(supabase, { requestId: crypto.randomUUID(), conversationId });
+
   // 이력은 질문과 무관하게 읽을 수 있다 — 임베딩·검색과 병렬로 (첫 토큰까지의 시간이 체감이다)
   const historyPromise = supabase
     .schema('rudy')
@@ -239,8 +256,11 @@ Deno.serve(async (req) => {
   // 직전에 루디가 뭘 물었다면, 이 메시지가 그 답일 수 있다 (§4-F1).
   // 대기 중인 질문이 없으면 조회 한 번으로 끝나므로 매 턴 돌려도 싸다.
   // 검색과 병렬 — 캡처가 늦어져도 답변이 기다릴 이유가 없다.
-  const capturePromise = captureAnswer(supabase, question, (g, p, r, d) =>
-    logGate(g, p, r, d, 'question'),
+  const capturePromise = captureAnswer(
+    supabase,
+    question,
+    (g, p, r, d) => logGate(g, p, r, d, 'question'),
+    cost.track('chat.question_judge', FAST_MODEL),
   ).catch((e) => {
     console.warn('[chat] 자기 진술 캡처 실패', e);
     return null;
@@ -256,7 +276,11 @@ Deno.serve(async (req) => {
     .join('\n');
 
   // 검색어를 뽑는다. 실패하면 질문 그대로 — 재작성이 죽어도 채팅은 살아야 한다.
-  const { topics, type, period, intent, outward } = await searchQueries(question, recent).catch((e) => {
+  const { topics, type, period, intent, outward } = await searchQueries(
+    question,
+    recent,
+    cost.track('chat.rewrite', FAST_MODEL),
+  ).catch((e) => {
     console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
     return { topics: [] as string[], type: null, period: null, intent: 'other', outward: 'no' as OutwardMode };
   });
@@ -284,7 +308,7 @@ Deno.serve(async (req) => {
   let axes: Axis[] = [];
   if (intent === 'trend' && !topics.length && !answered && !period) {
     try {
-      axes = await findAxes(supabase);
+      axes = await findAxes(supabase, new Date(), cost.track('chat.axis_label', FAST_MODEL));
     } catch (e) {
       console.warn('[chat] 클러스터 실패 → 검색으로 폴백', e);
     }
@@ -485,7 +509,7 @@ Deno.serve(async (req) => {
         if (outward === 'go') push({ t: 'web' }); // 바깥을 뒤졌다 — 앱이 "바깥에서 찾아봤다"를 표시
         push({ t: 'cite', ids: citedIds });
         if (link && utteranceId) push({ t: 'link', fragmentId: link.id, utteranceId });
-        for await (const delta of chatStream(messages)) {
+        for await (const delta of chatStream(messages, CHAT_MODEL, cost.track('chat.answer', CHAT_MODEL))) {
           if (cancelled) break; // 중단 — OpenAI 스트림도 여기서 놓는다
           answer += delta;
           push({ t: 'd', c: delta });
@@ -496,6 +520,7 @@ Deno.serve(async (req) => {
       } finally {
         // 이력은 서버가 적는다 — 앱이 스트리밍 중에 죽거나 중단해도 받은 데까지 남는다.
         if (answer) {
+          const { usd: costUsd } = cost.result(); // 이 턴에 쓴 gpt 호출 전부(재작성·판정·라벨·답변) 합계
           const { error } = await supabase
             .schema('rudy')
             .from('messages')
@@ -509,6 +534,7 @@ Deno.serve(async (req) => {
                 role: 'assistant',
                 content: answer,
                 cited_ids: citedIds,
+                cost_usd: costUsd,
               },
             ]);
           if (error) console.warn('[chat] 이력 저장 실패', error);
@@ -525,7 +551,7 @@ Deno.serve(async (req) => {
 
           // ⚠️ 저장이 끝난 뒤에 보낸다. 앱은 이 신호를 보고서야 화면의 답을 지운다 —
           // 스트림이 닫혔다는 것만으로 지우면 아직 안 적힌 답을 못 찾고 증발시킨다.
-          push({ t: 'done', saved: !error });
+          push({ t: 'done', saved: !error, costUsd });
         }
         try {
           controller.close();

@@ -10,7 +10,7 @@
 //      ③ 오래된 고아 — 물어도 유저가 답을 모른다. 후보엔 있지만 항상 꼴찌다.
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { complete, embed } from '../_shared/openai.ts';
+import { complete, embed, type UsageSink } from '../_shared/openai.ts';
 import { kstDate } from '../_shared/time.ts';
 
 const WINDOW_DAYS = 30; // 이보다 오래된 건 물어도 기억을 못 한다
@@ -115,6 +115,7 @@ export async function captureAnswer(
   supabase: SupabaseClient,
   message: string,
   log: (gate: string, passed: boolean, reason: string, detail: unknown) => void,
+  onUsage?: UsageSink,
 ): Promise<Target | null> {
   const since = new Date(Date.now() - CAPTURE_HOURS * 3_600_000).toISOString();
   const { data: pending } = await supabase
@@ -137,13 +138,17 @@ export async function captureAnswer(
     .maybeSingle();
 
   const target = frag as Target | null;
-  const raw = await complete([
-    { role: 'system', content: JUDGE_SYS },
-    {
-      role: 'user',
-      content: `루디가 물어본 파편: ${target ? questionSubject(target) : '(삭제됨)'}\n사용자 메시지: ${message}`,
-    },
-  ]);
+  const raw = await complete(
+    [
+      { role: 'system', content: JUDGE_SYS },
+      {
+        role: 'user',
+        content: `루디가 물어본 파편: ${target ? questionSubject(target) : '(삭제됨)'}\n사용자 메시지: ${message}`,
+      },
+    ],
+    undefined,
+    onUsage,
+  );
   const isAnswer = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim())?.isAnswer === true;
   log('confidence', isAnswer, isAnswer ? '자기 진술 포착' : '질문의 답이 아님', {
     utteranceId: pending.id,

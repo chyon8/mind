@@ -9,27 +9,27 @@ describe('opacity — SPEC §5 확정값 (PLAN.md §3.4)', () => {
     expect(opacity(daysAgo(1000), 'pinned', NOW)).toBe(1);
   });
 
-  test('normal: 3일까지 100%', () => {
+  test('normal: 1일까지 100%', () => {
     expect(opacity(daysAgo(0), 'normal', NOW)).toBe(1);
-    expect(opacity(daysAgo(3), 'normal', NOW)).toBe(1);
+    expect(opacity(daysAgo(1), 'normal', NOW)).toBe(1);
   });
 
-  test('normal: 3일~14일 선형 감쇠', () => {
-    expect(opacity(daysAgo(8.5), 'normal', NOW)).toBeCloseTo(0.625); // 중간점
-    expect(opacity(daysAgo(4), 'normal', NOW)).toBeLessThan(1);
-    expect(opacity(daysAgo(13), 'normal', NOW)).toBeGreaterThan(0.25);
+  test('normal: 1일~7일 선형 감쇠', () => {
+    expect(opacity(daysAgo(4), 'normal', NOW)).toBeCloseTo(0.575); // 중간점
+    expect(opacity(daysAgo(2), 'normal', NOW)).toBeLessThan(1);
+    expect(opacity(daysAgo(6), 'normal', NOW)).toBeGreaterThan(0.15);
   });
 
-  test('normal: 14일 이후 바닥 25% 고정', () => {
-    expect(opacity(daysAgo(14), 'normal', NOW)).toBe(0.25);
-    expect(opacity(daysAgo(365), 'normal', NOW)).toBe(0.25);
+  test('normal: 7일 이후 바닥 15% 고정', () => {
+    expect(opacity(daysAgo(7), 'normal', NOW)).toBe(0.15);
+    expect(opacity(daysAgo(365), 'normal', NOW)).toBe(0.15);
   });
 
-  test('important: 14일까지 100%, 45일에 바닥', () => {
-    expect(opacity(daysAgo(14), 'important', NOW)).toBe(1);
-    expect(opacity(daysAgo(29.5), 'important', NOW)).toBeCloseTo(0.625); // 중간점
-    expect(opacity(daysAgo(45), 'important', NOW)).toBe(0.25);
-    expect(opacity(daysAgo(365), 'important', NOW)).toBe(0.25);
+  test('important: 7일까지 100%, 21일에 바닥', () => {
+    expect(opacity(daysAgo(7), 'important', NOW)).toBe(1);
+    expect(opacity(daysAgo(14), 'important', NOW)).toBeCloseTo(0.575); // 중간점
+    expect(opacity(daysAgo(21), 'important', NOW)).toBe(0.15);
+    expect(opacity(daysAgo(365), 'important', NOW)).toBe(0.15);
   });
 
   test('미래 timestamp(시계 오차)는 100%로 clamp', () => {
@@ -50,13 +50,13 @@ describe('effectiveTier — 자라나는 중요도', () => {
     expect(effectiveTier('important', 0)).toBe('important');
   });
 
-  test('20일 전 파편: 한 번도 안 구해냈으면 바닥, 두 번 구해냈으면 아직 살아있다', () => {
+  test('10일 전 파편: 한 번도 안 구해냈으면 바닥, 두 번 구해냈으면 아직 살아있다', () => {
     const fr = (touch_count: number) => ({
-      last_touched_at: daysAgo(20).toISOString(),
+      last_touched_at: daysAgo(10).toISOString(),
       tier: 'normal' as const,
       touch_count,
     });
-    expect(vividness(fr(0), NOW)).toBe(0.25); // normal은 14일에 바닥
-    expect(vividness(fr(2), NOW)).toBeGreaterThan(0.8); // important 곡선 (14일부터 감쇠 시작)
+    expect(vividness(fr(0), NOW)).toBe(0.15); // normal은 7일에 바닥
+    expect(vividness(fr(2), NOW)).toBeGreaterThan(0.8); // important 곡선 (7일부터 감쇠 시작)
   });
 });
