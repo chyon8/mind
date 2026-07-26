@@ -24,6 +24,8 @@ const REPEAT_WINDOW_DAYS = 30; // 최근 이만큼의 브리핑 URL은 다시 �
 //    그리고 이건 파편 수와 무관하다 — 30일 창 × 브리핑당 8항목이 자연 상한이라 무한히 안 자란다.
 //    아래 숫자는 폭주 방어선일 뿐이다(하루에 브리핑을 수십 번 눌렀을 때).
 const PROMPT_TOPIC_HINT = 250;
+// 조립 스트리밍 중 원장을 갱신하는 주기. 함수가 죽어도 여기까지는 남는다 (아래 조립부 주석).
+const SAVE_EVERY_MS = 4000;
 
 // ⚠️ scripts/check-brief.mjs의 ASSEMBLE_SYS와 반드시 동일.
 const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아온 것들을 아침 브리핑으로 쓴다.
@@ -42,7 +44,10 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
   제일 좋은 것만 남기고 나머지는 버린다. 하나를 여러 각도로 쪼갠 건 발견이 아니라 반복이다.
 
 ## 항목 하나의 모양 (짧게 — 주절주절 절대 금지)
-### 제목 = 한 줄 발견. "이런 게 있다"가 아니라 "이게 너한테 뭐다"
+### [라벨] 제목 = 한 줄 발견. "이런 게 있다"가 아니라 "이게 너한테 뭐다"
+**제목 맨 앞에 그 항목이 나온 각도의 slot을 대괄호 라벨로 붙인다.** 각도에 [expansion]이라
+적혀 있으면 \`### [확장] …\`, [idea]면 \`### [아이디어] …\`, [lens]면 \`### [관점] …\`,
+[resurface]면 \`### [되꺼냄] …\`. **주어진 slot을 그대로 옮겨라 — 네가 판단해서 바꾸지 마라.**
 제목 아래 **2~3문장으로 끝낸다.** 그 이상 쓰지 마라.
 - 불릿으로 잘게 쪼개지 마라. 자연스럽게 이어지는 문장으로 쓴다.
 - 뭔지 + 어느 파편에서 걸리는지 + 그래서 뭐가 흥미로운지를 한 흐름에 녹인다.
@@ -68,6 +73,9 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 
 const URL_RE = /\((https?:\/\/[^)]+)\)/g;
 const HEADING_RE = /^###\s+(.+)$/gm;
+// 제목 앞의 슬롯 라벨(`### [아이디어] …`). 반복 방지에 쓸 때는 떼어낸다 —
+// 라벨은 모든 제목에 붙는 공통 접두사라 두면 중복 게이트의 유사도를 통째로 끌어올린다.
+const SLOT_LABEL_RE = /^\[[^\]]{1,10}\]\s*/;
 
 // 최근 브리핑에서 다룬 주제(### 제목)와 인용 URL — 반복 방지용 (§6-4 ②).
 // ⚠️ URL만 막으면 같은 프로젝트가 매번 다른 링크로 또 나온다(유저가 지적). **주제**를 넘겨
@@ -88,7 +96,9 @@ async function recentBriefContext(
     .order('created_at', { ascending: false });
   const texts = (data ?? []).map((r) => (r.text as string) ?? '');
   return {
-    topics: texts.flatMap((t) => [...t.matchAll(HEADING_RE)].map((m) => m[1].trim())),
+    topics: texts.flatMap((t) =>
+      [...t.matchAll(HEADING_RE)].map((m) => m[1].trim().replace(SLOT_LABEL_RE, '')),
+    ),
     urls: texts.flatMap((t) => [...t.matchAll(URL_RE)].map((m) => m[1])),
   };
 }
@@ -205,6 +215,24 @@ export async function* streamBrief(
   // 렌더하므로 클라 변경 없이 "관찰"이 조용히 얹힌다.
   let full = opts.prelude ? `${opts.prelude}\n\n` : '';
   if (opts.prelude) yield { t: 'd', c: full };
+
+  // ⚠️ **원장 행을 조립 *전에* 만든다** (2026-07-26 사고 수리).
+  //    전에는 조립이 다 끝난 뒤에 insert했다. 그래서 함수가 조립 도중이나 직후에 죽으면
+  //    화면에 다 나온 브리핑이 **기록에 한 줄도 안 남았다** — 실제로 07-26에 두 번 그랬고
+  //    $0.65를 태우고 기록은 0건이었다. 채팅에서 이미 세운 원칙("화면에 나온 글자는 사라지지
+  //    않는다")의 서버 쪽 짝이다. 죽는 원인이 무엇이든 마지막 갱신 시점까지는 남는다.
+  const utt = () => supabase.schema('rudy').from('utterances');
+  const { data: row } = await utt()
+    .insert({ surface: 'briefing', kind: 'discovery', text: '', trigger: opts.trigger ?? 'pull' })
+    .select('id')
+    .single()
+    .then((r) => r, (e) => {
+      console.warn('[brief] 원장 행 생성 실패 — 끝나고 한 번 더 시도한다', e);
+      return { data: null };
+    });
+  const rowId = (row as { id?: string } | null)?.id;
+
+  let lastSave = Date.now();
   for await (const delta of chatStream(
     [
       { role: 'system', content: ASSEMBLE_SYS },
@@ -216,22 +244,34 @@ export async function* streamBrief(
   )) {
     full += delta;
     yield { t: 'd', c: delta };
+    // 주기 저장. fire-and-forget이라 스트리밍을 안 막는다 — 지연은 안 늘고 유실 창만 줄어든다.
+    if (rowId && Date.now() - lastSave >= SAVE_EVERY_MS) {
+      lastSave = Date.now();
+      utt().update({ text: full }).eq('id', rowId)
+        .then(undefined, (e: unknown) => console.warn('[brief] 중간 저장 실패', e));
+    }
   }
 
   const { usd: costUsd } = cost.result();
 
-  // 원장 기록 (§5·§6-4 ②) — 실패해도 브리핑은 살아야 한다. URL은 text에서 다시 뽑으므로 따로 안 넣는다.
-  await supabase
-    .schema('rudy')
-    .from('utterances')
-    .insert({
-      surface: 'briefing',
-      kind: 'discovery',
-      text: full,
-      trigger: opts.trigger ?? 'pull',
-      cost_usd: costUsd,
-    })
-    .then(undefined, (e) => console.warn('[brief] 원장 기록 실패', e));
+  // 최종 기록 (§5·§6-4 ②) — 실패해도 브리핑은 살아야 한다. URL은 text에서 다시 뽑으므로 따로 안 넣는다.
+  if (rowId) {
+    // 한 글자도 못 쓰고 끝났으면 빈 행을 남기지 않는다 (기록 목록이 빈 줄로 더러워진다).
+    const q = full.trim()
+      ? utt().update({ text: full, cost_usd: costUsd }).eq('id', rowId)
+      : utt().delete().eq('id', rowId);
+    await q.then(undefined, (e: unknown) => console.warn('[brief] 원장 기록 실패', e));
+  } else if (full.trim()) {
+    await utt()
+      .insert({
+        surface: 'briefing',
+        kind: 'discovery',
+        text: full,
+        trigger: opts.trigger ?? 'pull',
+        cost_usd: costUsd,
+      })
+      .then(undefined, (e) => console.warn('[brief] 원장 기록 실패', e));
+  }
 
   // 유저 지정을 소비한다 (RUDY-STATUS.md ①) — 한 번 나오고 끝. 안 내리면 매 브리핑에 또 나와서
   // 그게 §6-4 ②가 막으려는 반복이 된다.

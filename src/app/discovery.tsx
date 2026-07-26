@@ -39,22 +39,29 @@ function openLink(href: string) {
 // 문구로도 잡는다(유저: "이걸 왜 카드에 그대로 넣어").
 const REJECT_RE = /(뺐|뺀\s|제외|리스티클|못 찾|버린\s*것|안 넣)/;
 
+type CardData = { title: string; body: string; slot: string };
+
+// 제목 앞에 붙는 슬롯 라벨 — `### [아이디어] 제목` (brief.ts ASSEMBLE_SYS가 찍는다).
+// 라벨은 제목에서 떼어내 배지로 따로 보여준다. 없으면(구버전 브리핑) 그냥 빈 문자열이다.
+const SLOT_RE = /^\[([^\]]{1,10})\]\s*(.*)$/;
+
 // 스트리밍 마크다운을 카드로 쪼갠다 — ### 제목마다 한 장. 미완성이어도 안 죽는다.
-function parseCards(md: string): { title: string; body: string }[] {
-  const cards: { title: string; body: string }[] = [];
-  let cur: { title: string; body: string } | null = null;
+function parseCards(md: string): CardData[] {
+  const cards: CardData[] = [];
+  let cur: CardData | null = null;
   for (const ln of md.split('\n')) {
     const h = ln.match(/^###\s+(.+)/);
     if (h) {
-      cur = { title: h[1].trim(), body: '' };
+      const m = h[1].trim().match(SLOT_RE);
+      cur = { title: (m ? m[2] : h[1]).trim(), slot: m ? m[1].trim() : '', body: '' };
       cards.push(cur);
     } else if (ln.trimStart().startsWith('※')) {
-      cards.push({ title: '', body: ln.replace(/^\s*※\s*/, '').trim() }); // 정식 각주
+      cards.push({ title: '', slot: '', body: ln.replace(/^\s*※\s*/, '').trim() }); // 정식 각주
       cur = null;
     } else if (cur) {
       cur.body += (cur.body ? '\n' : '') + ln;
     } else if (ln.trim()) {
-      cards.push({ title: '', body: ln });
+      cards.push({ title: '', slot: '', body: ln });
     }
   }
 
@@ -66,11 +73,11 @@ function parseCards(md: string): { title: string; body: string }[] {
     if (paras.length > 1 && REJECT_RE.test(tail) && tail.length < 220) {
       paras.pop();
       last.body = paras.join('\n\n');
-      cards.push({ title: '', body: tail.trim() });
+      cards.push({ title: '', slot: '', body: tail.trim() });
     }
   }
 
-  return cards.map((c) => ({ title: c.title, body: c.body.trim() })).filter((c) => c.title || c.body);
+  return cards.map((c) => ({ ...c, body: c.body.trim() })).filter((c) => c.title || c.body);
 }
 
 const firstTitle = (md: string) => parseCards(md).find((c) => c.title)?.title ?? '(제목 없음)';
@@ -80,6 +87,7 @@ const firstTitle = (md: string) => parseCards(md).find((c) => c.title)?.title ??
 function Card({
   title,
   body,
+  slot,
   thrown,
   onThrow,
   projects,
@@ -88,6 +96,7 @@ function Card({
 }: {
   title: string;
   body: string;
+  slot: string; // 확장 / 아이디어 / 관점 / 되꺼냄. 구버전 브리핑은 빈 문자열이라 배지가 안 뜬다
   thrown: boolean;
   onThrow: () => void;
   // 던진 뒤에만 펼쳐지는 프로젝트 칩 (유저 요청, 2026-07-22) — 던지기 자체는 마찰 0 유지,
@@ -118,6 +127,9 @@ function Card({
   }
   return (
     <Animated.View style={[styles.card, style]}>
+      {!!slot && (
+        <Text style={[styles.slotBadge, slot === '아이디어' && styles.slotBadgeIdea]}>{slot}</Text>
+      )}
       <Text style={styles.cardTitle}>{title}</Text>
       {!!body && <Markdown text={body} onLink={openLink} />}
       <Pressable onPress={onThrow} disabled={thrown} hitSlop={6} style={styles.throw}>
@@ -443,6 +455,7 @@ export default function Discovery() {
             key={i}
             title={c.title}
             body={c.body}
+            slot={c.slot}
             thrown={thrown.has(c.title)}
             onThrow={() => throwCard(c.title, c.body)}
             projects={projects}
@@ -498,6 +511,15 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.xs,
   },
+  // 슬롯 배지 — 제목 위 한 줄. 카드를 늘리지 않게 작고 조용하게 둔다.
+  slotBadge: {
+    ...type.bodySm,
+    color: colors.faint,
+    fontFamily: fonts.sansSemiBold,
+    marginBottom: spacing.xxs,
+  },
+  // 아이디어만 살짝 드러낸다 — 이 사람이 제일 원하는 슬롯이라 한눈에 세어져야 한다.
+  slotBadgeIdea: { color: colors.ink },
   cardTitle: { ...type.headingMd, color: colors.ink, fontFamily: fonts.sansSemiBold, marginBottom: spacing.xxs },
   footnote: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, fontStyle: 'italic', paddingHorizontal: spacing.xs },
   throw: {

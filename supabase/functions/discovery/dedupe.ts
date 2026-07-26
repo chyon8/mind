@@ -114,6 +114,14 @@ export async function dedupeAngles(
 // 판정을 원장에 남긴다 (§6-4). 이 로그가 REPEAT_SIM을 조정할 유일한 근거다 —
 // 실패해도 삼킨다(fire-and-forget): 로그 때문에 브리핑이 죽으면 본말전도.
 export function logDedupe(supabase: SupabaseClient, r: DedupeResult, angleCount: number) {
+  // 살아남은 각도의 슬롯 구성. 유저 질문("아이디어가 제대로 나오고 있는 거 맞아?")에 답할
+  // 유일한 근거다 — 전엔 idea 미달이 console.warn으로만 흘러서 지나가면 알 길이 없었다.
+  const slots = r.kept.reduce<Record<string, number>>((acc, a) => {
+    acc[a.slot] = (acc[a.slot] ?? 0) + 1;
+    return acc;
+  }, {});
+  const mix = `확장${slots.expansion ?? 0} 아이디어${slots.idea ?? 0} 관점${slots.lens ?? 0} 되꺼냄${slots.resurface ?? 0}`;
+
   supabase
     .schema('rudy')
     .from('gate_log')
@@ -122,15 +130,18 @@ export function logDedupe(supabase: SupabaseClient, r: DedupeResult, angleCount:
       kind: 'discovery',
       gate: 'repetition',
       passed: r.dropped.length > 0 && !r.abandoned,
-      reason: r.abandoned
-        ? '너무 많이 잘려 컷 포기 — 빈 브리핑 방지'
-        : r.dropped.length
-          ? `중복 각도 ${r.dropped.length}개 제거`
-          : '중복 없음',
+      reason: `${
+        r.abandoned
+          ? '너무 많이 잘려 컷 포기 — 빈 브리핑 방지'
+          : r.dropped.length
+            ? `중복 각도 ${r.dropped.length}개 제거`
+            : '중복 없음'
+      } · ${mix}`,
       detail: {
         threshold: REPEAT_SIM,
         angles: angleCount,
         kept: r.kept.length,
+        slots,
         dropped: r.dropped,
       },
     })
