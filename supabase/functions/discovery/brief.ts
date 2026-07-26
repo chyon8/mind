@@ -17,6 +17,13 @@ import { exaSearch } from './search.ts';
 
 const NUM_RESULTS = 5;
 const REPEAT_WINDOW_DAYS = 30; // 최근 이만큼의 브리핑 URL은 다시 안 꺼낸다
+// 각도 프롬프트에 힌트로 넣을 "이미 다룬 주제" 개수 (최신순).
+// ⚠️ 2026-07-26: 30으로 줄였다가 **되돌렸다.** 실측에서 잘린 중복 6개가 전부 힌트 밖(순번
+//    31·33·38·57·66·134)이었다 — 모델이 못 본 주제를 그대로 다시 만들었고 각도 10개 중 6개가
+//    날아갔다. **막는 게 잡는 것보다 6배 싸다**: 힌트는 입력($5/1M)이고 버려진 각도는 출력($30/1M)이다.
+//    그리고 이건 파편 수와 무관하다 — 30일 창 × 브리핑당 8항목이 자연 상한이라 무한히 안 자란다.
+//    아래 숫자는 폭주 방어선일 뿐이다(하루에 브리핑을 수십 번 눌렀을 때).
+const PROMPT_TOPIC_HINT = 250;
 
 // ⚠️ scripts/check-brief.mjs의 ASSEMBLE_SYS와 반드시 동일.
 const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아온 것들을 아침 브리핑으로 쓴다.
@@ -75,7 +82,10 @@ async function recentBriefContext(
     .select('text')
     .eq('kind', 'discovery')
     .eq('surface', 'briefing')
-    .gte('created_at', since);
+    .gte('created_at', since)
+    // ⚠️ 정렬이 없었다. 아래에서 "최근 N개"를 자르는데 순서가 안 정해져 있으면
+    //    임의의 N개가 된다 — 정작 어제 다룬 주제가 빠질 수 있다. 최신순으로 고정한다.
+    .order('created_at', { ascending: false });
   const texts = (data ?? []).map((r) => (r.text as string) ?? '');
   return {
     topics: texts.flatMap((t) => [...t.matchAll(HEADING_RE)].map((m) => m[1].trim())),
@@ -110,9 +120,12 @@ export async function* streamBrief(
   const [material, prior] = await Promise.all([loadMaterial(supabase), recentBriefContext(supabase)]);
 
   yield { t: 'status', stage: 'angles' };
+  // 프롬프트 힌트(약하지만 생성 자체를 막는다) + 게이트(확실하지만 이미 만든 걸 버린다) 이중 방어.
+  // 힌트가 막아주면 각도 슬롯이 안 낭비되므로, 창 전체를 넣는 게 결과적으로 싸다 (위 상수 주석).
+  const hintTopics = prior.topics.slice(0, PROMPT_TOPIC_HINT);
   const block =
     materialBlock(material) +
-    (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
+    (hintTopics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${hintTopics.join(' / ')}` : '');
   const raw = await anglesFromBlock(
     block,
     DISCOVERY_MODEL,

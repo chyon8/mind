@@ -26,8 +26,10 @@ export const REPEAT_SIM = 0.6;
 //    brief.ts가 early return했고 원장 저장에도 도달하지 못했다). 중복보다 빈 브리핑이 훨씬 나쁘다.
 const MIN_KEEP = 4;
 
-// 최근 제목을 무한정 임베딩하지 않는다 — 30일치가 쌓이면 수백 개가 된다. 최신 것이 더 중요하다.
-const MAX_PRIOR = 80;
+// ⚠️ **창(30일) 전체를 덮는 게 목적이다.** 프롬프트 힌트는 최근 30개로 줄였고(brief.ts
+//    PROMPT_TOPIC_HINT), 나머지 커버는 전부 여기가 맡는다. 임베딩은 제목 144개가 $0.0005라
+//    사실상 공짜다 — 아낄 곳이 아니다. 이 숫자는 API 배열 상한(2048)에 대한 안전선일 뿐이다.
+const MAX_PRIOR = 300;
 
 function cosine(a: number[], b: number[]): number {
   let dot = 0;
@@ -59,7 +61,9 @@ export async function dedupeAngles(
   angles: Angle[],
   priorTopics: string[],
 ): Promise<DedupeResult> {
-  const prior = priorTopics.slice(-MAX_PRIOR).filter((t) => t.trim());
+  // ⚠️ priorTopics는 **최신순**이다 (brief.ts가 created_at desc로 읽는다).
+  //    slice(-N)으로 자르면 가장 오래된 N개를 집는다 — 정반대다.
+  const prior = priorTopics.slice(0, MAX_PRIOR).filter((t) => t.trim());
   if (angles.length <= 1) return { kept: angles, dropped: [], abandoned: false };
 
   const texts = [...angles.map(angleText), ...prior];

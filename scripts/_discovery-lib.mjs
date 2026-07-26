@@ -49,7 +49,17 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 2. **파편 두세 개가 한 방향을 가리키면 하나의 각도로 합쳐라.** 흩어진 걸 대신 이어준다.
 3. **각도는 구체적이어야 한다.** "하드웨어"가 아니라 "STM32로 만드는 소형 신디사이저 프로젝트".
    막연하면 검색이 리스티클을 문다.
-4. **resurface**: 오래돼 잊었을 파편 중, 지금 상황과 새로 닿는 것 하나. 검색이 아니라 되꺼냄이다.
+4. **한 파편에서 각도를 두 개 이상 만들지 마라.** 파편 하나가 브리핑을 먹으면 안 된다.
+
+## slot — 각도의 성격 (출처가 아니라 하는 일이 다르다)
+- **expansion**: 저장물이 가리키는 방향을 더 판다 — 경쟁자·선례·기술. **소재가 이어진다.**
+- **idea**: **만들 만한 것을 물어온다. 소재는 끊고 동기를 잇는다.** 파편에서 "왜 저장했나"라는
+  동기를 뽑아, 그 동기로 만들어진 **다른 소재**의 실물 제품·사례를 찾는다.
+  from은 반드시 「파편 → 동기」 형식으로 쓴다. 동기를 지어내지 마라 — 파편에 근거해야 한다.
+  **소재를 그대로 따라가면 그건 idea가 아니라 expansion이다.**
+- **lens**: 다른 프레임으로 비춘다 — 관점·트렌드·전시·가서 볼 것. 프로덕트가 아니어도 된다.
+- **resurface**: 오래돼 잊었을 파편 중 지금 상황과 새로 닿는 것. 검색이 아니라 되꺼냄이다.
+  필요할 때만 — 닿는 게 없으면 안 넣는다.
 
 ## 이 사람의 렌즈 (취향)
 - 소스 결: Hacker News / Indie Hackers / Product Hunt.
@@ -71,7 +81,14 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
   특히 **최근에 저장한 것(오늘·어제)을 우선 살펴라** — 지금 관심이 거기 있다.
 - **<이미 다룬 주제>가 주어지면 그건 다시 꺼내지 마라.** 지난번에 다룬 걸 또 하면 반복이다.
   같은 주제를 다른 제목으로 꺼내는 것도 반복이다.
-- new(완전히 새로운 것)·다른 분야(관점·전시·트렌드)를 반드시 섞어라.
+- **구성 (반드시 지켜라):**
+  - **idea는 최소 2개.** 이게 이 사람이 제일 원하는 것이다. 1개면 실패다 —
+    재료를 다시 훑어서 동기를 뽑아낼 파편을 더 찾아라. 저장물 대부분이 동기를 갖고 있다.
+  - **lens는 최대 1개.** 관점·문학·전시는 좋지만 브리핑의 곁가지다. 2개 이상이면 잡지가 된다.
+    (넘으면 코드가 잘라낸다 — 억지로 여러 개 만들어봐야 버려진다.)
+  - 나머지는 expansion. resurface는 닿는 게 있을 때만 0~1개.
+- **글감에서 뽑는 각도는 최대 1개.** 에세이 재료는 좋은 lens가 되지만, 소설·문학 각도가
+  서너 개면 브리핑이 문예지가 된다.
 - **10개 정도 만들어라.** 뒤에서 중복 각도를 걸러내므로 여유가 필요하다.
   단, 리스티클 미끼나 이미 아는 얘기로 자리를 메우진 마라 — 그건 걸러져도 자리만 낭비한다.
 
@@ -79,14 +96,15 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 막연한 시장조사("AI 회의 어시스턴트 시장 분석")가 아니라, 저장소를 겹치고 합쳐서 나온 구체적 각도다:
 - {"slot":"expansion","query":"Cluely 같은 실시간 회의 AI 어시스턴트 경쟁 제품과 수익 모델 indie hacker","from":"저장한 Cluely 북마크 × No phone(STT 미팅 어시스턴트)","why":"저장한 링크가 참고자료가 아니라 같은 물건 — 누가 이미 하고 돈 버나(원리 1)"}
 - {"slot":"expansion","query":"STM32 라즈베리파이로 만드는 소형 사이버덱 DIY 조립 프로젝트","from":"'Crazy AI Cyberdeck' + 'epaper display' 파편 두 개","why":"흩어진 두 파편이 한 물건으로 합쳐진다 — PCB 없이 시작하는 진입점(원리 2)"}
-- {"slot":"new","query":"why cassette tapes and analog objects are back in 2026 friction as feature","from":"#cassette 파편 + Mind(일부러 흐려지는 앱)","why":"프로덕트가 아니라 관점 — 이 사람 제품의 근거를 새 프레임으로 비춘다(다른 갈래)"}
+- {"slot":"lens","query":"why cassette tapes and analog objects are back in 2026 friction as feature","from":"#cassette 파편 + Mind(일부러 흐려지는 앱)","why":"프로덕트가 아니라 관점 — 이 사람 제품의 근거를 새 프레임으로 비춘다(다른 갈래)"}
+- {"slot":"idea","query":"micro SaaS built from one annoyance with existing tool solo founder revenue examples","from":"'리틀리 좀 더 커스터마이징… 결제 자유롭게' 파편 → 쓰던 도구의 불편 하나에서 출발해 1인이 만들어 파는 것","why":"소재(링크인바이오)를 끊고 동기로 뻗는다 — 같은 동기로 만들어진 다른 물건들이 재료다"}
 - {"slot":"resurface","query":"","from":"'The Top Idea in Your Mind'(며칠 전 저장, 안 봄)","why":"저장한 날엔 에세이, 지금 3프로젝트+본업 상황에선 진단으로 읽힌다"}
 위 예는 **형식과 사고방식**을 보여줄 뿐이다. 이 사람의 지금 재료로 새로 만들어라 — 예시를 복사하지 마라.
 
 각 각도:
-- slot: "expansion" | "new" | "resurface"
+- slot: "expansion" | "idea" | "lens" | "resurface"
 - query: 실제로 검색창에 칠 구체적 문구 (주제에 맞게 한국어 또는 영어)
-- from: 어느 파편/프로젝트에서 나왔나 (완전히 새로운 것이면 "")
+- from: 어느 파편/프로젝트에서 나왔나. **idea는 「파편 → 동기」 형식으로.**
 - why: 왜 이 각도인가, 한 줄
 - from_picked: 「내가 지정한 것」구획의 파편에서 나온 각도면 true. **그 구획이 없으면 전부 false다.**
   ⚠️ "내가 이 각도를 골랐다"는 뜻이 **아니다.** 지정 구획에서 나온 것만 true다.
@@ -119,17 +137,19 @@ export async function loadMaterial(supabase) {
     byProject.get(m.project_id).push(f);
   }
   const title = (f) => (f.type === 'link' ? (f.link_title ?? f.content) : f.content) ?? '';
+  // ⚠️ 파편 id·링크 URL을 안 싣는다 — material.ts fragLine과 동일 (그 주석에 이유가 있다).
   const fragLine = (f) => {
     const t = f.type === 'link' && f.link_title ? `『${f.link_title}』 ` : '';
     const body = (f.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
     const desc = f.link_description ? ` — ${f.link_description.replace(/\s+/g, ' ').slice(0, 120)}` : '';
     const note = f.note ? ` (덧: ${f.note.replace(/\s+/g, ' ').slice(0, 80)})` : '';
-    return `  - ${kstDate(f.created_at)} [${f.type}] ${t}${body}${desc}${note} {id:${f.id}}`;
+    return `  - ${kstDate(f.created_at)} [${f.type}] ${t}${body}${desc}${note}`;
   };
   // status='active'만 프로젝트. 나머지(💡·글감·paused·done)는 리스트 — material.ts와 같은 갈림.
   const withFrags = (projRes.data ?? [])
     .map((p) => ({ ...p, fragments: byProject.get(p.id) ?? [] }))
-    .filter((p) => p.fragments.length > 0);
+    .filter((p) => p.fragments.length > 0)
+    .filter((p) => p.status !== 'done'); // 끝난 일은 재료가 아니다 (material.ts와 같은 규칙)
   const projects = withFrags
     .filter((p) => p.status === 'active')
     .map((p) => [`[프로젝트: ${p.name}]`, `  설명: ${p.description ?? '(없음)'}`, ...p.fragments.map(fragLine)].join('\n'))
@@ -159,6 +179,7 @@ export async function loadMaterial(supabase) {
     '※ 여기서 뽑는 각도는 최대 2개까지다 (아래 구성 규칙).',
     projects || '(없음)', '',
     '=== 아이디어·수집함 (아직 시작 안 한 것 / 멈춘 것) ===',
+    '※ 끝난 프로젝트(done)는 재료에서 아예 빠진다 — 여기 없다.',
     '※ **이건 프로젝트가 아니라 리스트다.** 파편 하나하나가 내용 그 자체다 —',
     '   설명은 정답지가 아니라 그냥 라벨이다. 진행 중인 일의 캡에 걸리지 않는다.',
     '※ 글감은 에세이 소재다 — 프로덕트처럼 다루지 마라.',
@@ -177,7 +198,8 @@ export async function loadMaterial(supabase) {
 export async function recentBriefContext(supabase) {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
   const { data } = await supabase.schema('rudy').from('utterances').select('text')
-    .eq('kind', 'discovery').eq('surface', 'briefing').gte('created_at', since);
+    .eq('kind', 'discovery').eq('surface', 'briefing').gte('created_at', since)
+    .order('created_at', { ascending: false }); // 최신순 — 아래에서 "최근 N개"를 자르므로 필수
   const texts = (data ?? []).map((r) => r.text ?? '');
   return {
     topics: texts.flatMap((t) => [...t.matchAll(/^###\s+(.+)$/gm)].map((m) => m[1].trim())),
@@ -188,7 +210,7 @@ export async function recentBriefContext(supabase) {
 // ── discovery/dedupe.ts의 node 미러 (임계·안전망 반드시 동일) ─────────────────
 export const REPEAT_SIM = 0.6;
 const MIN_KEEP = 4;
-const MAX_PRIOR = 80;
+const MAX_PRIOR = 300; // 창 전체를 덮는다 — 임베딩은 제목 144개가 $0.0005라 아낄 곳이 아니다
 
 export async function embedMany(key, texts) {
   const res = await fetch('https://api.openai.com/v1/embeddings', {
@@ -208,7 +230,7 @@ function cosine(a, b) {
 }
 
 export async function dedupeAngles(key, angles, priorTopics) {
-  const prior = (priorTopics ?? []).slice(-MAX_PRIOR).filter((t) => t.trim());
+  const prior = (priorTopics ?? []).slice(0, MAX_PRIOR).filter((t) => t.trim()); // 최신순이라 앞에서 자른다
   if (angles.length <= 1) return { kept: angles, dropped: [], abandoned: false };
   const text = (a) => `${a.query} ${a.from} ${a.why}`.replace(/\s+/g, ' ').trim();
   const vecs = await embedMany(key, [...angles.map(text), ...prior]);
@@ -233,7 +255,17 @@ export async function dedupeAngles(key, angles, priorTopics) {
   return { kept, dropped, abandoned: false };
 }
 
-export async function callOpenAI(key, model, system, user) {
+// _shared/usage.ts의 단가표와 동일하게 유지한다.
+const PRICE_PER_1M = {
+  'gpt-4o': { in: 2.5, out: 10.0 },
+  'gpt-4o-mini': { in: 0.15, out: 0.6 },
+  'gpt-5.5': { in: 5.0, out: 30.0, cachedIn: 0.5 },
+};
+
+// ⚠️ 예전엔 usage를 통째로 버렸다 — 그래서 스크립트 비용이 항상 "추정"이었고, 프롬프트 캐싱이
+//    실제로 걸리는지도 알 수 없었다. 이제 호출마다 실측을 찍는다 (배포 함수는 rudy.llm_usage에
+//    같은 값을 남긴다 — _shared/usage.ts).
+export async function callOpenAI(key, model, system, user, label = '') {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -244,7 +276,19 @@ export async function callOpenAI(key, model, system, user) {
     }),
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
-  const { choices } = await res.json();
+  const { choices, usage } = await res.json();
+  if (usage) {
+    const p = PRICE_PER_1M[model];
+    const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+    const plain = (usage.prompt_tokens ?? 0) - cached;
+    const cost = p
+      ? (plain * p.in + cached * (p.cachedIn ?? p.in) + (usage.completion_tokens ?? 0) * p.out) / 1e6
+      : null;
+    console.log(
+      `  💰 ${label || model}: 입력 ${usage.prompt_tokens}${cached ? ` (캐시 ${cached})` : ''}` +
+      ` · 출력 ${usage.completion_tokens} → ${cost == null ? '단가 미상' : '$' + cost.toFixed(4)}`,
+    );
+  }
   return choices?.[0]?.message?.content ?? '';
 }
 
@@ -254,13 +298,24 @@ export function parseAngles(raw, pickedMax) {
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
   let angles = (p.angles ?? [])
     .filter(
-      (a) => a && ['expansion', 'new', 'resurface'].includes(a.slot) && typeof a.query === 'string',
+      (a) => a && ['expansion', 'idea', 'lens', 'resurface'].includes(a.slot) && typeof a.query === 'string',
     )
-    .map((a) => ({ ...a, picked: a.picked === true }));
-  if (typeof pickedMax === 'number') {
+    .map((a) => ({ ...a, from_picked: a.from_picked === true }));
+  // 지정 컷 (angles.ts와 동일). 너무 깎이면 포기 — 빈 브리핑이 중복보다 나쁘다.
+  if (typeof pickedMax === 'number' && pickedMax > 0) {
     let n = 0;
-    angles = angles.filter((a) => !a.picked || ++n <= pickedMax);
+    const kept = angles.filter((a) => !a.from_picked || ++n <= pickedMax);
+    if (kept.length >= 6) angles = kept;
   }
+  // lens 상한 = 1 (angles.ts LENS_MAX). 프롬프트만으론 안 지켜져서 코드로 자른다.
+  {
+    let n = 0;
+    const kept = angles.filter((a) => a.slot !== 'lens' || ++n <= 1);
+    if (kept.length >= 6) angles = kept;
+  }
+  // idea 하한은 코드로 못 만든다 — 미달을 알리기만 한다 (angles.ts IDEA_MIN).
+  const ideaCount = angles.filter((a) => a.slot === 'idea').length;
+  if (ideaCount < 2) console.log(`  ⚠️ idea 하한 미달: ${ideaCount}/2 — 프롬프트가 안 먹었다`);
   return angles.slice(0, 10);
 }
 

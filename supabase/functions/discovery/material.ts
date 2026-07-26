@@ -84,22 +84,32 @@ export async function loadMaterial(supabase: SupabaseClient): Promise<Material> 
     .filter((p) => p.fragments.length > 0); // 이 창에 파편 없는 프로젝트는 뺀다
 
   const loose = frags.filter((f) => !inProject.has(f.id));
+  // ⚠️ done은 재료에서 통째로 뺀다 (2026-07-26 유저 결정). 끝난 일에 바깥을 뒤질 이유가 없고,
+  //    구획 분리 뒤엔 오히려 **우대받는 자리**로 들어가는 게 문제였다 — lists는 "절반 이상을
+  //    여기서 뽑아라"의 대상이라, 끝난 프로젝트가 진행 중인 것보다 유리해진다.
+  //    paused는 남긴다: 멈춘 것뿐이지 다시 시작할 수 있다.
+  const live = all.filter((p) => p.status !== 'done');
   return {
-    projects: all.filter((p) => p.status === 'active'),
-    lists: all.filter((p) => p.status !== 'active'),
+    projects: live.filter((p) => p.status === 'active'),
+    lists: live.filter((p) => p.status !== 'active'),
     loose,
     picked: (pickRes.data ?? []) as Frag[],
   };
 }
 
 // 파편 한 줄. 링크는 제목·설명(og)까지 — 북마크가 뭔지 알아야 원리 C(북마크×프로젝트 겹치기)가 된다.
+//
+// ⚠️ **파편 id를 안 싣는다** (2026-07-26 실측으로 제거, 유저 승인). 각도 출력의 `from`은 자유
+//    문장이고 조립은 출처 URL만 쓴다 — 이 파이프라인 어디서도 파편 id를 읽지 않는다. UUID 41자가
+//    파편마다 붙어 재료의 28%(127개 기준 2,893토큰)를 먹었고 파편 수에 정비례해 자라던 것.
+//    링크 URL 원문은 남긴다 — 도메인이 힌트가 되고, 빼는 건 유저가 승인한 적 없다.
 function fragLine(f: Frag): string {
   const date = kstDate(f.created_at);
   const title = f.type === 'link' && f.link_title ? `『${f.link_title}』 ` : '';
   const body = (f.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
   const desc = f.link_description ? ` — ${f.link_description.replace(/\s+/g, ' ').slice(0, 120)}` : '';
   const note = f.note ? ` (덧: ${f.note.replace(/\s+/g, ' ').slice(0, 80)})` : '';
-  return `  - ${date} [${f.type}] ${title}${body}${desc}${note} {id:${f.id}}`;
+  return `  - ${date} [${f.type}] ${title}${body}${desc}${note}`;
 }
 
 // 모델에 넘길 재료 블록. 성격이 섞이지 않게 구획을 나눠서 준다.
@@ -146,6 +156,7 @@ export function materialBlock(m: Material): string {
     projects || '(없음)',
     '',
     '=== 아이디어·수집함 (아직 시작 안 한 것 / 멈춘 것) ===',
+    '※ 끝난 프로젝트(done)는 재료에서 아예 빠진다 — 여기 없다.',
     '※ **이건 프로젝트가 아니라 리스트다.** 파편 하나하나가 내용 그 자체다 —',
     '   설명은 정답지가 아니라 그냥 라벨이다. 진행 중인 일의 캡에 걸리지 않는다.',
     '※ 글감은 에세이 소재다 — 프로덕트처럼 다루지 마라.',

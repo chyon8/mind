@@ -13,7 +13,7 @@ import { complete, DISCOVERY_MODEL, type UsageSink } from '../_shared/openai.ts'
 import { loadMaterial, materialBlock } from './material.ts';
 
 export type Angle = {
-  slot: 'expansion' | 'new' | 'resurface';
+  slot: 'expansion' | 'idea' | 'lens' | 'resurface';
   query: string; // 실제 검색창에 칠 구체적 문구
   from: string; // 어느 파편/프로젝트에서 나왔나
   why: string; // 왜 이 각도인가 (한 줄)
@@ -25,6 +25,11 @@ export type Angle = {
 //    각도가 전멸하고, 그러면 brief.ts가 early return해서 **원장 저장에도 도달하지 못한다.**
 //    지정 하나가 브리핑을 먹는 것보다 브리핑이 사라지는 게 훨씬 나쁘다.
 const MIN_ANGLES_AFTER_CUT = 6;
+
+// 2026-07-26 유저 지시. lens는 코드로 자르고(상한), idea는 프롬프트로 요구한다(하한 — 코드는
+// 각도를 만들 수 없다). 실측 근거: 프롬프트에 "lens 최대 1~2"를 써도 3개가 나왔다.
+const LENS_MAX = 1;
+const IDEA_MIN = 2;
 
 export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 맡는다.
 아직 검색하지 않는다 — 이 사람의 저장소를 읽고 **무엇을 검색할지** 각도만 정한다.
@@ -50,7 +55,17 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 2. **파편 두세 개가 한 방향을 가리키면 하나의 각도로 합쳐라.** 흩어진 걸 대신 이어준다.
 3. **각도는 구체적이어야 한다.** "하드웨어"가 아니라 "STM32로 만드는 소형 신디사이저 프로젝트".
    막연하면 검색이 리스티클을 문다.
-4. **resurface**: 오래돼 잊었을 파편 중, 지금 상황과 새로 닿는 것 하나. 검색이 아니라 되꺼냄이다.
+4. **한 파편에서 각도를 두 개 이상 만들지 마라.** 파편 하나가 브리핑을 먹으면 안 된다.
+
+## slot — 각도의 성격 (출처가 아니라 하는 일이 다르다)
+- **expansion**: 저장물이 가리키는 방향을 더 판다 — 경쟁자·선례·기술. **소재가 이어진다.**
+- **idea**: **만들 만한 것을 물어온다. 소재는 끊고 동기를 잇는다.** 파편에서 "왜 저장했나"라는
+  동기를 뽑아, 그 동기로 만들어진 **다른 소재**의 실물 제품·사례를 찾는다.
+  from은 반드시 「파편 → 동기」 형식으로 쓴다. 동기를 지어내지 마라 — 파편에 근거해야 한다.
+  **소재를 그대로 따라가면 그건 idea가 아니라 expansion이다.**
+- **lens**: 다른 프레임으로 비춘다 — 관점·트렌드·전시·가서 볼 것. 프로덕트가 아니어도 된다.
+- **resurface**: 오래돼 잊었을 파편 중 지금 상황과 새로 닿는 것. 검색이 아니라 되꺼냄이다.
+  필요할 때만 — 닿는 게 없으면 안 넣는다.
 
 ## 이 사람의 렌즈 (취향)
 - 소스 결: Hacker News / Indie Hackers / Product Hunt.
@@ -72,7 +87,14 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
   특히 **최근에 저장한 것(오늘·어제)을 우선 살펴라** — 지금 관심이 거기 있다.
 - **<이미 다룬 주제>가 주어지면 그건 다시 꺼내지 마라.** 지난번에 다룬 걸 또 하면 반복이다.
   같은 주제를 다른 제목으로 꺼내는 것도 반복이다.
-- new(완전히 새로운 것)·다른 분야(관점·전시·트렌드)를 반드시 섞어라.
+- **구성 (반드시 지켜라):**
+  - **idea는 최소 2개.** 이게 이 사람이 제일 원하는 것이다. 1개면 실패다 —
+    재료를 다시 훑어서 동기를 뽑아낼 파편을 더 찾아라. 저장물 대부분이 동기를 갖고 있다.
+  - **lens는 최대 1개.** 관점·문학·전시는 좋지만 브리핑의 곁가지다. 2개 이상이면 잡지가 된다.
+    (넘으면 코드가 잘라낸다 — 억지로 여러 개 만들어봐야 버려진다.)
+  - 나머지는 expansion. resurface는 닿는 게 있을 때만 0~1개.
+- **글감에서 뽑는 각도는 최대 1개.** 에세이 재료는 좋은 lens가 되지만, 소설·문학 각도가
+  서너 개면 브리핑이 문예지가 된다.
 - **10개 정도 만들어라.** 뒤에서 중복 각도를 걸러내므로 여유가 필요하다.
   단, 리스티클 미끼나 이미 아는 얘기로 자리를 메우진 마라 — 그건 걸러져도 자리만 낭비한다.
 
@@ -80,21 +102,25 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 막연한 시장조사("AI 회의 어시스턴트 시장 분석")가 아니라, 저장소를 겹치고 합쳐서 나온 구체적 각도다:
 - {"slot":"expansion","query":"Cluely 같은 실시간 회의 AI 어시스턴트 경쟁 제품과 수익 모델 indie hacker","from":"저장한 Cluely 북마크 × No phone(STT 미팅 어시스턴트)","why":"저장한 링크가 참고자료가 아니라 같은 물건 — 누가 이미 하고 돈 버나(원리 1)"}
 - {"slot":"expansion","query":"STM32 라즈베리파이로 만드는 소형 사이버덱 DIY 조립 프로젝트","from":"'Crazy AI Cyberdeck' + 'epaper display' 파편 두 개","why":"흩어진 두 파편이 한 물건으로 합쳐진다 — PCB 없이 시작하는 진입점(원리 2)"}
-- {"slot":"new","query":"why cassette tapes and analog objects are back in 2026 friction as feature","from":"#cassette 파편 + Mind(일부러 흐려지는 앱)","why":"프로덕트가 아니라 관점 — 이 사람 제품의 근거를 새 프레임으로 비춘다(다른 갈래)"}
+- {"slot":"lens","query":"why cassette tapes and analog objects are back in 2026 friction as feature","from":"#cassette 파편 + Mind(일부러 흐려지는 앱)","why":"프로덕트가 아니라 관점 — 이 사람 제품의 근거를 새 프레임으로 비춘다(다른 갈래)"}
+- {"slot":"idea","query":"micro SaaS built from one annoyance with existing tool solo founder revenue examples","from":"'리틀리 좀 더 커스터마이징… 결제 자유롭게' 파편 → 쓰던 도구의 불편 하나에서 출발해 1인이 만들어 파는 것","why":"소재(링크인바이오)를 끊고 동기로 뻗는다 — 같은 동기로 만들어진 다른 물건들이 재료다"}
 - {"slot":"resurface","query":"","from":"'The Top Idea in Your Mind'(며칠 전 저장, 안 봄)","why":"저장한 날엔 에세이, 지금 3프로젝트+본업 상황에선 진단으로 읽힌다"}
 위 예는 **형식과 사고방식**을 보여줄 뿐이다. 이 사람의 지금 재료로 새로 만들어라 — 예시를 복사하지 마라.
 
 각 각도:
-- slot: "expansion" | "new" | "resurface"
+- slot: "expansion" | "idea" | "lens" | "resurface"
 - query: 실제로 검색창에 칠 구체적 문구 (주제에 맞게 한국어 또는 영어)
-- from: 어느 파편/프로젝트에서 나왔나 (완전히 새로운 것이면 "")
+- from: 어느 파편/프로젝트에서 나왔나. **idea는 「파편 → 동기」 형식으로.**
 - why: 왜 이 각도인가, 한 줄
 - from_picked: 「내가 지정한 것」구획의 파편에서 나온 각도면 true. **그 구획이 없으면 전부 false다.**
   ⚠️ "내가 이 각도를 골랐다"는 뜻이 **아니다.** 지정 구획에서 나온 것만 true다.
 
 JSON만 출력: {"angles":[{"slot":"...","query":"...","from":"...","why":"...","from_picked":false}]}`;
 
-const SLOTS = ['expansion', 'new', 'resurface'];
+// 2026-07-26: 'new' → 'lens' 개명 + 'idea' 신설. 'new'는 정의가 없어서 실질적으로 관점
+// 슬롯으로 굳어 있었다(실측: "새로움" 각도 6개 전부 관점·문학). 이름이 하는 일을 말하게 바꾸고,
+// 프로덕트 아이디어(동기 기반)는 제 슬롯을 받았다.
+const SLOTS = ['expansion', 'idea', 'lens', 'resurface'];
 
 // 재료 블록 → 각도. brief.ts가 재료를 한 번만 로드해 넘길 수 있게 블록을 받는다.
 // resurface는 query가 비어 있어도 통과시킨다(검색이 아니라 되꺼냄이라서).
@@ -138,6 +164,24 @@ export function anglesFromBlock(
       const kept = angles.filter((a) => !a.from_picked || ++n <= pickedMax);
       if (kept.length >= MIN_ANGLES_AFTER_CUT) angles = kept;
       else console.warn('[angles] 지정 컷이 각도를 너무 깎아 포기', angles.length, '→', kept.length);
+    }
+
+    // lens 상한 (2026-07-26 유저 지시 "관점 한 개 넘지 않게").
+    // ⚠️ 프롬프트에 "최대 1개"라고 써도 안 지켜졌다 — 실측에서 3개가 나왔고 그중 2개가 글감이었다.
+    //    §7-b: "약한 지시로는 구조적 쏠림을 못 이긴다, 숫자 캡이라야 이긴다". 그래서 코드로 자른다.
+    //    모델이 먼저 낸 것을 남긴다(제 딴엔 우선순위 순으로 냈을 테니).
+    {
+      let n = 0;
+      const kept = angles.filter((a) => a.slot !== 'lens' || ++n <= LENS_MAX);
+      if (kept.length >= MIN_ANGLES_AFTER_CUT) angles = kept;
+      else console.warn('[angles] lens 컷이 각도를 너무 깎아 포기', angles.length, '→', kept.length);
+    }
+
+    // idea 하한은 **코드로 못 만든다** — 자를 순 있어도 생성할 순 없다. 프롬프트가 요구하고,
+    // 미달이면 여기 남긴다. 몇 번 미달하는지가 프롬프트를 더 조일지 판단할 근거가 된다.
+    const ideaCount = angles.filter((a) => a.slot === 'idea').length;
+    if (ideaCount < IDEA_MIN) {
+      console.warn(`[angles] idea 하한 미달: ${ideaCount}/${IDEA_MIN} — 프롬프트가 안 먹었다`);
     }
     // 상한. 중복 게이트(dedupe.ts)가 뒤에서 깎으므로 목표(8개)보다 넉넉히 통과시킨다.
     return angles.slice(0, 12);

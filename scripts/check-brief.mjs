@@ -77,7 +77,7 @@ async function main() {
   const block = rawBlock + (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
   if (prior.topics.length) console.log(`(이미 다룬 주제 ${prior.topics.length}개 회피)`);
   process.stdout.write('각도 뽑는 중 (gpt-5.5)… ');
-  const raw = parseAngles(await callOpenAI(env.openai, MODEL, ANGLE_SYS, block), pickedCount);
+  const raw = parseAngles(await callOpenAI(env.openai, MODEL, ANGLE_SYS, block, '각도'), pickedCount);
   console.log(`${raw.length}개`);
 
   // 중복 게이트 — 검색 전에 자른다 (brief.ts와 같은 자리·같은 임계). 걸러진 각도는 Exa를 안 탄다.
@@ -136,7 +136,7 @@ async function main() {
   ].filter(Boolean).join('\n\n');
 
   process.stdout.write('\n브리핑 조립 중 (gpt-5.5)…\n\n');
-  const brief = await callOpenAI(env.openai, MODEL, ASSEMBLE_SYS, user);
+  const brief = await callOpenAI(env.openai, MODEL, ASSEMBLE_SYS, user, '조립');
   console.log('═'.repeat(70));
   console.log(brief);
   console.log('═'.repeat(70));
