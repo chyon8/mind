@@ -28,6 +28,8 @@ export interface Fragment {
   archived: boolean;
   touch_count: number; // 회상에서 구해낸 횟수 = 자라나는 중요도
   let_go_at: string | null; // 회상에서 흘려보낸 시각. 보여준 것만으론 기록되지 않는다
+  // "다음 발견에 포함" 표시. 브리핑이 한 번 돌면 서버가 전부 내린다 — 선명도와 무관하다
+  discover_next: boolean;
   // fragment_projects에서 파생 (클라이언트 전용). 빈 배열 = Inbox
   project_ids: string[];
 }

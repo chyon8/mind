@@ -15,12 +15,12 @@ if (!env.openai) { console.error('OPENAI_API_KEY(또는 OPEN_AI_API_KEY) 필요'
 const supabase = makeClient(env.url, env.role);
 
 async function main() {
-  const { block } = await loadMaterial(supabase);
+  const { block, pickedCount } = await loadMaterial(supabase);
   console.log(`모델: ${MODEL} / 재료 ${block.split('\n').length}줄\n`);
 
   const raw = await callOpenAI(env.openai, MODEL, ANGLE_SYS, block);
   let angles;
-  try { angles = parseAngles(raw); }
+  try { angles = parseAngles(raw, pickedCount); }
   catch { console.error('JSON 파싱 실패. 원문:\n', raw); process.exit(1); }
 
   const label = { expansion: '확장', new: '새로움', resurface: '되꺼냄' };

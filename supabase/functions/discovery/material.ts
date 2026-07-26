@@ -30,6 +30,9 @@ export type Project = {
 export type Material = {
   projects: Project[];
   loose: Frag[]; // 어느 프로젝트에도 안 묶인 파편 — 북마크·관찰. 확장(원리 C)의 씨앗.
+  // 유저가 "다음 발견에 포함"으로 직접 지정한 것 (RUDY-STATUS.md ①). 창(90일)을 안 걸고
+  // archived도 안 거른다 — 명시적 지정이 자동 규칙을 이긴다. 브리핑이 쓰고 나면 꺼진다.
+  picked: Frag[];
 };
 
 const FRAG_COLS = 'id, created_at, type, content, link_title, link_description, note';
@@ -37,7 +40,7 @@ const WINDOW_DAYS = 90; // §6-2 창. 지금은 코퍼스가 5일치라 사실�
 
 export async function loadMaterial(supabase: SupabaseClient): Promise<Material> {
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
-  const [projRes, fragRes, mapRes] = await Promise.all([
+  const [projRes, fragRes, mapRes, pickRes] = await Promise.all([
     supabase.from('projects').select('id, name, status, description').order('created_at'),
     supabase
       .from('fragments')
@@ -46,6 +49,7 @@ export async function loadMaterial(supabase: SupabaseClient): Promise<Material> 
       .gte('created_at', since)
       .order('created_at', { ascending: false }),
     supabase.from('fragment_projects').select('fragment_id, project_id'),
+    supabase.from('fragments').select(FRAG_COLS).eq('discover_next', true),
   ]);
 
   const frags = (fragRes.data ?? []) as Frag[];
@@ -73,7 +77,7 @@ export async function loadMaterial(supabase: SupabaseClient): Promise<Material> 
     .filter((p) => p.fragments.length > 0); // 이 창에 파편 없는 프로젝트는 뺀다
 
   const loose = frags.filter((f) => !inProject.has(f.id));
-  return { projects, loose };
+  return { projects, loose, picked: (pickRes.data ?? []) as Frag[] };
 }
 
 // 파편 한 줄. 링크는 제목·설명(og)까지 — 북마크가 뭔지 알아야 원리 C(북마크×프로젝트 겹치기)가 된다.
@@ -100,7 +104,18 @@ export function materialBlock(m: Material): string {
 
   const loose = m.loose.map(fragLine).join('\n');
 
+  // 지정된 게 있을 때만 맨 위에 붙인다 — 빈 구획을 넣으면 모델이 "지정이 있었나" 헷갈린다.
+  const picked = m.picked.length
+    ? [
+        '=== 내가 지정한 것 (유저가 직접 "다음 발견에 포함"을 누른 파편) ===',
+        '※ 이건 유저의 명시적 지시다. 반드시 각도로 만들어라.',
+        m.picked.map(fragLine).join('\n'),
+        '',
+      ]
+    : [];
+
   return [
+    ...picked,
     '=== 진행 중인 일 / 아이디어 수집 (프로젝트별) ===',
     '※ status=active는 지금 만드는 일. 그 외(💡·글감·포폴용 등)는 이름이 성격을 말한다.',
     '※ 글감은 에세이 소재다 — 프로덕트처럼 다루지 마라.',

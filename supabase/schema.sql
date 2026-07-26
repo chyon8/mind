@@ -28,8 +28,14 @@ create table fragments (
   touch_count        integer not null default 0,
   -- 회상에서 흘려보낸 시각. 보여준 것만으로는 아무것도 기록하지 않는다 —
   -- 무시하면 아무 일도 안 일어나야 "안 보는 행위 자체가 판정이다"(SPEC §1)가 산다.
-  let_go_at          timestamptz
+  let_go_at          timestamptz,
+  -- "다음 발견에 포함" 표시. 브리핑이 한 번 돌면 전부 false로 내려간다 (discover-next.sql).
+  -- 선명도와 무관하다 — 이걸 켜도 last_touched_at·touch_count는 안 움직인다.
+  discover_next      boolean not null default false
 );
+
+-- 브리핑이 "표시된 것"만 골라 읽는다 — true인 행만 담는 부분 인덱스
+create index fragments_discover_next_idx on fragments (discover_next) where discover_next;
 
 create index fragments_created_at_idx on fragments (created_at desc);
 -- 회상 후보는 "가장 오래 안 건드린 것"부터 찾는다

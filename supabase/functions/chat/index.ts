@@ -37,6 +37,11 @@ const LINK_THRESHOLD = 0.34;
 const LINK_COOLDOWN_DAYS = 30; // 되살리기와 같은 쿨다운 (§4-C1 표면 간 중복 방지)
 const HISTORY_LIMIT = 20; // 맥락으로 넘길 이전 메시지 수
 const PERIOD_LIMIT = 40; // 기간 조회 상한 (하루에 40개 넘게 던지면 최신순으로 자른다)
+// 열거 조회 상한 (2026-07-25). 전수를 넘기는 게 핵심이라 넉넉하게 두되, 코퍼스가 수천 개로
+// 자랐을 때 질문 하나가 수십만 토큰이 되는 것만 막는다. 넘치면 최신순으로 자른다.
+// ⚠️ 이 상한에 실제로 닿기 시작하면(파편 300개+) 싼 모델로 1차 필터를 거는 게 맞다 — 그때까진
+//    통째로 넘기는 게 더 싸고 정확하다 (RUDY-STATUS.md ② 비용 메모).
+const ENUMERATE_LIMIT = 300;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -74,6 +79,17 @@ function fragBlock(f: Frag, projects: { id: string; name: string }[]): string {
     lines.push(`  프로젝트: ${projects.map((p) => `${p.name} (id: ${p.id})`).join(', ')}`);
   }
   return lines.join('\n');
+}
+
+// 열거 경로용 한 줄 (2026-07-25). fragBlock은 파편 하나가 여러 줄이라 전 파편에 곱하면
+// 컨텍스트가 터진다 — 여기선 한 파편 = 한 줄. 링크의 URL은 안 싣는다(제목·설명이 신호 전부고,
+// 원본 주소가 필요하면 유저가 그 파편을 탭한다). id는 남긴다 — 답에서 링크로 걸어야 하니까.
+function enumLine(f: Frag): string {
+  const raw = (f.type === 'link' ? (f.link_title ?? f.content) : f.content) ?? '';
+  const title = raw.replace(/\s+/g, ' ').slice(0, 100);
+  const desc = f.link_description ? ` — ${f.link_description.replace(/\s+/g, ' ').slice(0, 100)}` : '';
+  const note = f.note ? ` (덧: ${f.note.replace(/\s+/g, ' ').slice(0, 80)})` : '';
+  return `- ${kstDate(f.created_at)} [${f.type}] ${title}${desc}${note} | id: ${f.id}`;
 }
 
 // 질문 문장을 그대로 임베딩하면 검색이 망가진다 (2026-07-19 실측).
@@ -115,8 +131,16 @@ intent — 이 메시지가 무엇인지:
   "-할까/-하면 좋을까/-있나"처럼 앞으로의 판단을 구하면 orient다.
   ⚠️ period와 헷갈리지 마라: "오늘 뭐 저장했지", "오늘은 무슨 생각을 했지"처럼 **과거형으로
   이미 한 일을 묻는 건 period다**(사실 조회). orient는 지금부터 뭘 볼지 판단을 구하는 것.
+- "enumerate": **저장한 것들 중 "내가 ~한 것"을 전부 열거해달라는 질문.** 특정 소재가 아니라
+  **태도·속성**으로 묶어서 묻는다. "내가 사고싶어한 것들이 뭐였지", "가보고 싶다던 데 어디였지",
+  "내가 해보고 싶다고 한 것들", "내가 비판했던 것들", "읽으려고 저장한 거".
+  판단 기준: **"내가 ~한/~하고 싶어한 것들"의 모양이면 enumerate다.** 태도의 종류는 상관없다 —
+  구매·방문·시도·감상·비판 뭐든.
+  ⚠️ period와 갈라라: period는 **시간**으로 자르고("오늘 뭐 저장했지"), enumerate는 **속성**으로
+  자른다. 둘 다 있으면("지난주에 사고싶다고 한 거") period를 쓴다 — 시간이 더 좁은 조건이다.
+  ⚠️ trend와 갈라라: trend는 "요즘 뭐에 꽂혔어"처럼 **경향**을 묻는다. enumerate는 항목을 달라는 것.
 - "other": 그 외 전부. 구체적인 검색, 세상 지식 질문, 그리고 **질문이 아닌 것**
-  (진술·감상·인사·잡담). 묻지 않았으면 trend·orient가 아니다.
+  (진술·감상·인사·잡담). 묻지 않았으면 trend·orient·enumerate가 아니다.
 
 outward — 바깥(웹)에서 찾는 것과의 관계. **단, 이 사람의 세계(파편·프로젝트·관심)와 연결될 때만이다.**
 루디는 만능 검색기가 아니다 — 날씨·환율·일반 사실 조회는 바깥이 아니다("no").
@@ -128,6 +152,8 @@ outward — 바깥(웹)에서 찾는 것과의 관계. **단, 이 사람의 세�
   (날씨·시세 등)**. 애매하면 no.
 
 JSON만 출력: {"topics":["..."],"type":null,"period":null,"intent":"other","outward":"no"}`;
+
+const INTENTS = ['trend', 'orient', 'enumerate'];
 
 type OutwardMode = 'no' | 'ask' | 'go';
 type Extracted = {
@@ -166,7 +192,7 @@ async function searchQueries(
       : [],
     type: TYPES.includes(p?.type) ? p.type : null,
     period: PERIODS.includes(p?.period) ? (p.period as Period) : null,
-    intent: p?.intent === 'trend' || p?.intent === 'orient' ? p.intent : 'other',
+    intent: INTENTS.includes(p?.intent) ? p.intent : 'other',
     outward: OUTWARD.includes(p?.outward) ? (p.outward as OutwardMode) : 'no',
   };
 }
@@ -381,6 +407,22 @@ Deno.serve(async (req) => {
   // 축이 안 서는 질문만 원문으로 검색해 폴백한다 — 채팅에서 침묵은 답이 아니다.
   const queries = topics.length ? topics : [question];
 
+  // ── 열거 경로 (2026-07-25) — "내가 사고싶어한 것들이 뭐였지" 류.
+  //
+  // ⚠️ **속성 열거 질의는 검색으로 답할 수 없다.** period와 정확히 같은 종류의 한계다(아래
+  //    시간 질의 주석 참고) — 시간이 아니라 **태도·속성**으로 자르는 질문이라서.
+  //    실측(2026-07-25 유저 지적): "내가 사고싶어한 것들이 뭐였지"에 조명만 나왔다. 원인은
+  //    topics가 안 뽑혀(구체적 소재가 없다) 질문 원문으로 검색했고, 그 임베딩에 남는 신호가
+  //    "사고싶다"라는 **서술어뿐**이라 그 말이 문자로 적힌 파편만 걸린 것. 스피커 링크의
+  //    임베딩은 "스피커 제품"이라 말하고, "사고 싶었다"는 저장할 때 아무도 안 적었다.
+  //    → 튜닝으로 못 고친다. 인덱스에 그 정보가 없다.
+  //
+  // → 유사도를 아예 안 쓰고 **전 파편의 한 줄 요약을 전부** 넘긴다. 질문을 든 모델이 직접 고른다.
+  //    이러면 사고싶다·하고싶다뿐 아니라 **어떤 속성이든** 잡힌다 — 미리 정의한 목록이 없으므로.
+  //    (저장 시점에 stance 태그를 뽑아 인덱스하는 안은 기각했다: 유저 지적 "그 외에 다른 게
+  //     나오면 어차피 못 잡는 거 아닌가" — 맞다. enum은 미리 예상한 속성만 잡는다.)
+  const enumerateAll = intent === 'enumerate' && !answered && !period;
+
   let citedIds: string[] = [];
   let evidence = '';
   let link: Frag | null = null;
@@ -405,6 +447,19 @@ Deno.serve(async (req) => {
     citedIds = inPeriod.map((f) => f.id);
     evidence = inPeriod.map((f) => fragBlock(f, [])).join('\n');
     periodNote = `${PERIOD_LABEL[period]}(${since.slice(0, 10)} 이후) 저장한 파편 ${inPeriod.length}개 — 검색 결과가 아니라 전부다`;
+  } else if (enumerateAll) {
+    // archived(무덤)를 안 거른다 — "찾으러 온 행위는 무덤도 뒤진다"(rudy-search.sql:3) 계승.
+    // 열거는 명시적으로 찾으러 온 것이라 검색과 같은 규칙을 따른다.
+    const { data: rows } = await supabase
+      .from('fragments')
+      .select(FRAG_COLS)
+      .order('created_at', { ascending: false })
+      .limit(ENUMERATE_LIMIT);
+    const all = (rows ?? []) as Frag[];
+    evidence = all.map(enumLine).join('\n');
+    periodNote = `저장한 파편 ${all.length}개 전부 — 검색 결과가 아니다`;
+    // ⚠️ citedIds는 비운다. 300개를 근거 칩으로 그리면 답보다 칩이 길다 — 이 경로의 답은
+    //    모델이 골라 본문에 링크로 건 목록 자체다(prompt.ts가 파편 링크를 의무화한다).
   } else if (intent === 'orient') {
     // orient는 검색으로 폴백하지 않는다 — "오늘 뭐 봐야 할까"는 메타 질문이라 원문으로
     // 검색하면 3차 사고(질문 문장이 메타 표현으로 검색을 오염시킴)가 재현된다.
@@ -505,11 +560,13 @@ Deno.serve(async (req) => {
   const context = [
     period
       ? `<기간>\n${periodNote}\n${evidence || '(이 기간에 저장한 것 없음)'}\n</기간>`
-      : intent === 'orient'
-        ? `<오늘>\n${orient ? evidence : '오늘 딱히 다시 볼 만한 게 없다.'}\n</오늘>`
-        : useAxes
-          ? `<축>\n${evidence}\n</축>`
-          : `<근거>\n${evidence || '(없음)'}\n</근거>`,
+      : enumerateAll
+        ? `<전체목록>\n${periodNote}\n${evidence || '(저장한 것 없음)'}\n</전체목록>`
+        : intent === 'orient'
+          ? `<오늘>\n${orient ? evidence : '오늘 딱히 다시 볼 만한 게 없다.'}\n</오늘>`
+          : useAxes
+            ? `<축>\n${evidence}\n</축>`
+            : `<근거>\n${evidence || '(없음)'}\n</근거>`,
     web ? `<바깥>\n${web}\n</바깥>` : '',
     // 'ask' = 바깥이 도움될 수 있지만 안 뒤졌다. 억지 말고 도움되면 끝에 "바깥에서 찾아볼까?" 묻게.
     outward === 'ask' ? `<바깥가능>\n바깥에서 찾으면 도움될 수 있다. 억지로 말고, 정말 도움되겠으면 답 끝에 짧게 "바깥에서 찾아볼까?"라고만 물어라.\n</바깥가능>` : '',

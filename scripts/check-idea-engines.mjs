@@ -42,8 +42,12 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 ## 거르는 법 (제일 중요 — 통과보다 거절이 신뢰를 만든다)
 - **리스티클/SEO 쓰레기는 버린다.** "N Best…", "Top 10…", 어필리에이트 비교글. highlights에 알맹이(실물·1차 경험)가 없으면 버린다.
 - **이 사람이 이미 저장했거나 이미 브리핑한 것과 겹치면 뺀다.** <이미 저장>·<이미 브리핑함>에 있는 걸 "발견"이라 하지 마라.
-- **한 각도의 결과가 다 시원찮으면 그 항목을 통째로 버린다** (침묵 기본값 §2-8). 억지로 채우지 마라.
-- 6~8개가 상한. 좋은 게 4개면 4개만 쓴다.
+- **각도 하나 = 항목 하나가 기본이다.** 각도가 9개 왔으면 항목도 9개 쓴다.
+  버리는 건 **예외**다 — 그 각도의 검색 결과가 전부 리스티클이거나 알맹이가 아예 없을 때만.
+  애매한 걸 "완벽하지 않아서" 깎지 마라. **2개 이상 버리게 되면 네 기준이 너무 빡빡한 것이니
+  다시 봐라.** 이 사람이 "개수가 부족하다"고 명시적으로 말했다.
+- **한 주제로 브리핑을 채우지 마라.** 같은 파편·같은 프로젝트에서 나온 항목이 3개 이상이면
+  제일 좋은 것만 남기고 나머지는 버린다. 하나를 여러 각도로 쪼갠 건 발견이 아니라 반복이다.
 
 ## 항목 하나의 모양 (짧게 — 주절주절 절대 금지)
 ### 제목 = 한 줄 발견. "이런 게 있다"가 아니라 "이게 너한테 뭐다"
@@ -61,7 +65,9 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 - 되꺼냄(resurface)은 검색 결과가 없다. 그 파편이 지금 왜 다르게 읽히는지만 한두 문장.
 
 ## 브리핑 전체
-- 항목 사이는 빈 줄 하나. 전체가 스크롤 두세 번에 끝나야 한다 — 길면 안 읽는다.
+- 항목 사이는 빈 줄 하나.
+- **짧게 쓰는 건 항목 하나하나에서 한다 (2~3문장). 항목 수를 줄여서 하지 마라.**
+  전체 길이를 맞추려고 항목을 빼는 건 금지다 — 8개를 짧게 쓰는 게 5개를 길게 쓰는 것보다 낫다.
 - 맨 위에 인삿말·서론 쓰지 마라. 바로 첫 항목(### )부터.
 - 버리거나 못 찾은 게 있으면 **맨 끝에 ※ 로 시작하는 한 줄**로 짧게. 없으면 생략.
 
@@ -153,11 +159,11 @@ async function main() {
   }
 
   // 재료·각도는 딱 한 번 — 모든 모드가 공유한다 (검색·조립 차이만 보이게)
-  const { block: rawBlock, saved } = await loadMaterial(supabase);
+  const { block: rawBlock, saved, pickedCount } = await loadMaterial(supabase);
   const prior = await recentBriefContext();
   const block = rawBlock + (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
   process.stdout.write('각도 뽑는 중 (gpt-5.5, 전 모드 공유)… ');
-  const angles = parseAngles(await callOpenAI(env.openai, ANGLE_MODEL, ANGLE_SYS, block));
+  const angles = parseAngles(await callOpenAI(env.openai, ANGLE_MODEL, ANGLE_SYS, block), pickedCount);
   console.log(`${angles.length}개`);
   for (const a of angles) console.log(`  [${a.slot}] ${a.query || '(되꺼냄)'} ← ${a.from}`);
 

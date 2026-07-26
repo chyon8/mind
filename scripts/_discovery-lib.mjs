@@ -54,13 +54,20 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 - **음악은 검색하지 마라.** 이 사람이 알아서 찾는다. 이 사람이 이미 잘 찾는 영역엔 들어가지 않는다.
 
 ## 구성 (제일 중요 — 프로젝트로 쏠리는 걸 막는다)
+- **「내가 지정한 것」 구획이 주어지면, 거기 있는 파편 하나당 각도 **딱 1개**를 만든다.**
+  \`"from_picked": true\`를 붙여라 (지정 구획에서 나온 각도만). **한 파편에서 두 개 이상 만들지 마라. 브리핑을 그 얘기로 채우지 마라.**
+  지정이 1개면 그 각도도 1개고, 나머지 자리는 전부 아래 규칙대로 다른 재료에서 채운다.
 - **진행 중 프로젝트 확장은 최대 2개.** 프로젝트가 셋이라고 셋 다 꺼내지 마라 —
   매번 같은 프로젝트(Caselab·Mind·No phone)가 나오면 이 사람은 발견을 꺼버린다.
-- **절반 이상을 미소속 파편(북마크·관찰) + 완전히 새로운 갈래에서 뽑아라.**
+- **절반 이상을 미소속 파편(북마크·관찰) + 💡·미착수 아이디어 + 완전히 새로운 갈래에서 뽑아라.**
   특히 **최근에 저장한 것(오늘·어제)을 우선 살펴라** — 지금 관심이 거기 있다. 미소속에 좋은 재료가 많다.
+- **💡·미착수 아이디어(status가 active가 아닌 것)는 미소속과 같은 취급이다** — 위 "절반 이상"에
+  포함되고, "진행 중 프로젝트 최대 2개" 캡에는 **안 걸린다.** 아이디어 수집함에 재료가 있으면 써라.
 - **<이미 다룬 주제>가 주어지면 그건 다시 꺼내지 마라.** 지난번에 다룬 걸 또 하면 반복이다.
 - new(완전히 새로운 것)·다른 분야(관점·전시·트렌드)를 반드시 섞어라.
-- **6~8개는 상한이지 목표가 아니다.** 좋은 각도가 4개면 4개만. 억지로 채우면 그 순간 쓰레기가 섞인다.
+- **8~10개를 만들어라. 8개가 최소선이다.** 재료가 있는 한 8개는 채운다 —
+  이 사람이 "개수가 부족하다"고 했다. 단, 리스티클 미끼나 이미 아는 얘기로 자리를 메우진 마라:
+  진짜 아무리 짜내도 안 되는 날은 줄여도 되지만, 그건 예외지 기본이 아니다.
 
 ## 좋은 각도의 예 (실제로 이 사람에게 통한 것 — 사고방식을 그대로 배워라)
 막연한 시장조사("AI 회의 어시스턴트 시장 분석")가 아니라, 저장소를 겹치고 합쳐서 나온 구체적 각도다:
@@ -75,20 +82,24 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 - query: 실제로 검색창에 칠 구체적 문구 (주제에 맞게 한국어 또는 영어)
 - from: 어느 파편/프로젝트에서 나왔나 (완전히 새로운 것이면 "")
 - why: 왜 이 각도인가, 한 줄
+- from_picked: 「내가 지정한 것」구획의 파편에서 나온 각도면 true. **그 구획이 없으면 전부 false다.**
+  ⚠️ "내가 이 각도를 골랐다"는 뜻이 **아니다.** 지정 구획에서 나온 것만 true다.
 
-JSON만 출력: {"angles":[{"slot":"...","query":"...","from":"...","why":"..."}]}`;
+JSON만 출력: {"angles":[{"slot":"...","query":"...","from":"...","why":"...","from_picked":false}]}`;
 // ────────────────────────────────────────────────────────────────────────────
 
 // discovery/material.ts와 같은 로딩·렌더. { block, saved } 반환 — saved는 중복 제거용 저장 목록.
 export async function loadMaterial(supabase) {
   const since = new Date(Date.now() - 90 * 86_400_000).toISOString();
-  const [projRes, fragRes, mapRes] = await Promise.all([
+  const cols = 'id, created_at, type, content, link_title, link_description, note';
+  const [projRes, fragRes, mapRes, pickRes] = await Promise.all([
     supabase.from('projects').select('id, name, status, description').order('created_at'),
     supabase
       .from('fragments')
-      .select('id, created_at, type, content, link_title, link_description, note')
+      .select(cols)
       .eq('archived', false).gte('created_at', since).order('created_at', { ascending: false }),
     supabase.from('fragment_projects').select('fragment_id, project_id'),
+    supabase.from('fragments').select(cols).eq('discover_next', true),
   ]);
   const frags = fragRes.data ?? [];
   const fragById = new Map(frags.map((f) => [f.id, f]));
@@ -115,7 +126,16 @@ export async function loadMaterial(supabase) {
     .map((p) => [`[프로젝트: ${p.name}] (${p.status})`, `  설명: ${p.description ?? '(없음)'}`, ...p.fragments.map(fragLine)].join('\n'))
     .join('\n\n');
   const loose = frags.filter((f) => !inProject.has(f.id));
+  const picked = pickRes.data ?? [];
   const block = [
+    ...(picked.length
+      ? [
+          '=== 내가 지정한 것 (유저가 직접 "다음 발견에 포함"을 누른 파편) ===',
+          '※ 이건 유저의 명시적 지시다. 반드시 각도로 만들어라.',
+          picked.map(fragLine).join('\n'),
+          '',
+        ]
+      : []),
     '=== 진행 중인 일 / 아이디어 수집 (프로젝트별) ===',
     '※ status=active는 지금 만드는 일. 그 외(💡·글감·포폴용 등)는 이름이 성격을 말한다.',
     '※ 글감은 에세이 소재다 — 프로덕트처럼 다루지 마라.',
@@ -125,7 +145,8 @@ export async function loadMaterial(supabase) {
     loose.map(fragLine).join('\n') || '(없음)',
   ].join('\n');
   const saved = frags.map((f) => title(f).replace(/\s+/g, ' ').slice(0, 70)).filter(Boolean);
-  return { block, saved };
+  // pickedCount는 parseAngles에 그대로 넘긴다 — 지정 하나당 각도 하나를 코드로 자르는 근거.
+  return { block, saved, pickedCount: picked.length };
 }
 
 export async function callOpenAI(key, model, system, user) {
@@ -143,11 +164,20 @@ export async function callOpenAI(key, model, system, user) {
   return choices?.[0]?.message?.content ?? '';
 }
 
-export function parseAngles(raw) {
+// discovery/angles.ts의 anglesFromBlock과 같은 파싱·컷이어야 한다.
+// pickedMax = 「내가 지정한 것」파편 수. 지정에서 나온 각도를 그 개수까지만 남긴다.
+export function parseAngles(raw, pickedMax) {
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
-  return (p.angles ?? []).filter(
-    (a) => a && ['expansion', 'new', 'resurface'].includes(a.slot) && typeof a.query === 'string',
-  );
+  let angles = (p.angles ?? [])
+    .filter(
+      (a) => a && ['expansion', 'new', 'resurface'].includes(a.slot) && typeof a.query === 'string',
+    )
+    .map((a) => ({ ...a, picked: a.picked === true }));
+  if (typeof pickedMax === 'number') {
+    let n = 0;
+    angles = angles.filter((a) => !a.picked || ++n <= pickedMax);
+  }
+  return angles.slice(0, 10);
 }
 
 export async function exaSearch(key, query, numResults = 5) {

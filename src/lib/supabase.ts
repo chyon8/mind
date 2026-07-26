@@ -347,6 +347,18 @@ export async function fetchRecentThrownIds(days: number): Promise<string[]> {
   return data.map((r) => r.id as string);
 }
 
+// "다음 발견에 포함"으로 지금 표시된 개수 (§① 상한 5개). 켤 때만 센다 —
+// 끌 때는 셀 이유가 없고, 화면을 열 때마다 세면 상세 진입이 왕복 하나 느려진다.
+export async function countDiscoverNext(): Promise<number> {
+  if (!isConfigured) return 0;
+  const { count, error } = await supabase()
+    .from('fragments')
+    .select('id', { count: 'exact', head: true })
+    .eq('discover_next', true);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export type CollisionHit = { id: string; similarity: number; seed_id: string };
 
 // 씨앗과 의미가 부딪히는 후보 + 어느 씨앗과 부딪혔는지. 선명도 판정은 하지 않는다(recall.ts).

@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/lib/confirm';
 import { feedDateLabel, formatTime } from '@/lib/dates';
 import {
+  countDiscoverNext,
   deleteFragment,
   fetchProjects,
   getFragment,
@@ -26,6 +27,10 @@ const TIERS: { value: Tier; label: string }[] = [
   { value: 'important', label: '중요' },
   { value: 'pinned', label: '고정' },
 ];
+
+// "다음 발견에 포함" 동시 표시 상한. 다 지정해버리면 브리핑이 통째로 지시 이행이 되고
+// "안 물어본 걸 물어온다"는 발견의 본질이 죽는다 (2026-07-25 유저 지시).
+const DISCOVER_MAX = 5;
 
 // 원탭 진입의 질문은 파편 내용을 품어야 한다 — "이거 관련 뭐 있었지"만 보내면
 // 임베딩에 주제가 없어서 RAG가 아무거나 물어온다. 화면의 "이거"를 문장에 풀어 넣는다.
@@ -57,6 +62,8 @@ export default function FragmentDetail() {
   const [selectedPiece, setSelectedPiece] = useState<MergedPiece | null>(null);
   // 아직 동작 안 하는 칩을 눌렀을 때 그 칩만 잠깐 "아직 준비중"으로 바뀐다
   const [soon, setSoon] = useState<string | null>(null);
+  // 표시가 5개 꽉 찼을 때 잠깐 뜨는 안내 (soon과 같은 결 — 토스트를 새로 들이지 않는다)
+  const [discoverFull, setDiscoverFull] = useState(false);
 
   // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
   // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
@@ -69,6 +76,12 @@ export default function FragmentDetail() {
     const t = setTimeout(() => setSoon(null), 1600);
     return () => clearTimeout(t);
   }, [soon]);
+
+  useEffect(() => {
+    if (!discoverFull) return;
+    const t = setTimeout(() => setDiscoverFull(false), 1600);
+    return () => clearTimeout(t);
+  }, [discoverFull]);
 
   useEffect(() => {
     if (!id) return;
@@ -144,6 +157,22 @@ export default function FragmentDetail() {
     const raw = content.trim();
     const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     Linking.openURL(url).catch(() => {});
+  }
+
+  // "다음 발견에 포함" (RUDY-STATUS.md ①) — 다음 브리핑이 이 파편을 반드시 각도로 만든다.
+  // 브리핑이 한 번 돌면 서버가 전부 내린다(brief.ts) — 한 번 나오고 끝, 또 원하면 또 누른다.
+  // touch 안 한다(patch 기본값) — 표시는 "이걸 봐줘"라는 지시지 "아직 중요해"라는 판단이 아니다.
+  async function toggleDiscoverNext() {
+    if (fragment!.discover_next) {
+      await patch({ discover_next: false });
+      return;
+    }
+    // 상한 5개 — 다 지정하면 브리핑이 통째로 지시 이행이 되고 발견이 죽는다
+    if ((await countDiscoverNext()) >= DISCOVER_MAX) {
+      setDiscoverFull(true);
+      return;
+    }
+    await patch({ discover_next: true });
   }
 
   // 프로젝트는 태그 — 여러 개 동시에 붙는다 (PLAN.md §3.3)
@@ -320,6 +349,27 @@ export default function FragmentDetail() {
             );
           })}
         </View>
+
+        {/* 발견 (RUDY-STATUS.md ①) — 루디에게 주는 지시다. 위 루디 칩(묻기=읽기, 채팅으로 이동)과
+            섞이면 안 되므로 TIER·PROJECT와 같은 층(이 파편의 속성을 정하는 자리)에 둔다.
+            ⚠️ 라벨은 상태에 따라 **바꾸지 않는다** — 폭이 튄다. 켜짐은 채움으로만 말한다
+            (projectChipActive와 같은 관용구). 안내·경고도 버튼이 아니라 아래 한 줄이 받는다. */}
+        <Text style={styles.sectionLabel}>발견</Text>
+        <Pressable
+          onPress={() => toggleDiscoverNext().catch(() => {})}
+          style={[styles.discoverBtn, fragment.discover_next && styles.discoverBtnOn]}
+        >
+          <Text style={[styles.discoverLabel, fragment.discover_next && styles.discoverLabelOn]}>
+            다음 브리핑에 포함
+          </Text>
+        </Pressable>
+        <Text style={styles.discoverHint}>
+          {discoverFull
+            ? `최대 ${DISCOVER_MAX}개까지 지정할 수 있다`
+            : fragment.discover_next
+              ? '다음 브리핑에 한 번 나오고 자동으로 꺼진다'
+              : '지정하면 다음 브리핑이 이걸 반드시 다룬다'}
+        </Text>
 
         <View style={styles.divider} />
 
@@ -552,6 +602,21 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   reviveLabel: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
+  // 발견 표시 — tier 토글과 같은 모양(rounded.sm·같은 패딩). 라벨은 안 바뀌므로 폭이 고정이고,
+  // 켜짐은 채움으로만 말한다. 상태 문구는 아래 hint 한 줄이 받는다 (버튼을 토스트로 쓰지 않는다).
+  discoverBtn: {
+    alignSelf: 'flex-start',
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  discoverBtnOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  discoverLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
+  discoverLabelOn: { color: colors.onInk },
+  // 한 줄 안내 — 상태·경고가 여기로 온다. 버튼 폭에 영향을 주지 않는 자리다.
+  discoverHint: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, marginTop: spacing.xs },
   graveBtn: { paddingVertical: spacing.sm },
   graveLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
   deleteBtn: { paddingVertical: spacing.sm, marginTop: spacing.sm },

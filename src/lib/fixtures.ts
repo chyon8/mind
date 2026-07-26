@@ -65,6 +65,7 @@ const f = (
   archived: false,
   touch_count: 0,
   let_go_at: null,
+  discover_next: false,
   project_ids: [],
   ...extra,
 });
