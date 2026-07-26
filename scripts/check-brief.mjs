@@ -6,7 +6,7 @@
 // RUDY-DISCOVERY.md의 렌즈·원리·통한 예시가 프롬프트에 반영돼 있다 — 그 문서가 기준이다.
 
 import {
-  ANGLE_SYS, callOpenAI, exaSearch, loadEnv, loadMaterial, makeClient, parseAngles,
+  ANGLE_SYS, callOpenAI, dedupeAngles, exaSearch, loadEnv, loadMaterial, makeClient, parseAngles,
 } from './_discovery-lib.mjs';
 
 const ANGLES_ONLY = process.argv.includes('--angles-only');
@@ -77,8 +77,19 @@ async function main() {
   const block = rawBlock + (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
   if (prior.topics.length) console.log(`(이미 다룬 주제 ${prior.topics.length}개 회피)`);
   process.stdout.write('각도 뽑는 중 (gpt-5.5)… ');
-  const angles = parseAngles(await callOpenAI(env.openai, MODEL, ANGLE_SYS, block), pickedCount);
-  console.log(`${angles.length}개`);
+  const raw = parseAngles(await callOpenAI(env.openai, MODEL, ANGLE_SYS, block), pickedCount);
+  console.log(`${raw.length}개`);
+
+  // 중복 게이트 — 검색 전에 자른다 (brief.ts와 같은 자리·같은 임계). 걸러진 각도는 Exa를 안 탄다.
+  const gate = await dedupeAngles(env.openai, raw, prior.topics);
+  const angles = gate.kept;
+  if (gate.dropped.length) {
+    console.log(`중복 게이트: ${gate.dropped.length}개 제거${gate.abandoned ? ' (너무 많이 잘려 컷 포기)' : ''}`);
+    for (const d of gate.dropped) console.log(`  ✕ ${d.query.slice(0, 45)} (${d.sim.toFixed(3)}) ← ${d.against.slice(0, 50)}`);
+  } else {
+    console.log('중복 게이트: 제거 없음');
+  }
+  console.log(`남은 각도 ${angles.length}개`);
 
   if (ANGLES_ONLY) {
     for (const a of angles) console.log(`  [${a.slot}] ${a.query || '(되꺼냄)'} ← ${a.from}`);

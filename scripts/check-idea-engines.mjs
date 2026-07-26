@@ -20,7 +20,7 @@
 // ⬜ "아이디어만 뽑는 각도" 모드는 여기 없음 — 별도 논의 중(2026-07-23), 결정되면 추가.
 
 import {
-  ANGLE_SYS, callOpenAI, loadEnv, loadMaterial, makeClient, parseAngles,
+  ANGLE_SYS, callOpenAI, dedupeAngles, loadEnv, loadMaterial, makeClient, parseAngles,
 } from './_discovery-lib.mjs';
 
 const MODE = process.argv[2];
@@ -163,8 +163,11 @@ async function main() {
   const prior = await recentBriefContext();
   const block = rawBlock + (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
   process.stdout.write('각도 뽑는 중 (gpt-5.5, 전 모드 공유)… ');
-  const angles = parseAngles(await callOpenAI(env.openai, ANGLE_MODEL, ANGLE_SYS, block), pickedCount);
-  console.log(`${angles.length}개`);
+  const parsed = parseAngles(await callOpenAI(env.openai, ANGLE_MODEL, ANGLE_SYS, block), pickedCount);
+  // 중복 게이트도 전 모드가 공유한다 — 엔진 비교의 입력을 프로덕션과 같게 유지한다.
+  const gate = await dedupeAngles(env.openai, parsed, prior.topics);
+  const angles = gate.kept;
+  console.log(`${parsed.length}개 → 중복 ${gate.dropped.length}개 제거 → ${angles.length}개`);
   for (const a of angles) console.log(`  [${a.slot}] ${a.query || '(되꺼냄)'} ← ${a.from}`);
 
   const savedBlock = `<이미 저장>\n${saved.join(' / ')}\n</이미 저장>`;

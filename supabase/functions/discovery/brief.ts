@@ -12,6 +12,7 @@ import { chatStream, DISCOVERY_MODEL } from '../_shared/openai.ts';
 import { costTracker } from '../_shared/usage.ts';
 import { loadMaterial, materialBlock, type Frag } from './material.ts';
 import { anglesFromBlock } from './angles.ts';
+import { dedupeAngles, logDedupe } from './dedupe.ts';
 import { exaSearch } from './search.ts';
 
 const NUM_RESULTS = 5;
@@ -25,7 +26,8 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 ## 거르는 법 (제일 중요 — 통과보다 거절이 신뢰를 만든다)
 - **리스티클/SEO 쓰레기는 버린다.** "N Best…", "Top 10…", 어필리에이트 비교글. highlights에 알맹이(실물·1차 경험)가 없으면 버린다.
 - **이 사람이 이미 저장했거나 이미 브리핑한 것과 겹치면 뺀다.** <이미 저장>·<이미 브리핑함>에 있는 걸 "발견"이라 하지 마라.
-- **각도 하나 = 항목 하나가 기본이다.** 각도가 9개 왔으면 항목도 9개 쓴다.
+- **각도 하나 = 항목 하나가 기본이다. 목표는 8개.** 각도가 8개 왔으면 항목도 8개 쓴다.
+  8개보다 많이 오면 제일 좋은 8개를 고르고, 8개 이하면 온 만큼 다 쓴다.
   버리는 건 **예외**다 — 그 각도의 검색 결과가 전부 리스티클이거나 알맹이가 아예 없을 때만.
   애매한 걸 "완벽하지 않아서" 깎지 마라. **2개 이상 버리게 되면 네 기준이 너무 빡빡한 것이니
   다시 봐라.** 이 사람이 "개수가 부족하다"고 명시적으로 말했다.
@@ -111,16 +113,28 @@ export async function* streamBrief(
   const block =
     materialBlock(material) +
     (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
-  const angles = await anglesFromBlock(
+  const raw = await anglesFromBlock(
     block,
     DISCOVERY_MODEL,
     cost.track('discovery.angles', DISCOVERY_MODEL),
     cost.meta('discovery.angles'),
     material.picked.length, // 지정 하나당 각도 하나 — 코드에서 자른다 (angles.ts 참조)
   );
-  if (!angles.length) {
+  if (!raw.length) {
     yield { t: 'done', empty: true }; // 볼 게 없으면 빈 브리핑 (§2-8)
     return;
+  }
+
+  // 중복 게이트 (dedupe.ts) — **검색 전에** 자른다. 지난 브리핑과 같은 주제를 다른 제목으로
+  // 꺼내는 걸 여기서 막는다. 걸러진 각도의 Exa 비용은 아예 안 나가므로 품질과 비용이 같은 방향.
+  // 게이트가 죽어도 브리핑은 살아야 한다 — 실패하면 원본 각도로 그냥 간다.
+  let angles = raw;
+  try {
+    const r = await dedupeAngles(raw, prior.topics);
+    angles = r.kept;
+    logDedupe(supabase, r, raw.length);
+  } catch (e) {
+    console.warn('[brief] 중복 게이트 실패 → 거르지 않고 진행', e);
   }
 
   const toSearch = angles.filter((a) => a.slot !== 'resurface' && a.query);
@@ -160,7 +174,13 @@ export async function* streamBrief(
     .join('\n\n');
 
   const user = [
-    `<이미 저장>\n${material.loose.concat(material.projects.flatMap((p) => p.fragments)).map(savedTitle).join(' / ')}\n</이미 저장>`,
+    // ⚠️ projects·lists·loose **전부** 넣는다. 구획을 나눈 뒤 lists를 빠뜨리면 💡에 저장해둔
+    //    링크를 "발견"이라고 다시 물어온다.
+    `<이미 저장>\n${material.loose
+      .concat(material.projects.flatMap((p) => p.fragments))
+      .concat(material.lists.flatMap((p) => p.fragments))
+      .map(savedTitle)
+      .join(' / ')}\n</이미 저장>`,
     prior.urls.length ? `<이미 브리핑함>\n${prior.urls.join(' / ')}\n</이미 브리핑함>` : '',
     `<검색결과>\n${payload}\n</검색결과>`,
   ]

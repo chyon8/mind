@@ -32,10 +32,16 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 이 사람이 **아직 모르는 걸 바깥에서 물어올** 검색 각도를 만든다.
 
 ## 재료를 읽는 법 (성격이 다르다 — 절대 뭉뚱그리지 마라)
-- 진행 중 프로젝트(active): 지금 만드는 일. 설명이 정답지다. 파편만 보고 프로젝트를 넘겨짚지 마라.
-- 💡 등 미착수: 아직 안 정한 아이디어 수집. "언젠가" 리스트일 수 있다.
-- 글감: 에세이 소재. 프로덕트가 아니다. 프로덕트 아이디어처럼 다루지 마라.
-- 미소속 파편: 북마크·관찰. 저장한 링크가 여기 많다.
+- **진행 중인 일 (프로젝트)**: 지금 만드는 일. 설명이 정답지다. 파편만 보고 넘겨짚지 마라.
+- **아이디어·수집함**: 프로젝트가 아니라 **리스트**다 — 파편 하나하나가 내용 그 자체고,
+  설명은 정답지가 아니라 라벨일 뿐이다. 💡는 "언젠가" 아이디어, 글감은 에세이 소재
+  (프로덕트 아이디어처럼 다루지 마라).
+- **미소속 파편**: 북마크·관찰. 저장한 링크가 여기 많다.
+
+⚠️ **어느 구획이든, 실무 할일·수정사항 메모는 재료가 아니다.**
+예: "메뉴 안 텍스트 수정", "버튼 색 바꾸기", "○○ 버그 확인", "우유 사기".
+바깥에서 찾아올 게 없는 것들이다 — 각도로 만들지 마라. 특히 진행 중 프로젝트에는 이런
+실무 메모가 섞여 있다. **재료는 관심·아이디어·참고자료·저장한 링크다.**
 
 ## 각도를 정하는 법 (제일 중요)
 1. **저장한 북마크 × 프로젝트를 겹쳐라.** 저장한 링크가 프로젝트와 같은 물건이면,
@@ -57,17 +63,17 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
 - **「내가 지정한 것」 구획이 주어지면, 거기 있는 파편 하나당 각도 **딱 1개**를 만든다.**
   \`"from_picked": true\`를 붙여라 (지정 구획에서 나온 각도만). **한 파편에서 두 개 이상 만들지 마라. 브리핑을 그 얘기로 채우지 마라.**
   지정이 1개면 그 각도도 1개고, 나머지 자리는 전부 아래 규칙대로 다른 재료에서 채운다.
-- **진행 중 프로젝트 확장은 최대 2개.** 프로젝트가 셋이라고 셋 다 꺼내지 마라 —
-  매번 같은 프로젝트(Caselab·Mind·No phone)가 나오면 이 사람은 발견을 꺼버린다.
-- **절반 이상을 미소속 파편(북마크·관찰) + 💡·미착수 아이디어 + 완전히 새로운 갈래에서 뽑아라.**
-  특히 **최근에 저장한 것(오늘·어제)을 우선 살펴라** — 지금 관심이 거기 있다. 미소속에 좋은 재료가 많다.
-- **💡·미착수 아이디어(status가 active가 아닌 것)는 미소속과 같은 취급이다** — 위 "절반 이상"에
-  포함되고, "진행 중 프로젝트 최대 2개" 캡에는 **안 걸린다.** 아이디어 수집함에 재료가 있으면 써라.
+- **「진행 중인 일」 구획에서 뽑는 각도는 최대 2개까지다. 0개여도 된다** —
+  **2는 채워야 할 정원이 아니라 넘으면 안 되는 선이다.** 이번에 새로 걸리는 게 없으면
+  안 다루는 게 맞다. 매번 같은 프로젝트(Caselab·Mind·No phone)가 나오면 이 사람은 발견을 꺼버린다.
+  ⚠️ 이 캡은 「진행 중인 일」에만 걸린다. **「아이디어·수집함」과 미소속에는 안 걸린다.**
+- **절반 이상을 「아이디어·수집함」 + 미소속 파편 + 완전히 새로운 갈래에서 뽑아라.**
+  특히 **최근에 저장한 것(오늘·어제)을 우선 살펴라** — 지금 관심이 거기 있다.
 - **<이미 다룬 주제>가 주어지면 그건 다시 꺼내지 마라.** 지난번에 다룬 걸 또 하면 반복이다.
+  같은 주제를 다른 제목으로 꺼내는 것도 반복이다.
 - new(완전히 새로운 것)·다른 분야(관점·전시·트렌드)를 반드시 섞어라.
-- **8~10개를 만들어라. 8개가 최소선이다.** 재료가 있는 한 8개는 채운다 —
-  이 사람이 "개수가 부족하다"고 했다. 단, 리스티클 미끼나 이미 아는 얘기로 자리를 메우진 마라:
-  진짜 아무리 짜내도 안 되는 날은 줄여도 되지만, 그건 예외지 기본이 아니다.
+- **10개 정도 만들어라.** 뒤에서 중복 각도를 걸러내므로 여유가 필요하다.
+  단, 리스티클 미끼나 이미 아는 얘기로 자리를 메우진 마라 — 그건 걸러져도 자리만 낭비한다.
 
 ## 좋은 각도의 예 (실제로 이 사람에게 통한 것 — 사고방식을 그대로 배워라)
 막연한 시장조사("AI 회의 어시스턴트 시장 분석")가 아니라, 저장소를 겹치고 합쳐서 나온 구체적 각도다:
@@ -120,10 +126,22 @@ export async function loadMaterial(supabase) {
     const note = f.note ? ` (덧: ${f.note.replace(/\s+/g, ' ').slice(0, 80)})` : '';
     return `  - ${kstDate(f.created_at)} [${f.type}] ${t}${body}${desc}${note} {id:${f.id}}`;
   };
-  const projects = (projRes.data ?? [])
+  // status='active'만 프로젝트. 나머지(💡·글감·paused·done)는 리스트 — material.ts와 같은 갈림.
+  const withFrags = (projRes.data ?? [])
     .map((p) => ({ ...p, fragments: byProject.get(p.id) ?? [] }))
-    .filter((p) => p.fragments.length > 0)
-    .map((p) => [`[프로젝트: ${p.name}] (${p.status})`, `  설명: ${p.description ?? '(없음)'}`, ...p.fragments.map(fragLine)].join('\n'))
+    .filter((p) => p.fragments.length > 0);
+  const projects = withFrags
+    .filter((p) => p.status === 'active')
+    .map((p) => [`[프로젝트: ${p.name}]`, `  설명: ${p.description ?? '(없음)'}`, ...p.fragments.map(fragLine)].join('\n'))
+    .join('\n\n');
+  // ⚠️ "프로젝트"라는 단어를 안 쓴다 — 라벨 하나가 캡 소속을 정한다 (material.ts 주석 참고).
+  const lists = withFrags
+    .filter((p) => p.status !== 'active')
+    .map((p) => [
+      `[${p.name}]${p.status === 'paused' || p.status === 'done' ? ` (${p.status})` : ''}`,
+      ...(p.description ? [`  설명: ${p.description}`] : []),
+      ...p.fragments.map(fragLine),
+    ].join('\n'))
     .join('\n\n');
   const loose = frags.filter((f) => !inProject.has(f.id));
   const picked = pickRes.data ?? [];
@@ -136,10 +154,15 @@ export async function loadMaterial(supabase) {
           '',
         ]
       : []),
-    '=== 진행 중인 일 / 아이디어 수집 (프로젝트별) ===',
-    '※ status=active는 지금 만드는 일. 그 외(💡·글감·포폴용 등)는 이름이 성격을 말한다.',
-    '※ 글감은 에세이 소재다 — 프로덕트처럼 다루지 마라.',
+    '=== 진행 중인 일 (프로젝트) ===',
+    '※ 지금 실제로 만들고 있는 것. **설명이 정답지다** — 파편만 보고 넘겨짚지 마라.',
+    '※ 여기서 뽑는 각도는 최대 2개까지다 (아래 구성 규칙).',
     projects || '(없음)', '',
+    '=== 아이디어·수집함 (아직 시작 안 한 것 / 멈춘 것) ===',
+    '※ **이건 프로젝트가 아니라 리스트다.** 파편 하나하나가 내용 그 자체다 —',
+    '   설명은 정답지가 아니라 그냥 라벨이다. 진행 중인 일의 캡에 걸리지 않는다.',
+    '※ 글감은 에세이 소재다 — 프로덕트처럼 다루지 마라.',
+    lists || '(없음)', '',
     '=== 어디에도 안 묶인 파편 (북마크·관찰·스치는 생각) ===',
     '※ 저장한 링크가 여기 많다. 프로젝트 설명과 겹쳐 봐라(원리 C).',
     loose.map(fragLine).join('\n') || '(없음)',
@@ -147,6 +170,67 @@ export async function loadMaterial(supabase) {
   const saved = frags.map((f) => title(f).replace(/\s+/g, ' ').slice(0, 70)).filter(Boolean);
   // pickedCount는 parseAngles에 그대로 넘긴다 — 지정 하나당 각도 하나를 코드로 자르는 근거.
   return { block, saved, pickedCount: picked.length };
+}
+
+// 최근 30일 브리핑에서 다룬 주제(###)·URL — brief.ts recentBriefContext 미러.
+// 반복 방지의 유일한 출처다 (기록을 지우면 여기서도 사라진다).
+export async function recentBriefContext(supabase) {
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data } = await supabase.schema('rudy').from('utterances').select('text')
+    .eq('kind', 'discovery').eq('surface', 'briefing').gte('created_at', since);
+  const texts = (data ?? []).map((r) => r.text ?? '');
+  return {
+    topics: texts.flatMap((t) => [...t.matchAll(/^###\s+(.+)$/gm)].map((m) => m[1].trim())),
+    urls: texts.flatMap((t) => [...t.matchAll(/\((https?:\/\/[^)]+)\)/g)].map((m) => m[1])),
+  };
+}
+
+// ── discovery/dedupe.ts의 node 미러 (임계·안전망 반드시 동일) ─────────────────
+export const REPEAT_SIM = 0.6;
+const MIN_KEEP = 4;
+const MAX_PRIOR = 80;
+
+export async function embedMany(key, texts) {
+  const res = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'text-embedding-3-large', input: texts }),
+  });
+  if (!res.ok) throw new Error(`openai embeddings ${res.status}: ${await res.text()}`);
+  const { data } = await res.json();
+  return data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
+}
+
+function cosine(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
+}
+
+export async function dedupeAngles(key, angles, priorTopics) {
+  const prior = (priorTopics ?? []).slice(-MAX_PRIOR).filter((t) => t.trim());
+  if (angles.length <= 1) return { kept: angles, dropped: [], abandoned: false };
+  const text = (a) => `${a.query} ${a.from} ${a.why}`.replace(/\s+/g, ' ').trim();
+  const vecs = await embedMany(key, [...angles.map(text), ...prior]);
+  const angleVecs = vecs.slice(0, angles.length);
+  const priorVecs = vecs.slice(angles.length);
+  const kept = [], keptVecs = [], dropped = [];
+  angles.forEach((a, i) => {
+    const v = angleVecs[i];
+    let best = 0, against = '';
+    priorVecs.forEach((pv, j) => {
+      const s = cosine(v, pv);
+      if (s > best) { best = s; against = `이미 다룸: ${prior[j]}`; }
+    });
+    keptVecs.forEach((kv, j) => {
+      const s = cosine(v, kv);
+      if (s > best) { best = s; against = `같은 실행: ${kept[j].query || kept[j].from}`; }
+    });
+    if (best >= REPEAT_SIM) { dropped.push({ query: a.query || a.from, sim: best, against }); return; }
+    kept.push(a); keptVecs.push(v);
+  });
+  if (kept.length < MIN_KEEP) return { kept: angles, dropped, abandoned: true };
+  return { kept, dropped, abandoned: false };
 }
 
 export async function callOpenAI(key, model, system, user) {
