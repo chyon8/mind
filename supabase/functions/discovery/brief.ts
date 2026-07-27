@@ -11,7 +11,8 @@ import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { chatStream, DISCOVERY_MODEL } from '../_shared/openai.ts';
 import { costTracker } from '../_shared/usage.ts';
 import { loadMaterial, materialBlock, type Frag } from './material.ts';
-import { anglesFromBlock } from './angles.ts';
+import { anglesFromBlock, TOTAL_ANGLE_MAX } from './angles.ts';
+import { ideaAngles } from './idea.ts';
 import { dedupeAngles, logDedupe } from './dedupe.ts';
 import { exaSearch } from './search.ts';
 
@@ -46,8 +47,12 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 ## 항목 하나의 모양 (짧게 — 주절주절 절대 금지)
 ### [라벨] 제목 = 한 줄 발견. "이런 게 있다"가 아니라 "이게 너한테 뭐다"
 **제목 맨 앞에 그 항목이 나온 각도의 slot을 대괄호 라벨로 붙인다.** 각도에 [expansion]이라
-적혀 있으면 \`### [확장] …\`, [idea]면 \`### [아이디어] …\`, [lens]면 \`### [관점] …\`,
-[resurface]면 \`### [되꺼냄] …\`. **주어진 slot을 그대로 옮겨라 — 네가 판단해서 바꾸지 마라.**
+적혀 있으면 \`### [확장] …\`, [idea]면 \`### [아이디어] …\`, [resurface]면 \`### [되꺼냄] …\`.
+주어진 slot을 그대로 옮긴다.
+⚠️ **[아이디어]는 from의 「파편 → 동기」에서 동기 쪽만 이어진 각도다.** 파편의 소재로 되돌려
+쓰지 마라 — 그 소재를 끊으려고 일부러 파편을 안 보고 만든 검색어다. 검색 결과에 나온
+**바깥 사례가 주어**여야 한다. 제목이 \`NoPhone은 ~해야 한다\`처럼 이 사람의 프로젝트를 주어로
+삼는 조언이 되면 그건 확장이니 \`[확장]\`으로 바꿔 써라.
 제목 아래 **2~3문장으로 끝낸다.** 그 이상 쓰지 마라.
 - 불릿으로 잘게 쪼개지 마라. 자연스럽게 이어지는 문장으로 쓴다.
 - 뭔지 + 어느 파편에서 걸리는지 + 그래서 뭐가 흥미로운지를 한 흐름에 녹인다.
@@ -133,29 +138,48 @@ export async function* streamBrief(
   // 프롬프트 힌트(약하지만 생성 자체를 막는다) + 게이트(확실하지만 이미 만든 걸 버린다) 이중 방어.
   // 힌트가 막아주면 각도 슬롯이 안 낭비되므로, 창 전체를 넣는 게 결과적으로 싸다 (위 상수 주석).
   const hintTopics = prior.topics.slice(0, PROMPT_TOPIC_HINT);
+  const matBlock = materialBlock(material);
   const block =
-    materialBlock(material) +
+    matBlock +
     (hintTopics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${hintTopics.join(' / ')}` : '');
-  const raw = await anglesFromBlock(
-    block,
-    DISCOVERY_MODEL,
-    cost.track('discovery.angles', DISCOVERY_MODEL),
-    cost.meta('discovery.angles'),
-    material.picked.length, // 지정 하나당 각도 하나 — 코드에서 자른다 (angles.ts 참조)
-  );
+  // 확장·되꺼냄(angles.ts)과 아이디어(idea.ts)는 **서로를 안 기다린다** — 둘 다 같은 재료를
+  // 읽을 뿐이다. 순차로 돌리면 실행 시간 한도에 가까워진다(잘림 사고의 원인이 그거였다).
+  // ⚠️ 아이디어가 죽어도 브리핑은 확장으로 나가야 한다 → allSettled, 실패 시 빈 배열.
+  const [expRes, ideaRes] = await Promise.allSettled([
+    anglesFromBlock(
+      block,
+      DISCOVERY_MODEL,
+      cost.track('discovery.angles', DISCOVERY_MODEL),
+      cost.meta('discovery.angles'),
+      material.picked.length, // 지정 하나당 각도 하나 — 코드에서 자른다 (angles.ts 참조)
+    ),
+    // ⚠️ 아이디어엔 **재료만** 준다 (`block`이 아니라 `matBlock`). <이미 다룬 주제>를 같이
+    //    주면 ㉠ 입력이 1.8k → 10.3k로 불어 비용이 4배가 되고(실측 $0.03 → $0.12)
+    //    ㉡ 모델이 그 목록을 **재료로 삼는다** — 루디 자기 문장에서 발견을 만든다
+    //    (RUDY-DISCOVERY §7-f의 역류 버그). 반복 방지는 뒤의 중복 게이트가 한다.
+    ideaAngles(matBlock, DISCOVERY_MODEL, cost),
+  ]);
+  if (expRes.status === 'rejected') throw expRes.reason; // 확장이 죽으면 브리핑 자체가 없다
+  if (ideaRes.status === 'rejected') console.warn('[brief] 아이디어 경로 실패 → 확장만으로 진행', ideaRes.reason);
+
+  const ideas = ideaRes.status === 'fulfilled' ? ideaRes.value : [];
+  // 아이디어를 앞에 둔다 — 총량 상한에 걸려 잘릴 때 유저가 제일 원하는 것부터 남긴다.
+  const raw = [...ideas, ...expRes.value].slice(0, TOTAL_ANGLE_MAX);
+  console.log(`[brief] 각도 ${raw.length}개 (아이디어 ${ideas.length} + 확장·되꺼냄 ${expRes.value.length})`);
   if (!raw.length) {
     yield { t: 'done', empty: true }; // 볼 게 없으면 빈 브리핑 (§2-8)
     return;
   }
 
-  // 중복 게이트 (dedupe.ts) — **검색 전에** 자른다. 지난 브리핑과 같은 주제를 다른 제목으로
-  // 꺼내는 걸 여기서 막는다. 걸러진 각도의 Exa 비용은 아예 안 나가므로 품질과 비용이 같은 방향.
-  // 게이트가 죽어도 브리핑은 살아야 한다 — 실패하면 원본 각도로 그냥 간다.
+  // 게이트 둘 다 **검색 전에** 돈다 — 걸러진 각도의 Exa 비용은 아예 안 나가므로 품질과 비용이
+  // 같은 방향이다. 그리고 둘 다 죽어도 브리핑은 살아야 한다(실패하면 원본 각도로 그냥 간다).
   let angles = raw;
+
+  // 중복 게이트 — 지난 브리핑과 같은 주제를 다른 제목으로 꺼내는 걸 막는다.
   try {
-    const r = await dedupeAngles(raw, prior.topics);
+    const r = await dedupeAngles(angles, prior.topics);
+    logDedupe(supabase, r, angles.length);
     angles = r.kept;
-    logDedupe(supabase, r, raw.length);
   } catch (e) {
     console.warn('[brief] 중복 게이트 실패 → 거르지 않고 진행', e);
   }
@@ -245,9 +269,15 @@ export async function* streamBrief(
     full += delta;
     yield { t: 'd', c: delta };
     // 주기 저장. fire-and-forget이라 스트리밍을 안 막는다 — 지연은 안 늘고 유실 창만 줄어든다.
+    // ⚠️ **비용도 같이 적는다.** text만 적었더니 중간에 죽은 브리핑이 화면에 "단가 미상"으로
+    //    떴다 (cost_usd를 채우는 건 루프 *다음* 줄의 최종 update뿐이라 도달을 못 했다).
+    //    이 시점 값에는 조립 비용이 아직 안 들어 있다 — OpenAI가 usage를 스트림 **마지막**
+    //    청크로 주기 때문이다. 그래서 중간에 죽으면 각도 비용까지만 남는다(실제보다 적다).
+    //    끝까지 가면 아래 최종 update가 정확한 값으로 덮는다. 잘린 브리핑에 잘린 비용이
+    //    붙는 셈이라, "모른다"고 표시하는 것보다 이쪽이 사실에 가깝다.
     if (rowId && Date.now() - lastSave >= SAVE_EVERY_MS) {
       lastSave = Date.now();
-      utt().update({ text: full }).eq('id', rowId)
+      utt().update({ text: full, cost_usd: cost.result().usd }).eq('id', rowId)
         .then(undefined, (e: unknown) => console.warn('[brief] 중간 저장 실패', e));
     }
   }

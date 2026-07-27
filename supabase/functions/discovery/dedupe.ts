@@ -47,6 +47,13 @@ function cosine(a: number[], b: number[]): number {
 // from·why(한국어)를 같이 넣어야 "무엇에 관한 각도인가"가 벡터에 실린다.
 const angleText = (a: Angle) => `${a.query} ${a.from} ${a.why}`.replace(/\s+/g, ' ').trim();
 
+// ⚠️ **여기 idea 게이트(임베딩)를 만들었다가 걷어냈다 (2026-07-26). 다시 만들지 마라.**
+//    "idea가 소재를 끊었나"를 from의 「파편 → 동기」에서 소재와 query의 임베딩 거리로 재려 했는데,
+//    실측상 **신호가 없다**: query는 영어·소재는 한국어라 sim이 전부 0.16~0.34에 깔리고,
+//    품질이 나쁜 각도가 좋은 각도보다 **낮게** 나왔다(순서 역전 → 어떤 임계로도 못 가른다).
+//    언어 차이가 의미 차이를 덮는다. → 판정이 필요하면 판정을 시켜라. 부산물로 판정하지 마라.
+//    대신 각도·조립 프롬프트에 "idea의 주어는 내 프로젝트가 될 수 없다"를 박았다.
+
 export type DedupeResult = {
   kept: Angle[];
   dropped: { query: string; sim: number; against: string }[];
@@ -120,7 +127,7 @@ export function logDedupe(supabase: SupabaseClient, r: DedupeResult, angleCount:
     acc[a.slot] = (acc[a.slot] ?? 0) + 1;
     return acc;
   }, {});
-  const mix = `확장${slots.expansion ?? 0} 아이디어${slots.idea ?? 0} 관점${slots.lens ?? 0} 되꺼냄${slots.resurface ?? 0}`;
+  const mix = `확장${slots.expansion ?? 0} 아이디어${slots.idea ?? 0} 되꺼냄${slots.resurface ?? 0}`;
 
   supabase
     .schema('rudy')

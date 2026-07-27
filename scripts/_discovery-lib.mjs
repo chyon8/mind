@@ -51,15 +51,14 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
    막연하면 검색이 리스티클을 문다.
 4. **한 파편에서 각도를 두 개 이상 만들지 마라.** 파편 하나가 브리핑을 먹으면 안 된다.
 
-## slot — 각도의 성격 (출처가 아니라 하는 일이 다르다)
+## slot — 각도의 성격
 - **expansion**: 저장물이 가리키는 방향을 더 판다 — 경쟁자·선례·기술. **소재가 이어진다.**
-- **idea**: **만들 만한 것을 물어온다. 소재는 끊고 동기를 잇는다.** 파편에서 "왜 저장했나"라는
-  동기를 뽑아, 그 동기로 만들어진 **다른 소재**의 실물 제품·사례를 찾는다.
-  from은 반드시 「파편 → 동기」 형식으로 쓴다. 동기를 지어내지 마라 — 파편에 근거해야 한다.
-  **소재를 그대로 따라가면 그건 idea가 아니라 expansion이다.**
-- **lens**: 다른 프레임으로 비춘다 — 관점·트렌드·전시·가서 볼 것. 프로덕트가 아니어도 된다.
 - **resurface**: 오래돼 잊었을 파편 중 지금 상황과 새로 닿는 것. 검색이 아니라 되꺼냄이다.
   필요할 때만 — 닿는 게 없으면 안 넣는다.
+
+⚠️ **「만들 만한 것」(아이디어)은 여기서 만들지 마라.** 별도 경로가 만든다.
+소재를 끊는 일이라 파편을 보면서는 안 되기 때문이다 (RUDY-DISCOVERY §7-f).
+너는 **소재가 이어지는 것**만 담당한다.
 
 ## 이 사람의 렌즈 (취향)
 - 소스 결: Hacker News / Indie Hackers / Product Hunt.
@@ -81,30 +80,24 @@ export const ANGLE_SYS = `너는 Rudy의 발견 엔진에서 '각도 결정'을 
   특히 **최근에 저장한 것(오늘·어제)을 우선 살펴라** — 지금 관심이 거기 있다.
 - **<이미 다룬 주제>가 주어지면 그건 다시 꺼내지 마라.** 지난번에 다룬 걸 또 하면 반복이다.
   같은 주제를 다른 제목으로 꺼내는 것도 반복이다.
-- **구성 (반드시 지켜라):**
-  - **idea는 최소 2개.** 이게 이 사람이 제일 원하는 것이다. 1개면 실패다 —
-    재료를 다시 훑어서 동기를 뽑아낼 파편을 더 찾아라. 저장물 대부분이 동기를 갖고 있다.
-  - **lens는 최대 1개.** 관점·문학·전시는 좋지만 브리핑의 곁가지다. 2개 이상이면 잡지가 된다.
-    (넘으면 코드가 잘라낸다 — 억지로 여러 개 만들어봐야 버려진다.)
-  - 나머지는 expansion. resurface는 닿는 게 있을 때만 0~1개.
-- **글감에서 뽑는 각도는 최대 1개.** 에세이 재료는 좋은 lens가 되지만, 소설·문학 각도가
-  서너 개면 브리핑이 문예지가 된다.
-- **10개 정도 만들어라.** 뒤에서 중복 각도를 걸러내므로 여유가 필요하다.
+- **구성: expansion 3~4개 + resurface 0~1개. 그게 전부다.**
+- **글감(에세이 소재)에서는 각도를 만들지 마라.** 그건 아이디어 경로가 쓴다.
+- **3~4개 만들어라.** 아이디어 3~4개가 따로 합쳐져서 브리핑이 된다. 더 많이 내도 코드가 잘라낸다.
   단, 리스티클 미끼나 이미 아는 얘기로 자리를 메우진 마라 — 그건 걸러져도 자리만 낭비한다.
+- **why는 한 줄이다. 두 문장 쓰지 마라.** query·from·why를 길게 늘여 쓰면 출력이 커지고,
+  출력이 커지면 브리핑이 다 써지기 전에 시간이 끝나 **문장 중간에 잘린다** (2026-07-26 실측).
 
 ## 좋은 각도의 예 (실제로 이 사람에게 통한 것 — 사고방식을 그대로 배워라)
 막연한 시장조사("AI 회의 어시스턴트 시장 분석")가 아니라, 저장소를 겹치고 합쳐서 나온 구체적 각도다:
 - {"slot":"expansion","query":"Cluely 같은 실시간 회의 AI 어시스턴트 경쟁 제품과 수익 모델 indie hacker","from":"저장한 Cluely 북마크 × No phone(STT 미팅 어시스턴트)","why":"저장한 링크가 참고자료가 아니라 같은 물건 — 누가 이미 하고 돈 버나(원리 1)"}
 - {"slot":"expansion","query":"STM32 라즈베리파이로 만드는 소형 사이버덱 DIY 조립 프로젝트","from":"'Crazy AI Cyberdeck' + 'epaper display' 파편 두 개","why":"흩어진 두 파편이 한 물건으로 합쳐진다 — PCB 없이 시작하는 진입점(원리 2)"}
-- {"slot":"lens","query":"why cassette tapes and analog objects are back in 2026 friction as feature","from":"#cassette 파편 + Mind(일부러 흐려지는 앱)","why":"프로덕트가 아니라 관점 — 이 사람 제품의 근거를 새 프레임으로 비춘다(다른 갈래)"}
-- {"slot":"idea","query":"micro SaaS built from one annoyance with existing tool solo founder revenue examples","from":"'리틀리 좀 더 커스터마이징… 결제 자유롭게' 파편 → 쓰던 도구의 불편 하나에서 출발해 1인이 만들어 파는 것","why":"소재(링크인바이오)를 끊고 동기로 뻗는다 — 같은 동기로 만들어진 다른 물건들이 재료다"}
 - {"slot":"resurface","query":"","from":"'The Top Idea in Your Mind'(며칠 전 저장, 안 봄)","why":"저장한 날엔 에세이, 지금 3프로젝트+본업 상황에선 진단으로 읽힌다"}
 위 예는 **형식과 사고방식**을 보여줄 뿐이다. 이 사람의 지금 재료로 새로 만들어라 — 예시를 복사하지 마라.
 
 각 각도:
-- slot: "expansion" | "idea" | "lens" | "resurface"
+- slot: "expansion" | "resurface"
 - query: 실제로 검색창에 칠 구체적 문구 (주제에 맞게 한국어 또는 영어)
-- from: 어느 파편/프로젝트에서 나왔나. **idea는 「파편 → 동기」 형식으로.**
+- from: 어느 파편/프로젝트에서 나왔나
 - why: 왜 이 각도인가, 한 줄
 - from_picked: 「내가 지정한 것」구획의 파편에서 나온 각도면 true. **그 구획이 없으면 전부 false다.**
   ⚠️ "내가 이 각도를 골랐다"는 뜻이 **아니다.** 지정 구획에서 나온 것만 true다.
@@ -229,6 +222,9 @@ function cosine(a, b) {
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
+// ⚠️ idea 게이트(임베딩)를 여기 미러로 만들었다가 걷어냈다 (2026-07-26) — dedupe.ts 주석 참고.
+//    실측상 신호가 없다(영어 query ↔ 한국어 소재라 sim이 0.16~0.34에 깔리고 순서가 역전됐다).
+
 export async function dedupeAngles(key, angles, priorTopics) {
   const prior = (priorTopics ?? []).slice(0, MAX_PRIOR).filter((t) => t.trim()); // 최신순이라 앞에서 자른다
   if (angles.length <= 1) return { kept: angles, dropped: [], abandoned: false };
@@ -307,16 +303,88 @@ export function parseAngles(raw, pickedMax) {
     const kept = angles.filter((a) => !a.from_picked || ++n <= pickedMax);
     if (kept.length >= 6) angles = kept;
   }
-  // lens 상한 = 1 (angles.ts LENS_MAX). 프롬프트만으론 안 지켜져서 코드로 자른다.
-  {
-    let n = 0;
-    const kept = angles.filter((a) => a.slot !== 'lens' || ++n <= 1);
-    if (kept.length >= 6) angles = kept;
-  }
-  // idea 하한은 코드로 못 만든다 — 미달을 알리기만 한다 (angles.ts IDEA_MIN).
-  const ideaCount = angles.filter((a) => a.slot === 'idea').length;
-  if (ideaCount < 2) console.log(`  ⚠️ idea 하한 미달: ${ideaCount}/2 — 프롬프트가 안 먹었다`);
-  return angles.slice(0, 10);
+  // 확장·되꺼냄만 여기서 나온다 (angles.ts와 동일). 아이디어는 ideaAngles()가 따로 만든다.
+  return angles.slice(0, 5);
+}
+
+// ── discovery/idea.ts의 미러 — 2단계로 소재를 끊는다 (RUDY-DISCOVERY §7-f) ────
+export const MOTIVE_SYS = `너는 이 사람의 저장물을 읽고 **왜 저장했는지(동기)만** 뽑는다.
+아직 검색하지 않는다. 무엇을 찾을지도 정하지 않는다.
+
+## 할 일
+서로 다른 파편 4개를 고르고, 각각의 **동기**를 한 줄로 쓴다.
+**진행 중인 프로젝트의 실무 메모는 고르지 마라** — 바깥에서 찾아올 게 없다.
+글감·인용구·북마크·짧은 생각 전부 좋은 재료다.
+
+## 동기를 쓰는 법 (제일 중요)
+동기는 **욕구·상태**다. 물건이 아니다.
+- ❌ "유럽에서 한 달 살아보고 싶다" — 장소가 들어 있다
+- ❌ "키보드 키캡을 만들고 싶다" — 물건이 들어 있다
+- ⭕ "익숙한 환경을 통째로 갈아엎어야 행동이 바뀐다고 믿는다"
+- ⭕ "작은 물성을 손으로 만지고 남에게 자랑하고 싶다"
+
+**동기 문장에 아래를 쓰지 마라:**
+- 고유명사 (제품명·회사명·지명·언어명)
+- 그 파편의 소재를 특정하는 명사 (키캡·책상·여행·앱·강의 같은 것)
+- 업계 용어 (SaaS·대시보드·플랫폼)
+
+동기만 읽었을 때 **원래 파편이 뭐였는지 못 알아맞혀야 제대로 쓴 것이다.**
+그러면서도 사람의 욕구로서는 구체적이어야 한다 — "새로운 걸 원한다" 같은 건 너무 막연하다.
+
+⚠️ **"해결 방법·행동 동사를 쓰지 마라"를 추가했다가 되돌렸다 (2026-07-27 실측).**
+성공 개수는 그대로인데 **전시·공간 갈래가 3개→0개로 죽고** 회차 간 다양성이 줄었다.
+감정만 남기면 감정에 제일 가까운 상품 카테고리가 앱이라 그쪽으로 빨려간다. 다시 넣지 마라.
+
+## 출력
+JSON만: {"items":[{"frag":"출발 파편 원문 일부","motive":"동기 한 줄"}]}
+frag는 나중에 대조하려고 받는 것이다. 동기를 쓸 때 frag를 요약하지 마라 — 동기를 써라.`;
+
+export const IDEA_QUERY_SYS = `너는 이 사람이 구경할 만한 것을 찾을 검색어를 만든다.
+
+## 이 사람의 취향
+- 소스 결: Hacker News / Indie Hackers / Product Hunt.
+- 적당히 기술적. **너무 기술적이거나 학술적인 건 안 본다 — 논문·리서치 금지.**
+- "비슷한 프로덕트가 **실제로 있고 사람들이 쓴다**" — 개념 설명이 아니라 실물. 누가 만들었나.
+- 다른 분야는 예술 자체가 아니라 **새로운 관점·트렌드·가서 볼 것**(전시·공간 등).
+- **음악은 검색하지 마라.** 이 사람이 알아서 찾는다.
+
+## 주어지는 것
+이 사람이 무언가를 저장할 때의 **동기**다. 무엇을 저장했는지는 너에게 주지 않는다.
+알 필요도 없다 — 같은 동기를 가진 **아무 소재나** 찾으면 된다.
+
+## 할 일
+동기 하나당 검색어 하나. 그 동기를 가진 사람이 좋아할 **실제로 존재하는 물건·제품·공간·씬**을
+찾을 검색어를 만든다.
+
+## 검색어의 모양
+- **질문이 아니라 영역이다.** "○○을 어떻게 하나" 같은 질문형은 그 문제를 파는 업체 페이지만 부른다.
+- **물건·장르·씬의 이름**으로 채운다. 동사("어떻게","왜","하는 법")를 넣지 마라.
+- 추상명사만 나열하지 마라 — "tactile object communities" 같은 건 아무것도 안 물어온다.
+  **실제로 그 물건을 파는 사람들이 쓸 단어**를 써라.
+- 이미 아주 유명한 제품 이름은 넣지 마라. 그 회사 홈페이지만 나온다.
+
+## 출력
+JSON만: {"angles":[{"motive":"받은 동기 그대로","query":"검색어","area":"무슨 영역인지 한 줄"}]}`;
+
+// 아이디어 각도. 실패하면 빈 배열 — 아이디어가 없어도 브리핑은 확장으로 나간다.
+export async function ideaAngles(key, model, block) {
+  const parse = (raw) => JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
+  const s1 = parse(await callOpenAI(key, model, MOTIVE_SYS, block, '동기'));
+  const clean = (s1.items ?? []).filter((it) => it?.motive?.trim()).slice(0, 4);
+  if (!clean.length) { console.log('  ⚠️ 1단계가 동기를 못 냈다'); return []; }
+
+  // ★ 여기가 전부 — 동기만 넘긴다. 파편은 안 들어간다. ★
+  const motiveOnly = clean.map((it, i) => `${i + 1}. ${it.motive}`).join('\n');
+  const s2 = parse(await callOpenAI(key, model, IDEA_QUERY_SYS, `<동기>\n${motiveOnly}\n</동기>`, '아이디어'));
+  return (s2.angles ?? [])
+    .map((a, i) => ({
+      slot: 'idea',
+      query: (a.query ?? '').trim(),
+      from: `${(clean[i]?.frag ?? '').slice(0, 80)} → ${clean[i]?.motive ?? ''}`,
+      why: a.area ?? '',
+      from_picked: false,
+    }))
+    .filter((a) => a.query);
 }
 
 export async function exaSearch(key, query, numResults = 5) {

@@ -6,7 +6,8 @@
 // RUDY-DISCOVERY.md의 렌즈·원리·통한 예시가 프롬프트에 반영돼 있다 — 그 문서가 기준이다.
 
 import {
-  ANGLE_SYS, callOpenAI, dedupeAngles, exaSearch, loadEnv, loadMaterial, makeClient, parseAngles,
+  ANGLE_SYS, callOpenAI, dedupeAngles, exaSearch, ideaAngles, loadEnv, loadMaterial, makeClient,
+  parseAngles,
 } from './_discovery-lib.mjs';
 
 const ANGLES_ONLY = process.argv.includes('--angles-only');
@@ -36,8 +37,11 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 ## 항목 하나의 모양 (짧게 — 주절주절 절대 금지)
 ### [라벨] 제목 = 한 줄 발견. "이런 게 있다"가 아니라 "이게 너한테 뭐다"
 **제목 맨 앞에 그 항목이 나온 각도의 slot을 대괄호 라벨로 붙인다.** 각도에 [expansion]이라
-적혀 있으면 \`### [확장] …\`, [idea]면 \`### [아이디어] …\`, [lens]면 \`### [관점] …\`,
-[resurface]면 \`### [되꺼냄] …\`. **주어진 slot을 그대로 옮겨라 — 네가 판단해서 바꾸지 마라.**
+적혀 있으면 \`### [확장] …\`, [idea]면 \`### [아이디어] …\`, [resurface]면 \`### [되꺼냄] …\`.
+주어진 slot을 그대로 옮긴다.
+⚠️ **딱 하나 예외 — [아이디어]의 주어는 바깥 사례여야 한다.** 아이디어는 "남이 이미 만든 다른
+물건"을 보여주는 자리다. 제목이 \`NoPhone은 ~해야 한다\`처럼 **이 사람의 프로젝트를 주어로 삼는
+조언이 되면 그건 확장이니 \`[확장]\`으로 바꿔 써라.**
 제목 아래 **2~3문장으로 끝낸다.** 그 이상 쓰지 마라.
 - 불릿으로 잘게 쪼개지 마라. 자연스럽게 이어지는 문장으로 쓴다.
 - 뭔지 + 어느 파편에서 걸리는지 + 그래서 뭐가 흥미로운지를 한 흐름에 녹인다.
@@ -79,9 +83,17 @@ async function main() {
   const prior = await recentBriefContext();
   const block = rawBlock + (prior.topics.length ? `\n\n<이미 다룬 주제 (다시 꺼내지 마라)>\n${prior.topics.join(' / ')}` : '');
   if (prior.topics.length) console.log(`(이미 다룬 주제 ${prior.topics.length}개 회피)`);
-  process.stdout.write('각도 뽑는 중 (gpt-5.5)… ');
-  const raw = parseAngles(await callOpenAI(env.openai, MODEL, ANGLE_SYS, block, '각도'), pickedCount);
-  console.log(`${raw.length}개`);
+  // 확장·되꺼냄과 아이디어는 서로를 안 기다린다 (brief.ts와 동일 — 둘 다 같은 재료를 읽을 뿐).
+  process.stdout.write('각도 뽑는 중 (확장 + 아이디어 병렬)…\n');
+  const [expansions, ideas] = await Promise.all([
+    callOpenAI(env.openai, MODEL, ANGLE_SYS, block, '확장').then((r) => parseAngles(r, pickedCount)),
+    ideaAngles(env.openai, MODEL, rawBlock).catch((e) => {
+      console.log(`  아이디어 경로 실패: ${e.message.slice(0, 60)}`);
+      return [];
+    }),
+  ]);
+  const raw = [...ideas, ...expansions].slice(0, 8); // 아이디어 먼저 — 잘릴 때 뒤가 잘린다
+  console.log(`각도 ${raw.length}개 (아이디어 ${ideas.length} + 확장·되꺼냄 ${expansions.length})`);
 
   // 중복 게이트 — 검색 전에 자른다 (brief.ts와 같은 자리·같은 임계). 걸러진 각도는 Exa를 안 탄다.
   const gate = await dedupeAngles(env.openai, raw, prior.topics);
