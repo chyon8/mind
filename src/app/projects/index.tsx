@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { DatePickerModal } from '@/components/DatePickerModal';
 import { parseDateKey, toDateKey } from '@/lib/dates';
 import { createProject, fetchProjects } from '@/lib/supabase';
-import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Project, ProjectStatus } from '@/lib/types';
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -70,6 +70,11 @@ export default function Projects() {
   }
 
   const visible = projects.filter((p) => filter === 'all' || p.status === filter);
+  // 완료된 프로젝트는 구분선 밑, 흐리게 — 진행 중인 것부터 보게
+  const activeVisible = visible.filter((p) => p.status !== 'done');
+  const doneVisible = visible.filter((p) => p.status === 'done');
+  const ordered = [...activeVisible, ...doneVisible];
+  const doneStart = activeVisible.length;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -182,13 +187,16 @@ export default function Projects() {
         </View>
       ) : (
         <FlatList
-          data={visible}
+          data={ordered}
           keyExtractor={(p) => p.id}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
             const dot = STATUS_DOT[item.status];
-            return (
-              <Pressable style={styles.row} onPress={() => router.push(`/projects/${item.id}`)}>
+            const row = (
+              <Pressable
+                style={[styles.row, item.status === 'done' && styles.rowDone]}
+                onPress={() => router.push(`/projects/${item.id}`)}
+              >
                 <View
                   style={[
                     styles.dot,
@@ -197,11 +205,7 @@ export default function Projects() {
                   ]}
                 />
                 <View style={styles.rowBody}>
-                  <Text
-                    style={[styles.rowName, item.status === 'done' && styles.rowNameDone]}
-                  >
-                    {item.name}
-                  </Text>
+                  <Text style={styles.rowName}>{item.name}</Text>
                   <Text style={styles.rowMeta}>
                     {STATUS_LABEL[item.status]}
                     {item.started_at ? ` · ${item.started_at.replaceAll('-', '.')} 시작` : ''}
@@ -211,6 +215,16 @@ export default function Projects() {
                 <Text style={styles.chevron}>›</Text>
               </Pressable>
             );
+            // 진행 중/완료가 섞여 있을 때만 그 경계에 구분선을 넣는다
+            if (index === doneStart && doneStart > 0) {
+              return (
+                <View>
+                  <View style={styles.doneDivider} />
+                  {row}
+                </View>
+              );
+            }
+            return row;
           }}
         />
       )}
@@ -299,10 +313,15 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.hairlineSoft,
   },
   dot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
+  rowDone: { opacity: FLOOR_OPACITY },
   rowBody: { flex: 1, gap: 2 },
   rowName: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansMedium },
-  rowNameDone: { color: colors.mute },
   rowMeta: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
+  doneDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.hairline,
+    marginVertical: spacing.sm,
+  },
   chevron: { ...type.bodyLg, color: colors.faint, fontFamily: fonts.sans },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans },
