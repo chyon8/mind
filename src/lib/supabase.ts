@@ -134,7 +134,12 @@ export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
   }
   const { data, error } = await q.order('created_at', { ascending: false });
   if (error) throw error;
-  return data as DayMark[];
+  // 조인으로 이미 딸려온 소속을 project_ids로 펴준다 — 헤매기의 프로젝트 제외가 이걸 쓴다.
+  // 별도 쿼리를 새로 만들 필요가 없다.
+  return (data as any[]).map(({ fragment_projects, ...rest }) => ({
+    ...rest,
+    project_ids: (fragment_projects ?? []).map((m: any) => m.project_id),
+  })) as DayMark[];
 }
 
 // 데일리 뷰: 주 단위 범위 조회 (무덤 제외)

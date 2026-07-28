@@ -38,7 +38,11 @@ export interface Fragment {
 export type DayMark = Pick<
   Fragment,
   'id' | 'created_at' | 'last_touched_at' | 'tier' | 'touch_count'
->;
+> & {
+  // 렌즈 조회('all'·'inbox' 등)에서만 채워진다. 프로젝트 필터는 !inner 조인이라 그 프로젝트
+  // 하나만 돌아오므로 신뢰할 수 없다 — 헤매기의 프로젝트 제외가 '전체'에서만 도는 이유다.
+  project_ids?: string[];
+};
 
 export interface Project {
   id: string;

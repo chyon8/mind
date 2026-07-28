@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -9,23 +10,30 @@ import { onFragmentUpdated } from '@/lib/fragmentUpdates';
 import type { Fragment, Project } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
 
-// filter 아래 이 파편이 지금도 이 헤맴에 속하는지 — fetchFragments의 필터 조건과 같다
-function matchesFilter(fr: Fragment, filter: FeedFilter): boolean {
+// filter 아래 이 파편이 지금도 이 헤맴에 속하는지 — fetchFragments의 필터 조건과 같다.
+// excluded는 '전체'에서만 적용한다 (칩을 길게 눌러 뺀 프로젝트).
+function matchesFilter(fr: Fragment, filter: FeedFilter, excluded: Set<string>): boolean {
   if (fr.archived) return false;
-  if (filter === 'all') return true;
+  if (filter === 'all') return !fr.project_ids.some((id) => excluded.has(id));
   if (filter === 'inbox') return fr.project_ids.length === 0;
   return fr.project_ids.includes(filter);
 }
 
-// 헤매기 — 무작위로 계속 흘러나온다. 딴생각하며 머릿속을 거니는 것에 가깝다.
+// 헤매기 — 무작위로 흘러나온다. 딴생각하며 머릿속을 거니는 것에 가깝다.
 //
-// **판단 버튼이 없다.** 무한히 뽑을 수 있는 곳에 기억하기/흘려보내기를 붙이면
-// 결국 보관함 전체를 솎아내는 노동이 된다 — SPEC §7이 금지한 정리 스와이프다.
-// 지나가는 것만으론 아무 일도 안 일어나고, 마음이 가서 탭해 열면 그때 선명해진다
-// (스스로 찾아간 것이므로 정당한 touch다). 판단하는 자리는 데일리의 "떠오른 것" 하나뿐.
+// **판단 버튼이 없다.** 여기에 기억하기/흘려보내기를 붙이면 결국 보관함 전체를 솎아내는
+// 노동이 된다 — SPEC §7이 금지한 정리 스와이프다. 지나가는 것만으론 아무 일도 안 일어나고,
+// 마음이 가서 탭해 열면 그때 선명해진다 (스스로 찾아간 것이므로 정당한 touch다).
+// 판단하는 자리는 데일리의 "떠오른 것" 하나뿐이다. **한 바퀴로 끝나게 바뀐 뒤에도 이건 그대로다**
+// — 끝이 생겼다고 여기에 판단 버튼을 붙이지 마라.
+//
+// 2026-07-28 유저 지시로 **한 바퀴에서 끝난다.** 예전엔 덱이 비면 다시 섞어 무한히 돌았다.
 //
 // 나란히 놓인 두 파편 사이의 연결은 저장하지 않는다. 연결은 당신 머릿속에서 일어난다.
 const CHUNK = 8;
+
+// 헤맬 때 빼둘 프로젝트 (칩 길게 누르기). 자주 바꾸는 게 아니라 한 번 정해두는 성격이라 로컬에 남긴다.
+const EXCLUDE_KEY = 'wander.excluded';
 
 // 바닥(25%)까지 흐려진 걸 그대로 그리면 읽을 수가 없다. 여기선 보여주려고 꺼낸 것이므로
 // 바닥을 올려 읽히게 하되, 서로의 차이는 남긴다 — 지층감은 타임라인의 몫이다.
@@ -45,9 +53,12 @@ export default function Wander() {
   const deck = useRef<string[]>([]); // 이번 바퀴에 남은 것
   const [items, setItems] = useState<Fragment[]>([]);
   const [empty, setEmpty] = useState(false);
+  const [done, setDone] = useState(false); // 한 바퀴 다 돌았다
   const [projects, setProjects] = useState<Project[]>([]);
   // 어디서 헤맬지 태그로 좁힌다 — 기본은 전체 (PLAN §6.3, [13])
   const [filter, setFilter] = useState<FeedFilter>('all');
+  // '전체'에서 빼둘 프로젝트 id. 칩을 길게 누르면 토글된다.
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const loading = useRef(false);
 
   // 프로젝트에 정리된 파편도 그대로 흐르되, 어디 소속인지 태그로 구분한다 ([13])
@@ -65,26 +76,16 @@ export default function Wander() {
     [projects],
   );
 
-  // 끝이 없다. 한 바퀴를 다 돌면 다시 섞어서 계속 흐른다 —
-  // 헤매기는 끝내야 할 목록이 아니다.
+  // 한 바퀴로 끝난다 (2026-07-28). 덱을 다 쓰면 다시 섞지 않고 done을 세운다.
   const more = useCallback(async () => {
-    if (loading.current || pool.current.length === 0) return;
+    if (loading.current) return;
+    if (deck.current.length === 0) {
+      setDone(true);
+      return;
+    }
     loading.current = true;
     try {
-      // 파편이 CHUNK보다 적으면 한 번에 그만큼만 — 같은 게 연달아 여덟 번 나오면 안 된다
-      const take = Math.min(CHUNK, pool.current.length);
-      const ids: string[] = [];
-      while (ids.length < take) {
-        if (deck.current.length === 0) {
-          deck.current = shuffle(pool.current);
-          // 바퀴가 넘어가는 자리에서 같은 파편이 연달아 나오지 않게
-          const lastId = ids[ids.length - 1] ?? items[items.length - 1]?.id;
-          if (deck.current.length > 1 && deck.current[0] === lastId) {
-            [deck.current[0], deck.current[1]] = [deck.current[1], deck.current[0]];
-          }
-        }
-        ids.push(deck.current.shift()!);
-      }
+      const ids = deck.current.splice(0, Math.min(CHUNK, deck.current.length));
       const frs = await fetchFragmentsByIds([...new Set(ids)]);
       // 조회는 순서를 보장하지 않는다 — 섞어둔 순서대로 되돌린다
       const byId = new Map(frs.map((fr) => [fr.id, fr]));
@@ -94,7 +95,7 @@ export default function Wander() {
     } finally {
       loading.current = false;
     }
-  }, [items]);
+  }, []);
 
   // items는 자주 바뀌므로(스크롤할 때마다) ref로 최신 값을 들고 있는다 —
   // refreshItems를 items 변화마다 새로 만들면 구독이 계속 갈아끼워진다.
@@ -119,7 +120,7 @@ export default function Wander() {
     const stale = new Set(
       ids.filter((id) => {
         const fr = byId.get(id);
-        return !fr || !matchesFilter(fr, filter);
+        return !fr || !matchesFilter(fr, filter, excluded);
       }),
     );
     if (stale.size > 0) {
@@ -127,7 +128,7 @@ export default function Wander() {
       deck.current = deck.current.filter((id) => !stale.has(id));
     }
     setItems((prev) => prev.filter((fr) => !stale.has(fr.id)).map((fr) => byId.get(fr.id) ?? fr));
-  }, [filter]);
+  }, [filter, excluded]);
 
   useFocusEffect(
     useCallback(() => {
@@ -140,25 +141,46 @@ export default function Wander() {
 
   useEffect(() => {
     fetchProjects().then(setProjects).catch(() => {});
+    AsyncStorage.getItem(EXCLUDE_KEY)
+      .then((raw) => raw && setExcluded(new Set(JSON.parse(raw) as string[])))
+      .catch(() => {});
   }, []);
 
-  // 태그가 바뀌면 처음부터 다시 헤맨다 — 이전 태그의 카드가 섞여 나오면 안 된다
+  // 칩 길게 누르기 — '전체'에서 이 프로젝트를 뺀다. 아래 이펙트가 바퀴를 다시 돌린다.
+  const toggleExclude = useCallback((projectId: string) => {
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(projectId)) next.add(projectId);
+      AsyncStorage.setItem(EXCLUDE_KEY, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  // 태그나 제외가 바뀌면 처음부터 다시 헤맨다 — 이전 조건의 카드가 섞여 나오면 안 된다
   useEffect(() => {
     pool.current = [];
     deck.current = [];
     loading.current = false;
     setItems([]);
     setEmpty(false);
+    setDone(false);
     fetchDayIndex(filter)
       .then((index) => {
-        pool.current = index.map((m) => m.id);
+        // 제외는 '전체'에서만 — 프로젝트 필터는 !inner 조인이라 project_ids가 불완전하다.
+        const kept =
+          filter === 'all' && excluded.size > 0
+            ? index.filter((m) => !(m.project_ids ?? []).some((id) => excluded.has(id)))
+            : index;
+        pool.current = kept.map((m) => m.id);
+        // 한 바퀴 = 이 덱 하나. 다 쓰면 more()가 done을 세운다.
+        deck.current = shuffle(pool.current);
         if (pool.current.length === 0) setEmpty(true);
         else more();
       })
       .catch(() => setEmpty(true));
-    // more는 스크롤이 부른다 — 여기선 태그 전환 시 첫 배치만
+    // more는 스크롤이 부른다 — 여기선 조건 전환 시 첫 배치만
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [filter, excluded]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -178,13 +200,23 @@ export default function Wander() {
       >
         {filterOptions.map((f) => {
           const active = f.id === filter;
+          // 전체·Inbox는 뺄 프로젝트가 아니다 — 프로젝트 칩만 길게 눌러 제외한다.
+          const isProject = f.id !== 'all' && f.id !== 'inbox';
+          const off = isProject && excluded.has(f.id);
           return (
             <Pressable
               key={f.id}
               onPress={() => setFilter(f.id)}
-              style={[styles.filterChip, active && styles.filterChipActive]}
+              onLongPress={isProject ? () => toggleExclude(f.id) : undefined}
+              style={[styles.filterChip, active && styles.filterChipActive, off && styles.filterChipOff]}
             >
-              <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>
+              <Text
+                style={[
+                  styles.filterLabel,
+                  active && styles.filterLabelActive,
+                  off && styles.filterLabelOff,
+                ]}
+              >
                 {f.name}
               </Text>
             </Pressable>
@@ -194,7 +226,6 @@ export default function Wander() {
 
       <FlatList
         data={items}
-        // 바퀴가 돌면 같은 파편이 다시 나온다 — id만으론 키가 겹친다
         keyExtractor={(fr, i) => `${fr.id}-${i}`}
         contentContainerStyle={styles.list}
         onEndReached={more}
@@ -210,6 +241,9 @@ export default function Wander() {
         )}
         ListEmptyComponent={
           empty ? <Text style={styles.empty}>헤맬 것이 아직 없다</Text> : null
+        }
+        ListFooterComponent={
+          done && items.length > 0 ? <Text style={styles.end}>여기까지</Text> : null
         }
       />
     </SafeAreaView>
@@ -245,8 +279,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   filterChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  // 길게 눌러 제외한 프로젝트 — 취소선으로 "빠져 있다"를 바로 읽히게
+  filterChipOff: { borderColor: colors.hairlineSoft, backgroundColor: 'transparent' },
   filterLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
   filterLabelActive: { color: colors.onInk },
+  filterLabelOff: { color: colors.faint, textDecorationLine: 'line-through' },
   list: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
   empty: {
     ...type.bodyMd,
@@ -254,5 +291,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.sans,
     textAlign: 'center',
     paddingTop: spacing.xxl,
+  },
+  end: {
+    ...type.bodySm,
+    color: colors.faint,
+    fontFamily: fonts.sans,
+    textAlign: 'center',
+    paddingVertical: spacing.xl,
   },
 });
