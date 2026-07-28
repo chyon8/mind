@@ -21,6 +21,7 @@ import {
   fetchFragmentProjectMap,
   fetchProjects,
   insertFragment,
+  updateFragment,
   setFragmentProjects,
   touchFragment,
 } from '@/lib/supabase';
@@ -102,6 +103,7 @@ function Card({
   onThrow,
   memo,
   onMemoChange,
+  onMemoBlur,
   projects,
   assignedIds,
   onToggleProject,
@@ -111,15 +113,19 @@ function Card({
   slot: string; // 확장 / 아이디어 / 관점 / 되꺼냄. 구버전 브리핑은 빈 문자열이라 배지가 안 뜬다
   thrown: boolean;
   onThrow: () => void;
-  // 던지기 전에 미리 남겨두는 메모 — 던지면 파편의 덧붙임으로 같이 들어간다.
+  // 던진 뒤에만 여는 메모 (프로젝트 칩과 같은 자리 — 던지기 자체는 마찰 0 유지).
+  // 쓴 걸 blur에서 파편의 덧붙임으로 저장한다.
   memo: string;
   onMemoChange: (text: string) => void;
+  onMemoBlur: () => void;
   // 던진 뒤에만 펼쳐지는 프로젝트 칩 (유저 요청, 2026-07-22) — 던지기 자체는 마찰 0 유지,
   // 프로젝트 지정은 완전히 선택. projects가 빈 배열이면 칩 자체가 안 뜬다(지을 곳이 없다).
   projects: Project[];
   assignedIds: string[];
   onToggleProject: (projectId: string) => void;
 }) {
+  // 그냥 탭했다 나가는 것만으론(안 쓰고 blur) 기존 덧붙임을 빈 문자열로 덮어쓰지 않는다
+  const memoTouched = useRef(false);
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, {
@@ -147,22 +153,28 @@ function Card({
       )}
       <Text style={styles.cardTitle}>{title}</Text>
       {!!body && <Markdown text={body} onLink={openLink} />}
-      {!thrown && (
-        <TextInput
-          style={styles.memoInput}
-          multiline
-          value={memo}
-          onChangeText={onMemoChange}
-          placeholder="던지기 전에 메모 (선택)"
-          placeholderTextColor={colors.faint}
-          keyboardAppearance="dark"
-        />
-      )}
       <Pressable onPress={onThrow} disabled={thrown} hitSlop={6} style={styles.throw}>
         <Text style={[styles.throwText, thrown && styles.thrownText]}>
           {thrown ? '던졌다 ✓' : '↑ 던지기'}
         </Text>
       </Pressable>
+      {thrown && (
+        <TextInput
+          style={styles.memoInput}
+          multiline
+          value={memo}
+          onChangeText={(text) => {
+            memoTouched.current = true;
+            onMemoChange(text);
+          }}
+          onBlur={() => {
+            if (memoTouched.current) onMemoBlur();
+          }}
+          placeholder="덧붙일 생각 (선택)"
+          placeholderTextColor={colors.faint}
+          keyboardAppearance="dark"
+        />
+      )}
       {thrown && projects.length > 0 && (
         <View style={styles.projectRow}>
           {projects.map((p) => {
@@ -381,10 +393,9 @@ export default function Discovery() {
   );
 
   // 덧붙임이 링크를 클릭 가능하게 렌더하므로(Markdown) 마크업을 그대로 남긴다.
-  // 미리 써둔 메모가 있으면 그걸 먼저, 원래 카드 본문은 그 아래에 이어 붙인다.
-  const throwCard = useCallback((title: string, body: string, memo: string) => {
+  const throwCard = useCallback((title: string, body: string) => {
     setThrown((s) => new Set(s).add(title));
-    const note = [memo.trim(), body.trim()].filter(Boolean).join('\n\n') || null;
+    const note = body.trim() || null;
     insertFragment({ content: title, type: 'text', note })
       .then((fr) => {
         // id를 잡아둬야 던진 뒤 프로젝트 칩을 누를 수 있다 (유저 요청, 2026-07-22)
@@ -399,6 +410,17 @@ export default function Discovery() {
         }),
       );
   }, []);
+
+  // 던진 뒤 메모를 쓰면 그 파편의 덧붙임으로 저장한다 — 원래 카드 본문 위에 얹는다.
+  const saveCardMemo = useCallback(
+    (title: string, body: string, memo: string) => {
+      const fragId = thrownIds[title];
+      if (!fragId) return;
+      const note = [memo.trim(), body.trim()].filter(Boolean).join('\n\n') || null;
+      updateFragment(fragId, { note }).catch(() => {});
+    },
+    [thrownIds],
+  );
 
   const cards = mode === 'result' && kind !== 'empty' && kind !== 'error' ? parseCards(md) : [];
   const showStepper = mode === 'result' && kind === 'live' && !md;
@@ -486,9 +508,10 @@ export default function Discovery() {
             body={c.body}
             slot={c.slot}
             thrown={thrown.has(c.title)}
-            onThrow={() => throwCard(c.title, c.body, cardMemos[c.title] ?? '')}
+            onThrow={() => throwCard(c.title, c.body)}
             memo={cardMemos[c.title] ?? ''}
             onMemoChange={(text) => setCardMemos((prev) => ({ ...prev, [c.title]: text }))}
+            onMemoBlur={() => saveCardMemo(c.title, c.body, cardMemos[c.title] ?? '')}
             projects={projects}
             assignedIds={cardProjects[c.title] ?? []}
             onToggleProject={(pid) => toggleCardProject(c.title, pid)}
