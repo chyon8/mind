@@ -227,8 +227,16 @@ const styles = StyleSheet.create({
   back: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   title: { ...type.monoEyebrow, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 1 },
   spacer: { width: 44 },
-  filterScroll: { flexGrow: 0, marginBottom: spacing.sm },
-  filterRow: { flexDirection: 'row', gap: spacing.xs, paddingHorizontal: spacing.md },
+  // 세로 리스트에 밀려 찌그러지지 않도록 (ProjectChips와 같은 이유)
+  filterScroll: { flexGrow: 0, flexShrink: 0, marginBottom: spacing.xxs },
+  // ⚠️ paddingVertical이 반드시 있어야 한다. 없으면 ScrollView 높이가 칩 높이와 같아져서
+  //    borderRadius 알약의 위아래가 잘린다 — 눌러서 배경이 채워지면 잘린 게 그대로 보인다.
+  filterRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
   filterChip: {
     borderColor: colors.hairline,
     borderWidth: 1,
@@ -237,9 +245,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   filterChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
-  // iOS는 lineHeight 여백을 글자 위에만 붙인다 — bodyMd(15/21)를 그대로 쓰면 칩 안에서 글자가
-  // 아래로 내려간다. 한 줄짜리 칩이라 lineHeight를 줄이고 패딩으로 높이를 되돌린다.
-  filterLabel: { ...type.bodyMd, lineHeight: 17, color: colors.body, fontFamily: fonts.sans },
+  filterLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
   filterLabelActive: { color: colors.onInk },
   list: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
   empty: {
