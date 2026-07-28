@@ -16,11 +16,12 @@ import { parseDateKey, toDateKey } from '@/lib/dates';
 import { onFragmentUpdated } from '@/lib/fragmentUpdates';
 import {
   deleteProject,
+  fetchArchivedProjectFragments,
   fetchFragments,
   getProject,
   updateProject,
 } from '@/lib/supabase';
-import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment, Project, ProjectStatus } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
 
@@ -37,6 +38,7 @@ export default function ProjectDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [fragments, setFragments] = useState<Fragment[]>([]);
+  const [archivedFragments, setArchivedFragments] = useState<Fragment[]>([]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -51,6 +53,7 @@ export default function ProjectDetail() {
       })
       .catch(() => {});
     fetchFragments(id).then(setFragments).catch(() => {});
+    fetchArchivedProjectFragments(id).then(setArchivedFragments).catch(() => {});
   }, [id]);
 
   useFocusEffect(
@@ -184,6 +187,18 @@ export default function ProjectDetail() {
               />
             </Pressable>
           ))
+        )}
+
+        {archivedFragments.length > 0 && (
+          <>
+            <View style={styles.divider} />
+            <Text style={styles.sectionLabel}>묻힌 것 · {archivedFragments.length}</Text>
+            {archivedFragments.map((fr) => (
+              <Pressable key={fr.id} onPress={() => router.push(`/fragment/${fr.id}`)}>
+                <FragmentBullet fragment={fr} rowOpacity={FLOOR_OPACITY} />
+              </Pressable>
+            ))}
+          </>
         )}
       </ScrollView>
 

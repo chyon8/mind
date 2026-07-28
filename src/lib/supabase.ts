@@ -95,6 +95,19 @@ export async function fetchFragments(filter: FeedFilter, page = 0): Promise<Frag
   return data.map(toFragment);
 }
 
+// 프로젝트 상세의 "묻힌 것" 구획 — 이 프로젝트에 묻힌(archived) 파편만
+export async function fetchArchivedProjectFragments(projectId: string): Promise<Fragment[]> {
+  if (!isConfigured) return [];
+  const { data, error } = await supabase()
+    .from('fragments')
+    .select('*, fragment_projects!inner(project_id)')
+    .eq('fragment_projects.project_id', projectId)
+    .eq('archived', true)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data.map(toFragment);
+}
+
 // 월 캘린더용 — 날짜별 밀도만 알면 되므로 원문 없이 가볍게 전부 가져온다.
 // 피드는 100개씩 끊어 읽지만 캘린더는 아직 안 읽은 날에도 점을 찍어야 한다.
 export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
