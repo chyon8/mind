@@ -535,6 +535,11 @@ export default function Discovery() {
           </View>
         )}
       </ScrollView>
+
+      {/* 발견을 읽다 떠오른 걸 그 자리에서 던진다 — 카드의 "↑ 던지기"(카드 내용을 저장)와는 다르다. */}
+      <Pressable style={styles.fab} onPress={() => router.push('/input')}>
+        <Text style={styles.fabLabel}>＋ 던지기</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -555,7 +560,19 @@ const styles = StyleSheet.create({
   wordmark: { ...type.monoEyebrow, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 2 },
   headerBtn: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   headerBtnOff: { color: colors.faint },
-  list: { padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md },
+  // FAB이 마지막 카드를 가리지 않게 바닥 여백을 더 준다
+  list: { padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.md },
+
+  fab: {
+    position: 'absolute',
+    bottom: spacing.xl,
+    alignSelf: 'center',
+    backgroundColor: colors.ink,
+    borderRadius: rounded.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  fabLabel: { ...type.bodyLg, color: colors.onInk, fontFamily: fonts.sansMedium },
 
   card: {
     backgroundColor: colors.canvasElevated,

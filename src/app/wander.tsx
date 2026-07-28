@@ -234,10 +234,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: rounded.chip,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
+    paddingVertical: 6,
   },
   filterChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
-  filterLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  // iOS는 lineHeight 여백을 글자 위에만 붙인다 — bodyMd(15/21)를 그대로 쓰면 칩 안에서 글자가
+  // 아래로 내려간다. 한 줄짜리 칩이라 lineHeight를 줄이고 패딩으로 높이를 되돌린다.
+  filterLabel: { ...type.bodyMd, lineHeight: 17, color: colors.body, fontFamily: fonts.sans },
   filterLabelActive: { color: colors.onInk },
   list: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxxl },
   empty: {
