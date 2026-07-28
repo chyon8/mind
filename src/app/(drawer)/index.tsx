@@ -62,7 +62,10 @@ export default function Home() {
 
   // 이미 읽은 페이지 전부를 다시 읽는다 — 상세에서 돌아왔을 때 앞부분만 갱신하면
   // 뒤에 이어 붙여둔 것들과 어긋난다.
+  // 데일리 모드는 DailyView가 자기 범위(주간)만 따로 읽는다 — 여기서 피드/캘린더까지
+  // 같이 읽으면 데일리만 보는 동안에도 매번 최근 파편 전체를 불필요하게 가져오게 된다.
   const load = useCallback(async () => {
+    if (mode === 'daily') return;
     const version = ++loadVersion.current;
     try {
       const pages = await Promise.all(
@@ -78,7 +81,7 @@ export default function Home() {
     } catch {
       if (version === loadVersion.current) setFailed(true);
     }
-  }, [filter]);
+  }, [filter, mode]);
 
   // 바닥에 닿았다 → 다음 100개
   const loadMore = useCallback(async () => {
@@ -114,12 +117,20 @@ export default function Home() {
     setMode((m) => (m === 'daily' ? 'feed' : m));
   }, [filter]);
 
-  // 입력/상세에서 돌아올 때 포함, 화면이 보일 때마다 갱신
+  // 입력/상세에서 돌아올 때 포함, 화면이 보일 때마다 갱신 (데일리 모드면 load()가 안에서 스킵한다)
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load]),
   );
+
+  // 데일리 → 피드/어젠다로 넘어가는 순간엔 그동안 안 읽었으니 바로 읽어야 한다
+  const prevMode = useRef(mode);
+  useEffect(() => {
+    const wasDaily = prevMode.current === 'daily';
+    prevMode.current = mode;
+    if (wasDaily && mode !== 'daily') load();
+  }, [mode, load]);
 
   // 공유 저장은 이 화면이 이미 떠 있는 채로 일어난다 — 포커스가 안 바뀌므로 직접 듣는다
   useEffect(() => onThrown(load), [load]);
