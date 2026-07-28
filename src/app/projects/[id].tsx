@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -19,6 +19,7 @@ import {
   fetchArchivedProjectFragments,
   fetchFragments,
   getProject,
+  PAGE_SIZE,
   updateProject,
 } from '@/lib/supabase';
 import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/theme';
@@ -43,7 +44,12 @@ export default function ProjectDetail() {
   const [description, setDescription] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const load = useCallback(() => {
+  // 다른 리스트(피드 등)와 같은 방식 — 100개씩 끊어 읽고 바닥에 닿으면 이어 붙인다.
+  const lastPage = useRef(0);
+  const [exhausted, setExhausted] = useState(false);
+  const loadingMore = useRef(false);
+
+  const load = useCallback(async () => {
     if (!id) return;
     getProject(id)
       .then((p) => {
@@ -52,8 +58,37 @@ export default function ProjectDetail() {
         setDescription(p.description ?? '');
       })
       .catch(() => {});
-    fetchFragments(id).then(setFragments).catch(() => {});
     fetchArchivedProjectFragments(id).then(setArchivedFragments).catch(() => {});
+    try {
+      const pages = await Promise.all(
+        Array.from({ length: lastPage.current + 1 }, (_, i) => fetchFragments(id, i)),
+      );
+      setFragments(pages.flat());
+      setExhausted(pages[pages.length - 1].length < PAGE_SIZE);
+    } catch {
+      // 실패해도 이미 읽은 목록은 그대로 둔다
+    }
+  }, [id]);
+
+  const loadMore = useCallback(async () => {
+    if (!id || exhausted || loadingMore.current) return;
+    loadingMore.current = true;
+    try {
+      const next = lastPage.current + 1;
+      const frs = await fetchFragments(id, next);
+      lastPage.current = next;
+      setFragments((prev) => [...prev, ...frs]);
+      if (frs.length < PAGE_SIZE) setExhausted(true);
+    } catch {
+      // 다음 스크롤에서 다시 시도
+    } finally {
+      loadingMore.current = false;
+    }
+  }, [id, exhausted]);
+
+  useEffect(() => {
+    lastPage.current = 0;
+    setExhausted(false);
   }, [id]);
 
   useFocusEffect(
@@ -102,7 +137,15 @@ export default function ProjectDetail() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        onScroll={({ nativeEvent }) => {
+          const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+          if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 300) loadMore();
+        }}
+        scrollEventThrottle={200}
+      >
         <TextInput
           style={styles.name}
           value={name}
