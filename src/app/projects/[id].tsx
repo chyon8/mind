@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -13,6 +13,7 @@ import { DatePickerModal } from '@/components/DatePickerModal';
 import { FragmentBullet } from '@/components/FragmentBullet';
 import { confirmDelete } from '@/lib/confirm';
 import { parseDateKey, toDateKey } from '@/lib/dates';
+import { onFragmentUpdated } from '@/lib/fragmentUpdates';
 import {
   deleteProject,
   fetchFragments,
@@ -40,19 +41,26 @@ export default function ProjectDetail() {
   const [description, setDescription] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  const load = useCallback(() => {
+    if (!id) return;
+    getProject(id)
+      .then((p) => {
+        setProject(p);
+        setName(p.name);
+        setDescription(p.description ?? '');
+      })
+      .catch(() => {});
+    fetchFragments(id).then(setFragments).catch(() => {});
+  }, [id]);
+
   useFocusEffect(
     useCallback(() => {
-      if (!id) return;
-      getProject(id)
-        .then((p) => {
-          setProject(p);
-          setName(p.name);
-          setDescription(p.description ?? '');
-        })
-        .catch(() => {});
-      fetchFragments(id).then(setFragments).catch(() => {});
-    }, [id]),
+      load();
+    }, [load]),
   );
+
+  // 상세 수정이 이 화면이 뒤에 남아 있는 동안 끝날 수 있다 (포커스 안 바뀜)
+  useEffect(() => onFragmentUpdated(load), [load]);
 
   if (!project) return <SafeAreaView style={styles.screen} />;
 

@@ -1,12 +1,21 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FragmentCard } from '@/components/FragmentCard';
 import { fetchDayIndex, fetchFragmentsByIds, fetchProjects, type FeedFilter } from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
+import { onFragmentUpdated } from '@/lib/fragmentUpdates';
 import type { Fragment, Project } from '@/lib/types';
 import { vividness } from '@/lib/vividness';
+
+// filter 아래 이 파편이 지금도 이 헤맴에 속하는지 — fetchFragments의 필터 조건과 같다
+function matchesFilter(fr: Fragment, filter: FeedFilter): boolean {
+  if (fr.archived) return false;
+  if (filter === 'all') return true;
+  if (filter === 'inbox') return fr.project_ids.length === 0;
+  return fr.project_ids.includes(filter);
+}
 
 // 헤매기 — 무작위로 계속 흘러나온다. 딴생각하며 머릿속을 거니는 것에 가깝다.
 //
@@ -86,6 +95,48 @@ export default function Wander() {
       loading.current = false;
     }
   }, [items]);
+
+  // items는 자주 바뀌므로(스크롤할 때마다) ref로 최신 값을 들고 있는다 —
+  // refreshItems를 items 변화마다 새로 만들면 구독이 계속 갈아끼워진다.
+  const itemsRef = useRef<Fragment[]>([]);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  // 상세에서 돌아왔을 때 이미 뽑아둔 카드만 최신 상태로 맞춘다 — 순서·스크롤 위치는 안 흔든다.
+  // 헤매기는 끝내야 할 목록이 아니므로 전체 재섞기는 하지 않는다.
+  const refreshItems = useCallback(async () => {
+    const current = itemsRef.current;
+    if (current.length === 0) return;
+    const ids = current.map((fr) => fr.id);
+    let fresh: Fragment[];
+    try {
+      fresh = await fetchFragmentsByIds(ids);
+    } catch {
+      return;
+    }
+    const byId = new Map(fresh.map((fr) => [fr.id, fr]));
+    const stale = new Set(
+      ids.filter((id) => {
+        const fr = byId.get(id);
+        return !fr || !matchesFilter(fr, filter);
+      }),
+    );
+    if (stale.size > 0) {
+      pool.current = pool.current.filter((id) => !stale.has(id));
+      deck.current = deck.current.filter((id) => !stale.has(id));
+    }
+    setItems((prev) => prev.filter((fr) => !stale.has(fr.id)).map((fr) => byId.get(fr.id) ?? fr));
+  }, [filter]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshItems();
+    }, [refreshItems]),
+  );
+
+  // 상세 수정이 이 화면이 뒤에 남아 있는 동안 끝날 수 있다 (포커스 안 바뀜)
+  useEffect(() => onFragmentUpdated(refreshItems), [refreshItems]);
 
   useEffect(() => {
     fetchProjects().then(setProjects).catch(() => {});
