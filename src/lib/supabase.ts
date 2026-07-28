@@ -44,7 +44,7 @@ export async function signIn(email: string, password: string): Promise<void> {
   if (error) throw error;
 }
 
-export const PAGE_SIZE = 100;
+export const PAGE_SIZE = 30;
 
 // 'all' | 'inbox' | 'pinned' | 'grave' | 프로젝트 id
 // pinned = 즐겨찾기. 새 개념이 아니라 tier의 pinned를 모아 보는 렌즈일 뿐이다.
