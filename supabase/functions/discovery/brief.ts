@@ -79,17 +79,67 @@ const ASSEMBLE_SYS = `너는 Rudy다. 이 사람을 위해 바깥에서 찾아�
 마크다운으로 쓴다. 항목 제목은 ### 로.`;
 
 const URL_RE = /\((https?:\/\/[^)]+)\)/g;
-const HEADING_RE = /^###\s+(.+)$/gm;
 // 제목 앞의 슬롯 라벨(`### [아이디어] …`). 반복 방지에 쓸 때는 떼어낸다 —
 // 라벨은 모든 제목에 붙는 공통 접두사라 두면 중복 게이트의 유사도를 통째로 끌어올린다.
 const SLOT_LABEL_RE = /^\[[^\]]{1,10}\]\s*/;
 
+// 링크 라벨 — `[Mindsight Lockbox](https://…)`의 대괄호 안. 대개 영어 제품명이다.
+const LINK_LABEL_RE = /\[([^\]]{1,60})\]\(https?:\/\//g;
+
+// 저장한 링크의 제목 앞머리 = 제품 이름. "Pushary: Control panel… | Product Hunt" → "pushary".
+// 영문·숫자만 남긴다 (호스트명과 같은 모양으로 맞추려고).
+function productName(linkTitle: string): string | null {
+  const head = linkTitle.split(/[:|—–]/)[0];
+  const norm = head.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return norm.length >= 4 ? norm : null;
+}
+
+// 검색 결과가 **저장한 그 제품의 공식 사이트**인가. 2026-07-29 추가.
+// 07-28 브리핑에서 Product Hunt로 저장해둔 제품의 자기 사이트 3페이지가 그대로 "발견"으로
+// 나왔다. 조립 프롬프트엔 <이미 저장>이 들어가는데도 통과했다 — 저장한 URL(producthunt.com)과
+// 결과 URL(그 제품 도메인)이 달라서 모델이 다른 것으로 봤다.
+// 그래서 **도메인이 아니라 이름으로** 맞춘다. 판정이 아니라 문자열 일치라 코드로 자를 수 있다.
+// ⚠️ 부분 일치가 아니라 **완전 일치**다. 부분 일치로 하면 짧은 이름 하나가 검색 결과를 쓸어간다.
+// ⚠️ 저장한 URL의 도메인으로는 자르지 않는다 — Product Hunt 링크 하나 때문에
+//    Product Hunt 전체가 막히면 §1의 소스 결(HN/IH/PH)을 통째로 잃는다.
+function isOwnSite(url: string, savedNames: Set<string>): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  const base = host.replace(/^www\./, '').split('.')[0].replace(/[^a-z0-9]/g, '');
+  return base.length >= 4 && savedNames.has(base);
+}
+
+// 브리핑 본문을 항목 단위로 자른다. 제목과 **그 항목의** 링크 라벨을 한 벡터에 실어야 하므로
+// 제목만 따로 긁으면 안 된다.
+function briefSections(text: string): { heading: string; body: string }[] {
+  return text
+    .split(/^###\s+/m)
+    .slice(1)
+    .map((part) => {
+      const nl = part.indexOf('\n');
+      return nl === -1
+        ? { heading: part.trim(), body: '' }
+        : { heading: part.slice(0, nl).trim(), body: part.slice(nl + 1) };
+    });
+}
+
 // 최근 브리핑에서 다룬 주제(### 제목)와 인용 URL — 반복 방지용 (§6-4 ②).
 // ⚠️ URL만 막으면 같은 프로젝트가 매번 다른 링크로 또 나온다(유저가 지적). **주제**를 넘겨
 //    각도 단계에서 "이미 다룬 것"을 피하게 한다. utterances에 detail 컬럼이 없어 text에서 뽑는다.
+//
+// ⚠️ **`topics`(프롬프트 힌트)와 `matchTopics`(중복 게이트)를 갈라 놓는다** — 2026-07-29.
+//    게이트는 각도(영어 query + 한국어 from/why)를 한국어 제목하고만 비교하고 있었다.
+//    07-28에 어제 낸 락박스가 브랜드만 바꿔 그대로 다시 나왔는데, 어제 항목에 붙어 있던
+//    영어 제품명("Mindsight Lockbox" 등)이 본문에 멀쩡히 있는데도 비교 대상이 아니었다.
+//    언어가 어긋나면 유사도가 임계 밑에 깔린다(임베딩 idea 게이트가 죽은 것과 같은 원인).
+//    → 게이트에만 링크 라벨을 얹는다. 프롬프트 힌트는 그대로 둬서 입력 비용이 안 는다.
 async function recentBriefContext(
   supabase: SupabaseClient,
-): Promise<{ topics: string[]; urls: string[] }> {
+): Promise<{ topics: string[]; matchTopics: string[]; urls: string[] }> {
   const since = new Date(Date.now() - REPEAT_WINDOW_DAYS * 86_400_000).toISOString();
   const { data } = await supabase
     .schema('rudy')
@@ -102,10 +152,15 @@ async function recentBriefContext(
     //    임의의 N개가 된다 — 정작 어제 다룬 주제가 빠질 수 있다. 최신순으로 고정한다.
     .order('created_at', { ascending: false });
   const texts = (data ?? []).map((r) => (r.text as string) ?? '');
+  const sections = texts.flatMap(briefSections);
+  const topics = sections.map((s) => s.heading.replace(SLOT_LABEL_RE, ''));
   return {
-    topics: texts.flatMap((t) =>
-      [...t.matchAll(HEADING_RE)].map((m) => m[1].trim().replace(SLOT_LABEL_RE, '')),
-    ),
+    topics,
+    matchTopics: sections.map((s) => {
+      const labels = [...s.body.matchAll(LINK_LABEL_RE)].map((m) => m[1].trim());
+      const heading = s.heading.replace(SLOT_LABEL_RE, '');
+      return labels.length ? `${heading} · ${labels.join(' ')}` : heading;
+    }),
     urls: texts.flatMap((t) => [...t.matchAll(URL_RE)].map((m) => m[1])),
   };
 }
@@ -179,12 +234,22 @@ export async function* streamBrief(
 
   // 중복 게이트 — 지난 브리핑과 같은 주제를 다른 제목으로 꺼내는 걸 막는다.
   try {
-    const r = await dedupeAngles(angles, prior.topics);
+    const r = await dedupeAngles(angles, prior.matchTopics);
     logDedupe(supabase, r, angles.length);
     angles = r.kept;
   } catch (e) {
     console.warn('[brief] 중복 게이트 실패 → 거르지 않고 진행', e);
   }
+
+  // 저장해둔 링크의 제품 이름들 — 그 제품 자기 사이트를 검색 결과에서 걷어내는 데 쓴다.
+  const savedNames = new Set(
+    material.loose
+      .concat(material.projects.flatMap((p) => p.fragments))
+      .concat(material.lists.flatMap((p) => p.fragments))
+      .concat(material.picked)
+      .map((f) => f.link_title && productName(f.link_title))
+      .filter((n): n is string => !!n),
+  );
 
   const toSearch = angles.filter((a) => a.slot !== 'resurface' && a.query);
   yield { t: 'status', stage: 'search', count: toSearch.length };
@@ -195,12 +260,14 @@ export async function* streamBrief(
         const results = await exaSearch(a.query, NUM_RESULTS);
         return {
           angle: a,
-          results: results.map((r) => ({
-            title: r.title,
-            url: r.url,
-            date: r.publishedDate?.slice(0, 10) ?? null,
-            highlights: r.highlights.join(' … ').slice(0, 900),
-          })),
+          results: results
+            .filter((r) => !isOwnSite(r.url, savedNames))
+            .map((r) => ({
+              title: r.title,
+              url: r.url,
+              date: r.publishedDate?.slice(0, 10) ?? null,
+              highlights: r.highlights.join(' … ').slice(0, 900),
+            })),
         };
       } catch (e) {
         console.warn('[brief] 검색 실패', a.query, e);
