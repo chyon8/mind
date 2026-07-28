@@ -1,6 +1,16 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatCost } from '@/lib/cost';
 import { dayKey, feedDateLabel, formatTime } from '@/lib/dates';
@@ -90,6 +100,8 @@ function Card({
   slot,
   thrown,
   onThrow,
+  memo,
+  onMemoChange,
   projects,
   assignedIds,
   onToggleProject,
@@ -99,6 +111,9 @@ function Card({
   slot: string; // 확장 / 아이디어 / 관점 / 되꺼냄. 구버전 브리핑은 빈 문자열이라 배지가 안 뜬다
   thrown: boolean;
   onThrow: () => void;
+  // 던지기 전에 미리 남겨두는 메모 — 던지면 파편의 덧붙임으로 같이 들어간다.
+  memo: string;
+  onMemoChange: (text: string) => void;
   // 던진 뒤에만 펼쳐지는 프로젝트 칩 (유저 요청, 2026-07-22) — 던지기 자체는 마찰 0 유지,
   // 프로젝트 지정은 완전히 선택. projects가 빈 배열이면 칩 자체가 안 뜬다(지을 곳이 없다).
   projects: Project[];
@@ -132,6 +147,17 @@ function Card({
       )}
       <Text style={styles.cardTitle}>{title}</Text>
       {!!body && <Markdown text={body} onLink={openLink} />}
+      {!thrown && (
+        <TextInput
+          style={styles.memoInput}
+          multiline
+          value={memo}
+          onChangeText={onMemoChange}
+          placeholder="던지기 전에 메모 (선택)"
+          placeholderTextColor={colors.faint}
+          keyboardAppearance="dark"
+        />
+      )}
       <Pressable onPress={onThrow} disabled={thrown} hitSlop={6} style={styles.throw}>
         <Text style={[styles.throwText, thrown && styles.thrownText]}>
           {thrown ? '던졌다 ✓' : '↑ 던지기'}
@@ -236,6 +262,8 @@ export default function Discovery() {
   const [thrown, setThrown] = useState<Set<string>>(new Set());
   const [thrownIds, setThrownIds] = useState<Record<string, string>>({});
   const [cardProjects, setCardProjects] = useState<Record<string, string[]>>({});
+  // 던지기 전에 카드마다 미리 써두는 메모 — title을 키로 쓴다(projects/thrown과 같은 방식)
+  const [cardMemos, setCardMemos] = useState<Record<string, string>>({});
   const syncThrown = useCallback((text: string) => {
     const titles = parseCards(text).map((c) => c.title).filter(Boolean);
     if (!titles.length) return;
@@ -352,10 +380,11 @@ export default function Discovery() {
     [refreshList],
   );
 
-  // note엔 링크 마크업을 평문으로 눕혀서 넣는다 — 덧붙임은 읽는 글이지 링크가 아니다.
-  const throwCard = useCallback((title: string, body: string) => {
+  // 덧붙임이 링크를 클릭 가능하게 렌더하므로(Markdown) 마크업을 그대로 남긴다.
+  // 미리 써둔 메모가 있으면 그걸 먼저, 원래 카드 본문은 그 아래에 이어 붙인다.
+  const throwCard = useCallback((title: string, body: string, memo: string) => {
     setThrown((s) => new Set(s).add(title));
-    const note = body.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1 ($2)').trim() || null;
+    const note = [memo.trim(), body.trim()].filter(Boolean).join('\n\n') || null;
     insertFragment({ content: title, type: 'text', note })
       .then((fr) => {
         // id를 잡아둬야 던진 뒤 프로젝트 칩을 누를 수 있다 (유저 요청, 2026-07-22)
@@ -457,7 +486,9 @@ export default function Discovery() {
             body={c.body}
             slot={c.slot}
             thrown={thrown.has(c.title)}
-            onThrow={() => throwCard(c.title, c.body)}
+            onThrow={() => throwCard(c.title, c.body, cardMemos[c.title] ?? '')}
+            memo={cardMemos[c.title] ?? ''}
+            onMemoChange={(text) => setCardMemos((prev) => ({ ...prev, [c.title]: text }))}
             projects={projects}
             assignedIds={cardProjects[c.title] ?? []}
             onToggleProject={(pid) => toggleCardProject(c.title, pid)}
@@ -521,6 +552,17 @@ const styles = StyleSheet.create({
   // 아이디어만 살짝 드러낸다 — 이 사람이 제일 원하는 슬롯이라 한눈에 세어져야 한다.
   slotBadgeIdea: { color: colors.ink },
   cardTitle: { ...type.headingMd, color: colors.ink, fontFamily: fonts.sansSemiBold, marginBottom: spacing.xxs },
+  memoInput: {
+    ...type.bodyMd,
+    color: colors.body,
+    fontFamily: fonts.sans,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: rounded.sm,
+    padding: spacing.sm,
+    minHeight: 36,
+    textAlignVertical: 'top',
+  },
   footnote: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, fontStyle: 'italic', paddingHorizontal: spacing.xs },
   throw: {
     alignSelf: 'flex-start',
