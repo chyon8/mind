@@ -5,6 +5,7 @@ import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, Vie
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/lib/confirm';
 import { feedDateLabel, formatTime } from '@/lib/dates';
+import { Markdown } from '@/lib/markdown';
 import {
   countDiscoverNext,
   deleteFragment,
@@ -59,6 +60,9 @@ export default function FragmentDetail() {
   // content/note는 인라인 편집 대상 — 로컬 상태로 들고 있다가 blur 때 저장
   const [content, setContent] = useState('');
   const [note, setNote] = useState('');
+  // 덧붙임 안 링크를 누르려면 읽기 모드(Markdown)여야 한다 — 편집 중엔 TextInput이라 못 누른다.
+  // 내용이 있으면 기본은 읽기 모드, 탭하면 편집으로 전환.
+  const [noteEditing, setNoteEditing] = useState(false);
   const [selectedPiece, setSelectedPiece] = useState<MergedPiece | null>(null);
   // 아직 동작 안 하는 칩을 눌렀을 때 그 칩만 잠깐 "아직 준비중"으로 바뀐다
   const [soon, setSoon] = useState<string | null>(null);
@@ -117,6 +121,9 @@ export default function FragmentDetail() {
 
   if (!fragment) return <SafeAreaView style={styles.screen} />;
 
+  // 고정한 걸 실수로 묻지 않게 — 묻으려면 먼저 고정을 풀어야 한다 (파내기는 그대로 허용)
+  const pinnedBlocksGrave = fragment.tier === 'pinned' && !fragment.archived;
+
   // touch는 **내용에 손댔을 때만** 한다 (2026-07-22). 예전엔 tier·프로젝트 변경도 touch였는데,
   // 인박스를 정리하다가 54개 시계가 한꺼번에 리셋됐다 — 파일링은 "이게 아직 중요해"라는
   // 판단이 아니다. tier는 그 자체로 감쇠 속도를 바꾸므로 touch까지 하면 중복이기도 하다.
@@ -157,6 +164,11 @@ export default function FragmentDetail() {
     const raw = content.trim();
     const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     Linking.openURL(url).catch(() => {});
+  }
+
+  // 덧붙임 안 링크 — 던지기로 들어온 마크다운 링크든 유저가 직접 쓴 URL이든 눌러서 열 수 있어야 한다
+  function openUrl(href: string) {
+    Linking.openURL(href).catch(() => {});
   }
 
   // "다음 발견에 포함" (RUDY-STATUS.md ①) — 다음 브리핑이 이 파편을 반드시 각도로 만든다.
@@ -248,17 +260,27 @@ export default function FragmentDetail() {
         )}
 
         <Text style={styles.sectionLabel}>덧붙임</Text>
-        <TextInput
-          style={[styles.note, noFocusRing]}
-          multiline
-          value={note}
-          onChangeText={setNote}
-          onEndEditing={saveNote}
-          onBlur={saveNote}
-          placeholder="이 파편에 대한 생각을 덧붙여…"
-          placeholderTextColor={colors.faint}
-          keyboardAppearance="dark"
-        />
+        {noteEditing || !note ? (
+          <TextInput
+            style={[styles.note, noFocusRing]}
+            multiline
+            autoFocus={noteEditing}
+            value={note}
+            onChangeText={setNote}
+            onEndEditing={saveNote}
+            onBlur={() => {
+              saveNote();
+              setNoteEditing(false);
+            }}
+            placeholder="이 파편에 대한 생각을 덧붙여…"
+            placeholderTextColor={colors.faint}
+            keyboardAppearance="dark"
+          />
+        ) : (
+          <Pressable onPress={() => setNoteEditing(true)}>
+            <Markdown text={note} onLink={openUrl} />
+          </Pressable>
+        )}
 
         {fragment.merged_from.length > 0 && (
           <>
@@ -374,11 +396,18 @@ export default function FragmentDetail() {
         <View style={styles.divider} />
 
         <Pressable
-          onPress={() => patch({ archived: !fragment.archived })}
-          style={styles.graveBtn}
+          onPress={() => {
+            if (pinnedBlocksGrave) return;
+            patch({ archived: !fragment.archived });
+          }}
+          style={[styles.graveBtn, pinnedBlocksGrave && styles.graveBtnDisabled]}
         >
           <Text style={styles.graveLabel}>
-            {fragment.archived ? '파내기 — 타임라인으로 복귀' : '묻기 — 무덤으로'}
+            {fragment.archived
+              ? '파내기 — 타임라인으로 복귀'
+              : pinnedBlocksGrave
+                ? '묻기 — 고정을 먼저 풀어야 한다'
+                : '묻기 — 무덤으로'}
           </Text>
         </Pressable>
 
@@ -412,7 +441,7 @@ export default function FragmentDetail() {
               {selectedPiece.note != null && selectedPiece.note !== '' && (
                 <>
                   <Text style={styles.sectionLabel}>덧붙임</Text>
-                  <Text style={styles.noteReadonly}>{selectedPiece.note}</Text>
+                  <Markdown text={selectedPiece.note} onLink={openUrl} />
                 </>
               )}
             </ScrollView>
@@ -518,11 +547,6 @@ const styles = StyleSheet.create({
     minHeight: 44,
     textAlignVertical: 'top',
   },
-  noteReadonly: {
-    ...type.bodyMd,
-    color: colors.body,
-    fontFamily: fonts.sans,
-  },
   divider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.hairline,
@@ -618,6 +642,7 @@ const styles = StyleSheet.create({
   // 한 줄 안내 — 상태·경고가 여기로 온다. 버튼 폭에 영향을 주지 않는 자리다.
   discoverHint: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, marginTop: spacing.xs },
   graveBtn: { paddingVertical: spacing.sm },
+  graveBtnDisabled: { opacity: 0.4 },
   graveLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
   deleteBtn: { paddingVertical: spacing.sm, marginTop: spacing.sm },
   deleteLabel: { ...type.bodyMd, color: colors.error, fontFamily: fonts.sansMedium },
