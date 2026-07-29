@@ -32,6 +32,11 @@ export function FragmentBullet({
       <Text style={styles.text} numberOfLines={1}>
         {line}
       </Text>
+      {/* 중요(★)·고정(⚑) — ✎(덧붙임)과 같은 마크 관용구인데 색만 ink로 올린다.
+          불릿 줄은 촘촘해서 회색 마크는 안 보인다 (2026-07-29 유저 요청). */}
+      {fragment.tier !== 'normal' && (
+        <Text style={styles.tierMark}>{fragment.tier === 'pinned' ? '⚑' : '★'}</Text>
+      )}
       {fragment.merged_from.length > 0 && (
         <Text style={styles.time}>+{fragment.merged_from.length}</Text>
       )}
@@ -61,4 +66,6 @@ const styles = StyleSheet.create({
   },
   text: { ...type.bodyMd, lineHeight: 24, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
   time: { ...type.bodySm, lineHeight: 24, color: colors.faint, fontFamily: fonts.mono },
+  // mono가 아니라 sans — ★·⚑는 고정폭 폰트에 글리프가 없거나 깨질 수 있다.
+  tierMark: { fontSize: 13, lineHeight: 24, color: colors.ink, fontFamily: fonts.sans },
 });

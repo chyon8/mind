@@ -5,7 +5,11 @@ import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Fragment } from '@/lib/types';
 import { useImageUrl } from '@/lib/useImageUrl';
 
-const TIER_LABEL: Record<string, string> = { important: 'IMPORTANT', pinned: 'PINNED' };
+// 중요/고정 표시 (2026-07-29 유저 요청: "중요로 체크하면 별표든 뭐든 눈에 띄게").
+// 전엔 'IMPORTANT'를 다른 eyebrow와 **같은 faint 회색**으로 찍어서 사실상 안 보였다 —
+// 글자를 마크로 바꾸고 ink(최상위 색)로 올린다. 메타 줄 맨 앞에 둬서 시선이 먼저 닿게.
+// ⚠️ 카드 전체 opacity(선명도)는 그대로 걸린다 — 흐려진 파편의 별은 같이 흐려지는 게 맞다.
+const TIER_MARK: Record<string, string> = { important: '★', pinned: '⚑' };
 
 // 선명도는 카드 전체(보더 포함)에 opacity로 — 다크 캔버스 속으로 가라앉는 지층감 (PLAN §6.5)
 export function FragmentCard({
@@ -32,10 +36,10 @@ export function FragmentCard({
         </View>
       ) : null}
       <View style={styles.meta}>
-        <Text style={styles.eyebrow}>{fragment.type.toUpperCase()}</Text>
         {fragment.tier !== 'normal' && (
-          <Text style={styles.eyebrow}>{TIER_LABEL[fragment.tier]}</Text>
+          <Text style={styles.tierMark}>{TIER_MARK[fragment.tier]}</Text>
         )}
+        <Text style={styles.eyebrow}>{fragment.type.toUpperCase()}</Text>
         {fragment.merged_from.length > 0 && (
           <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
         )}
@@ -121,6 +125,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   eyebrow: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
+  // 마크는 mono가 아니라 sans — ★·⚑는 고정폭 폰트에 글리프가 없거나 깨질 수 있다.
+  tierMark: { fontSize: 14, lineHeight: 16, color: colors.ink, fontFamily: fonts.sans },
   time: { marginLeft: 'auto' },
   projectTag: {
     borderColor: colors.hairline,
