@@ -37,11 +37,15 @@ const LINK_THRESHOLD = 0.34;
 const LINK_COOLDOWN_DAYS = 30; // 되살리기와 같은 쿨다운 (§4-C1 표면 간 중복 방지)
 const HISTORY_LIMIT = 20; // 맥락으로 넘길 이전 메시지 수
 const PERIOD_LIMIT = 40; // 기간 조회 상한 (하루에 40개 넘게 던지면 최신순으로 자른다)
-// 열거 조회 상한 (2026-07-25). 전수를 넘기는 게 핵심이라 넉넉하게 두되, 코퍼스가 수천 개로
-// 자랐을 때 질문 하나가 수십만 토큰이 되는 것만 막는다. 넘치면 최신순으로 자른다.
-// ⚠️ 이 상한에 실제로 닿기 시작하면(파편 300개+) 싼 모델로 1차 필터를 거는 게 맞다 — 그때까진
+// 전량 조회 상한 (2026-07-25 열거 경로 → 2026-07-29 기본 경로로 확대).
+// 전수를 넘기는 게 핵심이라 넉넉하게 두되, 코퍼스가 수천 개로 자랐을 때 질문 하나가
+// 수십만 토큰이 되는 것만 막는다. 넘치면 최신순으로 자른다.
+// ⚠️ 300이었는데 실제 파편이 331개라 이미 오래된 31개가 조용히 잘리고 있었다 —
+//    "빠뜨리지 마라"고 프롬프트에 적어놓고 재료에서 빼고 있었던 것. 실측(2026-07-29)으로
+//    331개 = 24,567토큰이니 600개(≈45k)까지는 컨텍스트가 넉넉하다.
+// ⚠️ 이 상한에 실제로 닿으면(파편 600개+) 싼 모델로 1차 필터를 거는 게 맞다 — 그때까진
 //    통째로 넘기는 게 더 싸고 정확하다 (RUDY-STATUS.md ② 비용 메모).
-const ENUMERATE_LIMIT = 300;
+const CORPUS_LIMIT = 600;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -56,13 +60,18 @@ type Frag = {
   link_title: string | null;
   link_description: string | null;
   note: string | null;
+  archived: boolean;
 };
 
-const FRAG_COLS = 'id, created_at, type, content, link_title, link_description, note';
+const FRAG_COLS = 'id, created_at, type, content, link_title, link_description, note, archived';
+
+// 프로젝트 한 조각. **description이 정답지다** — 이름만 보면 No phone을 미니멀폰으로,
+// Caselab을 법률 프로덕트로 읽는다 (발견 쪽에서 실제로 터진 헛발질, material.ts 주석 참고).
+type Proj = { id: string; name: string; description: string | null };
 
 // 근거 한 조각. 모델이 [『제목』](mind://fragment/id)로 인용할 수 있게 id를 넣고,
 // 프로젝트 소속과 원본 URL도 준다 — "링크 달라", "프로젝트로 가자"에 답할 재료.
-function fragBlock(f: Frag, projects: { id: string; name: string }[]): string {
+function fragBlock(f: Frag, projects: Proj[]): string {
   const date = kstDate(f.created_at); // UTC로 찍으면 새벽 저장분이 하루 전으로 보인다
   const title = f.type === 'link' ? (f.link_title ?? f.content) : f.content;
   const lines = [
@@ -76,7 +85,11 @@ function fragBlock(f: Frag, projects: { id: string; name: string }[]): string {
   }
   if (f.note) lines.push(`  덧: ${f.note.replace(/\n/g, ' ')}`);
   if (projects.length) {
-    lines.push(`  프로젝트: ${projects.map((p) => `${p.name} (id: ${p.id})`).join(', ')}`);
+    lines.push(
+      `  프로젝트: ${projects
+        .map((p) => `${p.name} (id: ${p.id})${p.description ? ` — ${p.description.replace(/\s+/g, ' ').slice(0, 120)}` : ''}`)
+        .join(', ')}`,
+    );
   }
   return lines.join('\n');
 }
@@ -84,12 +97,52 @@ function fragBlock(f: Frag, projects: { id: string; name: string }[]): string {
 // 열거 경로용 한 줄 (2026-07-25). fragBlock은 파편 하나가 여러 줄이라 전 파편에 곱하면
 // 컨텍스트가 터진다 — 여기선 한 파편 = 한 줄. 링크의 URL은 안 싣는다(제목·설명이 신호 전부고,
 // 원본 주소가 필요하면 유저가 그 파편을 탭한다). id는 남긴다 — 답에서 링크로 걸어야 하니까.
+//
+// ⚠️ `·무덤` 표시를 붙인다 (2026-07-29). 전에는 archived 여부가 재료에 아예 안 실려서,
+//    모델이 2주 전에 흐려진 것과 어제 던진 것을 같은 무게로 읽었다. 무덤을 **빼는 게 아니라**
+//    표시하는 게 처방이다 — 실측(2026-07-29) 331개 중 238개(72%)가 무덤이라 빼면 코퍼스가
+//    지난 5일치만 남는다.
 function enumLine(f: Frag): string {
   const raw = (f.type === 'link' ? (f.link_title ?? f.content) : f.content) ?? '';
   const title = raw.replace(/\s+/g, ' ').slice(0, 100);
   const desc = f.link_description ? ` — ${f.link_description.replace(/\s+/g, ' ').slice(0, 100)}` : '';
   const note = f.note ? ` (덧: ${f.note.replace(/\s+/g, ' ').slice(0, 80)})` : '';
-  return `- ${kstDate(f.created_at)} [${f.type}] ${title}${desc}${note} | id: ${f.id}`;
+  const kind = `${f.type}${f.archived ? '·무덤' : ''}`;
+  return `- ${kstDate(f.created_at)} [${kind}] ${title}${desc}${note} | id: ${f.id}`;
+}
+
+// 저장소 전량 블록 (2026-07-29) — 기본 갈래가 보는 재료.
+//
+// ⚠️ 전에는 이 자리가 **유사도 상위 10개**였고, 그게 "채팅이 멍청하다"의 뿌리였다.
+//    실측: "오늘 집가서 뭐할까"에 앱 개발 버그 메모 10개가 갔다(Year 표시가 없네 / 반응형 /
+//    모달끄면 저장안되는 문제 …). 원인은 주제어가 안 뽑히는 질문("나한테 필요한 게 뭐야")이
+//    질문 원문으로 검색되는 오염 경로(위 EXTRACT_SYS 주석)로 떨어지기 때문.
+//    → **331개 = 24,567토큰이라 통째로 들어간다. 이 크기에선 고르는 것보다 다 보여주는 게 낫다.**
+//    (열거 경로가 이미 이 수법을 쓰고 있었다 — 라우터가 맞힐 때만 발동하던 걸 기본값으로 뒤집었다.)
+//
+// 프로젝트를 맨 위에 싣는다: "내가 뭘 만들고 있나"가 이 질문들의 제일 중요한 재료인데
+// 전엔 이름+id만 갔다(RUDY-STATUS 다음 할 일 ③).
+async function corpusBlock(): Promise<string> {
+  const [fragRes, projRes] = await Promise.all([
+    supabase
+      .from('fragments')
+      .select(FRAG_COLS)
+      .order('created_at', { ascending: false })
+      .limit(CORPUS_LIMIT),
+    supabase.from('projects').select('name, status, description').order('created_at'),
+  ]);
+  const projects = ((projRes.data ?? []) as { name: string; status: string; description: string | null }[])
+    .map((p) => `- ${p.name} (${p.status})${p.description ? ` — ${p.description.replace(/\s+/g, ' ')}` : ''}`)
+    .join('\n');
+  const frags = ((fragRes.data ?? []) as Frag[]).map(enumLine).join('\n');
+  return [
+    '=== 이 사람이 하고 있는 일 (프로젝트) ===',
+    '※ 설명이 정답지다. 이름만 보고 넘겨짚지 마라.',
+    projects || '(없음)',
+    '',
+    '=== 저장한 파편 전부 (`·무덤` = 흐려져서 가라앉은 것) ===',
+    frags || '(없음)',
+  ].join('\n');
 }
 
 // 질문 문장을 그대로 임베딩하면 검색이 망가진다 (2026-07-19 실측).
@@ -427,6 +480,10 @@ Deno.serve(async (req) => {
   let evidence = '';
   let link: Frag | null = null;
   let periodNote = '';
+  // 전량 블록은 **기본 갈래에서만** 붙인다. 나머지 갈래는 이미 자기 재료가 "전부"라서
+  // (기간=그 기간 전부 / 열거=전 파편 / 축·오늘=계산된 것), 전량을 겹치면 모델이
+  // 그 갈래의 규율을 무시하고 아무 날짜나 끌어온다 — prompt.ts §기간이 금지하는 그 동작.
+  let corpus = '';
 
   if (period) {
     // ⚠️ 시간 질의는 **검색으로 답할 수 없다.** "오늘 뭐 저장했지"를 임베딩 유사도로
@@ -454,7 +511,7 @@ Deno.serve(async (req) => {
       .from('fragments')
       .select(FRAG_COLS)
       .order('created_at', { ascending: false })
-      .limit(ENUMERATE_LIMIT);
+      .limit(CORPUS_LIMIT);
     const all = (rows ?? []) as Frag[];
     evidence = all.map(enumLine).join('\n');
     periodNote = `저장한 파편 ${all.length}개 전부 — 검색 결과가 아니다`;
@@ -477,6 +534,14 @@ Deno.serve(async (req) => {
     citedIds = axes.flatMap((a) => a.items.map((f) => f.id));
     evidence = axesBlock(axes);
   } else {
+    // ── 기본 갈래 (2026-07-29 개편). **재료가 둘이다:**
+    //    ① <저장소> 전량 — "무엇이 있나". 모델이 331개를 직접 훑어 고른다.
+    //    ② 유사도 상위 10개 — 그중 이 질문에 가장 닿는 것들의 **상세**(URL·설명·덧·프로젝트)
+    //       + 근거 칩. 전량은 한 줄이라 URL도 프로젝트 소속도 없어서, 이게 없으면
+    //       "링크 달라"·"프로젝트로 가자"가 답을 못 한다.
+    //    검색을 없앤 게 아니라 **역할을 바꿨다** — 전엔 검색이 모델이 보는 전부였다.
+    corpus = await corpusBlock();
+
     // 자발적 연결은 질문 원문 기준이라 원문 임베딩도 필요하다 — 한 번에 받는다
     const embeds = await embedMany([...queries, question]);
     const qEmbed = embeds[embeds.length - 1];
@@ -516,14 +581,15 @@ Deno.serve(async (req) => {
       (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
     );
 
-    // 근거 파편의 프로젝트 소속 — "프로젝트 상세로 가자"에 답할 재료
-    const projByFrag = new Map<string, { id: string; name: string }[]>();
+    // 근거 파편의 프로젝트 소속 — "프로젝트 상세로 가자"에 답할 재료.
+    // description까지 가져온다 (2026-07-29) — 이름만으론 No phone이 뭔지 모른다.
+    const projByFrag = new Map<string, Proj[]>();
     if (citedIds.length) {
       const { data: maps } = await supabase
         .from('fragment_projects')
-        .select('fragment_id, projects(id, name)')
+        .select('fragment_id, projects(id, name, description)')
         .in('fragment_id', citedIds);
-      for (const m of (maps ?? []) as { fragment_id: string; projects: { id: string; name: string } }[]) {
+      for (const m of (maps ?? []) as { fragment_id: string; projects: Proj }[]) {
         if (!m.projects) continue;
         const arr = projByFrag.get(m.fragment_id) ?? [];
         arr.push(m.projects);
@@ -578,8 +644,15 @@ Deno.serve(async (req) => {
     .filter(Boolean)
     .join('\n\n');
 
+  // ⚠️ 전량 블록은 **system 바로 뒤**여야 한다 (2026-07-29). OpenAI 자동 캐싱은 프롬프트
+  //    앞에서부터 같은 부분만 걸리는데, 이력 뒤에 두면 이력이 매 턴 바뀌어 24k짜리 재료가
+  //    영영 캐시에 안 올라간다. 여기 두면 한 대화의 2번째 턴부터 캐시 입력 단가($0.50/1M =
+  //    1/10)로 떨어진다.
+  //    RUDY-STATUS 기각 목록의 "캐싱은 안 걸린다"는 **하루 1회 브리핑** 얘기다 — 채팅은
+  //    턴이 몇 분 간격이라 조건이 정반대고, 그래서 여기선 되살렸다.
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(today) },
+    ...(corpus ? [{ role: 'system' as const, content: `<저장소>\n${corpus}\n</저장소>` }] : []),
     ...((history ?? []).reverse() as ChatMessage[]), // 최신순으로 받아 시간순으로 되돌린다
     { role: 'user', content: context },
   ];

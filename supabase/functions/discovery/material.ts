@@ -48,16 +48,24 @@ const WINDOW_DAYS = 90; // §6-2 창. 지금은 코퍼스가 5일치라 사실�
 export async function loadMaterial(supabase: SupabaseClient): Promise<Material> {
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
   const [projRes, fragRes, mapRes, pickRes] = await Promise.all([
-    supabase.from('projects').select('id, name, status, description').order('created_at'),
+    supabase.from('projects').select('id, name, status, description, discover_skip').order('created_at'),
     supabase
       .from('fragments')
       .select(FRAG_COLS)
       .eq('archived', false)
+      .eq('discover_skip', false) // 파편별 제외 (discover-skip.sql)
       .gte('created_at', since)
       .order('created_at', { ascending: false }),
     supabase.from('fragment_projects').select('fragment_id, project_id'),
     supabase.from('fragments').select(FRAG_COLS).eq('discover_next', true),
   ]);
+
+  const projRows = (projRes.data ?? []) as {
+    id: string; name: string; status: string; description: string | null; discover_skip: boolean;
+  }[];
+  // 제외된 프로젝트의 파편은 **통째로 뺀다** (2026-07-29 유저 결정). 라벨만 빼고 파편을
+  // 미소속으로 흘려보내면 여행 링크가 여전히 각도 재료가 돼서 제외가 사실상 무효가 된다.
+  const skipped = new Set(projRows.filter((p) => p.discover_skip).map((p) => p.id));
 
   const frags = (fragRes.data ?? []) as Frag[];
   const fragById = new Map(frags.map((f) => [f.id, f]));
@@ -65,8 +73,10 @@ export async function loadMaterial(supabase: SupabaseClient): Promise<Material> 
 
   const byProject = new Map<string, Frag[]>();
   const inProject = new Set<string>();
+  const hidden = new Set<string>(); // 제외된 프로젝트 소속 — 미소속으로도 안 새어나간다
   for (const m of maps) {
     inProject.add(m.fragment_id);
+    if (skipped.has(m.project_id)) hidden.add(m.fragment_id);
     const f = fragById.get(m.fragment_id);
     if (!f) continue; // 창 밖이거나 archived
     const arr = byProject.get(m.project_id) ?? [];
@@ -74,12 +84,13 @@ export async function loadMaterial(supabase: SupabaseClient): Promise<Material> 
     byProject.set(m.project_id, arr);
   }
 
-  const all = ((projRes.data ?? []) as { id: string; name: string; status: string; description: string | null }[])
+  const all = projRows
+    .filter((p) => !p.discover_skip)
     .map((p) => ({
       name: p.name,
       status: p.status,
       description: p.description,
-      fragments: byProject.get(p.id) ?? [],
+      fragments: (byProject.get(p.id) ?? []).filter((f) => !hidden.has(f.id)),
     }))
     .filter((p) => p.fragments.length > 0); // 이 창에 파편 없는 프로젝트는 뺀다
 

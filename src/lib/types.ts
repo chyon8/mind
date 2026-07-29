@@ -30,6 +30,9 @@ export interface Fragment {
   let_go_at: string | null; // 회상에서 흘려보낸 시각. 보여준 것만으론 기록되지 않는다
   // "다음 발견에 포함" 표시. 브리핑이 한 번 돌면 서버가 전부 내린다 — 선명도와 무관하다
   discover_next: boolean;
+  // "발견에서 제외" 표시 — discover_next의 대칭. 켜져 있으면 브리핑 재료에서 빠진다.
+  // 발견에만 건다: 채팅·검색은 그대로 다 본다 (discover-skip.sql). 선명도와 무관하다.
+  discover_skip: boolean;
   // fragment_projects에서 파생 (클라이언트 전용). 빈 배열 = Inbox
   project_ids: string[];
 }
@@ -51,6 +54,9 @@ export interface Project {
   status: ProjectStatus;
   started_at: string | null; // YYYY-MM-DD
   description: string | null;
+  // 발견 재료에서 이 프로젝트를 통째로 뺀다 (파편까지 — 미소속으로도 안 새어나간다).
+  // "여행리스트 긁으면 안 됨"(2026-07-29). 채팅·검색에는 안 건다.
+  discover_skip: boolean;
   // 목록 화면용 파생값
   fragment_count?: number;
 }

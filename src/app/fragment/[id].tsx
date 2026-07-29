@@ -184,7 +184,19 @@ export default function FragmentDetail() {
       setDiscoverFull(true);
       return;
     }
-    await patch({ discover_next: true });
+    // 포함과 제외는 같이 켜질 수 없다 — 서로를 끈다
+    await patch({ discover_next: true, discover_skip: false });
+  }
+
+  // "발견에서 제외" — 포함의 대칭. 브리핑 재료에서 이 파편이 빠진다(material.ts).
+  // ⚠️ 발견에만 건다. 채팅·검색은 그대로 다 본다 — "여행 뭐 저장했지"엔 답할 수 있어야 한다.
+  // touch 안 한다(patch 기본값) — 이것도 "이건 보지 마"라는 지시지 중요도 판단이 아니다.
+  async function toggleDiscoverSkip() {
+    await patch(
+      fragment!.discover_skip
+        ? { discover_skip: false }
+        : { discover_skip: true, discover_next: false },
+    );
   }
 
   // 프로젝트는 태그 — 여러 개 동시에 붙는다 (PLAN.md §3.3)
@@ -377,20 +389,33 @@ export default function FragmentDetail() {
             ⚠️ 라벨은 상태에 따라 **바꾸지 않는다** — 폭이 튄다. 켜짐은 채움으로만 말한다
             (projectChipActive와 같은 관용구). 안내·경고도 버튼이 아니라 아래 한 줄이 받는다. */}
         <Text style={styles.sectionLabel}>발견</Text>
-        <Pressable
-          onPress={() => toggleDiscoverNext().catch(() => {})}
-          style={[styles.discoverBtn, fragment.discover_next && styles.discoverBtnOn]}
-        >
-          <Text style={[styles.discoverLabel, fragment.discover_next && styles.discoverLabelOn]}>
-            다음 브리핑에 포함
-          </Text>
-        </Pressable>
+        {/* 포함/제외는 서로 배타적이라 한 줄에 나란히 둔다 — 둘 중 하나만 채워진다 */}
+        <View style={styles.discoverRow}>
+          <Pressable
+            onPress={() => toggleDiscoverNext().catch(() => {})}
+            style={[styles.discoverBtn, fragment.discover_next && styles.discoverBtnOn]}
+          >
+            <Text style={[styles.discoverLabel, fragment.discover_next && styles.discoverLabelOn]}>
+              다음 브리핑에 포함
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => toggleDiscoverSkip().catch(() => {})}
+            style={[styles.discoverBtn, fragment.discover_skip && styles.discoverBtnOn]}
+          >
+            <Text style={[styles.discoverLabel, fragment.discover_skip && styles.discoverLabelOn]}>
+              발견에서 제외
+            </Text>
+          </Pressable>
+        </View>
         <Text style={styles.discoverHint}>
           {discoverFull
             ? `최대 ${DISCOVER_MAX}개까지 지정할 수 있다`
-            : fragment.discover_next
-              ? '다음 브리핑에 한 번 나오고 자동으로 꺼진다'
-              : '지정하면 다음 브리핑이 이걸 반드시 다룬다'}
+            : fragment.discover_skip
+              ? '브리핑 재료에서 빠진다 — 검색·채팅에는 그대로 나온다'
+              : fragment.discover_next
+                ? '다음 브리핑에 한 번 나오고 자동으로 꺼진다'
+                : '지정하면 다음 브리핑이 이걸 반드시 다룬다'}
         </Text>
 
         <View style={styles.divider} />
@@ -628,6 +653,7 @@ const styles = StyleSheet.create({
   reviveLabel: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
   // 발견 표시 — tier 토글과 같은 모양(rounded.sm·같은 패딩). 라벨은 안 바뀌므로 폭이 고정이고,
   // 켜짐은 채움으로만 말한다. 상태 문구는 아래 hint 한 줄이 받는다 (버튼을 토스트로 쓰지 않는다).
+  discoverRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   discoverBtn: {
     alignSelf: 'flex-start',
     borderColor: colors.hairline,

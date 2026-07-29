@@ -204,6 +204,24 @@ export default function ProjectDetail() {
           keyboardAppearance="dark"
         />
 
+        {/* 발견에서 제외 (2026-07-29) — "여행리스트 긁으면 안 됨".
+            켜면 이 프로젝트와 **여기 묶인 파편까지** 브리핑 재료에서 빠진다(material.ts).
+            발견에만 건다 — 채팅·검색에는 그대로 나온다. 선명도는 안 건드린다. */}
+        <Text style={styles.sectionLabel}>발견</Text>
+        <Pressable
+          onPress={() => patch({ discover_skip: !project.discover_skip })}
+          style={[styles.chip, styles.skipChip, project.discover_skip && styles.chipActive]}
+        >
+          <Text style={[styles.chipLabel, project.discover_skip && styles.chipLabelActive]}>
+            발견에서 제외
+          </Text>
+        </Pressable>
+        <Text style={styles.skipHint}>
+          {project.discover_skip
+            ? '여기 묶인 파편까지 브리핑 재료에서 빠진다 — 검색·채팅에는 그대로 나온다'
+            : '켜면 이 프로젝트를 브리핑이 긁지 않는다'}
+        </Text>
+
         <View style={styles.divider} />
 
         <View style={styles.fragmentsHeader}>
@@ -293,6 +311,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   chipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  // STATUS 칩은 chipRow가 감싸지만 이건 홀로 서므로 폭을 내용에 맞춘다
+  skipChip: { alignSelf: 'flex-start' },
+  skipHint: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, marginTop: spacing.xs },
   chipLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   chipLabelActive: { color: colors.onInk },
   startRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
