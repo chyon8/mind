@@ -104,11 +104,16 @@ if (dry) {
   process.exit(0);
 }
 
-// trigger='push' — 앱이 "아침" 배지를 붙이고, **그날 모닝 브리핑 버튼이 잠긴다**.
-// 맥에서 이미 돌았는데 앱에서 또 눌러 OpenAI로 $0.32 나가는 걸 막아준다 (유저 확정).
-// cost_usd=0 — 구독에 묻어서 도니 추가 과금이 없다. 추정치를 적으면 원장이 거짓말을 한다.
+// trigger='pull' — **이건 발견이지 아침 브리핑이 아니다.**
+// ⚠️ 처음엔 'push'로 잡았다가 되돌렸다(2026-07-29, 유저 지적). 'push'는 앱에서 "아침" 배지가
+//    되는데, 같은 날 유저가 **"아침 브리핑은 발견은 빼고 관찰만"**으로 정했다. 발견을 아침이라고
+//    라벨링하면 그 결정과 정면으로 어긋난다. 'push'를 밀었던 이유(모닝 버튼이 잠겨 중복 지출
+//    방지)는 부수 효과였고, 아침이 관찰 전용이 되면 그 버튼 자체가 없어질 자리다.
+//    → 아침 브리핑을 만들 때 **그때 새 표면을 쓴다.** 발견은 발견으로 남는다.
+// cost_usd=0 — 구독에 묻어서 돌면 추가 과금이 없다. `claude -p`가 돌려주는 total_cost_usd는
+//   API 환산가지 청구액이 아니라서 적으면 원장이 거짓말을 한다. (API 과금 방식이면 바꿔야 한다.)
 const { error } = await sb.schema('rudy').from('utterances').insert({
-  surface: 'briefing', kind: 'discovery', text, trigger: 'push', cost_usd: 0,
+  surface: 'briefing', kind: 'discovery', text, trigger: 'pull', cost_usd: 0,
 });
 if (error) throw new Error(`원장 저장 실패: ${error.message}`);
 log('저장 완료 — 앱 발견 탭에서 보면 된다');
