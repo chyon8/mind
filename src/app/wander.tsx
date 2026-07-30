@@ -59,7 +59,14 @@ export default function Wander() {
   const [filter, setFilter] = useState<FeedFilter>('all');
   // '전체'에서 빼둘 프로젝트 id. 칩을 길게 누르면 토글된다.
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  // excluded를 로컬에서 읽어오기 전에 첫 바퀴를 시작하면 안 뺀 것들이 섞여 나온다 (아래 이펙트)
+  const [hydrated, setHydrated] = useState(false);
   const loading = useRef(false);
+  // 이번 조건의 덱이 만들어졌나. 만들어지기 전에 onEndReached가 more()를 부르면
+  // 빈 덱을 보고 "여기까지"를 세워버린다 — 첫 배치가 도착하자마자 끝났다고 표시된다.
+  const ready = useRef(false);
+  // 조건 전환 세대. 늦게 도착한 이전 조건의 응답이 덱을 덮어쓰지 못하게 한다.
+  const run = useRef(0);
 
   // 프로젝트에 정리된 파편도 그대로 흐르되, 어디 소속인지 태그로 구분한다 ([13])
   const projectsById = useMemo(
@@ -78,7 +85,7 @@ export default function Wander() {
 
   // 한 바퀴로 끝난다 (2026-07-28). 덱을 다 쓰면 다시 섞지 않고 done을 세운다.
   const more = useCallback(async () => {
-    if (loading.current) return;
+    if (loading.current || !ready.current) return;
     if (deck.current.length === 0) {
       setDone(true);
       return;
@@ -143,7 +150,8 @@ export default function Wander() {
     fetchProjects().then(setProjects).catch(() => {});
     AsyncStorage.getItem(EXCLUDE_KEY)
       .then((raw) => raw && setExcluded(new Set(JSON.parse(raw) as string[])))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setHydrated(true));
   }, []);
 
   // 칩 길게 누르기 — '전체'에서 이 프로젝트를 뺀다. 아래 이펙트가 바퀴를 다시 돌린다.
@@ -156,16 +164,26 @@ export default function Wander() {
     });
   }, []);
 
-  // 태그나 제외가 바뀌면 처음부터 다시 헤맨다 — 이전 조건의 카드가 섞여 나오면 안 된다
+  // 태그나 제외가 바뀌면 처음부터 다시 헤맨다 — 이전 조건의 카드가 섞여 나오면 안 된다.
+  //
+  // ⚠️ hydrated를 기다리는 이유(2026-07-30 수정): AsyncStorage에서 excluded를 읽는 건 비동기라
+  // 예전엔 이 이펙트가 excluded=∅으로 한 번 먼저 돌았다. 저장된 제외 목록이 도착해 두 번째로
+  // 돌아도, 먼저 떠난 fetchDayIndex가 나중에 응답하면 걸러지지 않은 덱이 그대로 덮어썼다
+  // — "헤매기에 들어가면 필터가 안 먹은 상태로 시작하고, 다른 탭을 눌렀다 와야 먹는다"의 원인.
+  // 세대(run)로 늦은 응답을 버리고, 첫 바퀴 자체를 excluded가 도착한 뒤로 미룬다.
   useEffect(() => {
+    if (!hydrated) return;
+    const version = ++run.current;
     pool.current = [];
     deck.current = [];
     loading.current = false;
+    ready.current = false;
     setItems([]);
     setEmpty(false);
     setDone(false);
     fetchDayIndex(filter)
       .then((index) => {
+        if (version !== run.current) return; // 이전 조건의 응답 — 버린다
         // 제외는 '전체'에서만 — 프로젝트 필터는 !inner 조인이라 project_ids가 불완전하다.
         const kept =
           filter === 'all' && excluded.size > 0
@@ -174,13 +192,16 @@ export default function Wander() {
         pool.current = kept.map((m) => m.id);
         // 한 바퀴 = 이 덱 하나. 다 쓰면 more()가 done을 세운다.
         deck.current = shuffle(pool.current);
+        ready.current = true;
         if (pool.current.length === 0) setEmpty(true);
         else more();
       })
-      .catch(() => setEmpty(true));
+      .catch(() => {
+        if (version === run.current) setEmpty(true);
+      });
     // more는 스크롤이 부른다 — 여기선 조건 전환 시 첫 배치만
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, excluded]);
+  }, [filter, excluded, hydrated]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
