@@ -58,6 +58,12 @@ export async function buildMaterial(sb) {
       .order('created_at', { ascending: false }).limit(300),
   ]);
 
+  // ⚠️ 에러를 표면화한다. 예전엔 전부 `data ?? []`라서 **쿼리가 실패해도 조용히 0건**이 됐다.
+  //    특히 지정(`pickRes`)이 0건일 때 "지정이 없는 건지 쿼리가 죽은 건지" 구분이 안 됐다.
+  for (const [name, res] of Object.entries({ projRes, fragRes, mapRes, pickRes, briefRes, linkRes })) {
+    if (res.error) throw new Error(`재료 로드 실패 (${name}): ${res.error.message}`);
+  }
+
   const projRows = projRes.data ?? [];
   const skipped = new Set(projRows.filter((p) => p.discover_skip).map((p) => p.id));
   const frags = fragRes.data ?? [];

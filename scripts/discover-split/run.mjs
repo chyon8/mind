@@ -63,6 +63,8 @@ const sb = client(); // .env를 process.env로 올린다 — EXA_API_KEY를 읽�
 const { md, stats } = await buildMaterial(sb);
 writeFileSync(new URL(`material-${stamp}.md`, WORK), md);
 log('재료:', JSON.stringify(stats), `(${md.length}자)`);
+// 지정 상태를 맨 앞에서 못박는다 — 0인지 쿼리가 조용히 실패한 건지 구분이 안 되던 자리다.
+log(stats.picked ? `⭐ 유저 지정 ${stats.picked}개 — 반드시 항목으로 나와야 한다` : '유저 지정 없음 (앱에서 "다음 발견에 포함"을 누르면 여기 뜬다)');
 if (materialOnly) process.exit(0);
 
 const exaKey = process.env.EXA_API_KEY;
@@ -269,8 +271,19 @@ if (error) throw new Error(`원장 저장 실패: ${error.message}`);
 log('저장 완료 — 앱 발견 탭에서 보면 된다');
 
 // 유저 지정을 소비한다 (한 번 나오고 끝 — 또 원하면 또 누른다).
+// ⚠️ 유저 확정 2026-07-30: **자동으로 내린다.** 앱에서 일일이 찾아 끄는 건 불가능하다.
+//    ✅ 다만 이 판은 각도가 JSON이라 `from_picked`로 **각도가 실제로 만들어졌는지 확인할 수
+//    있다**(1번·앱은 출력이 마크다운이라 못 한다 — `brief.ts:377`이 인정한 한계).
+//    각도조차 안 됐으면 유저는 아무것도 못 보고 표시만 잃는 것이므로 그때만 안 내린다.
+//    이건 유저가 손댈 일이 아니다 — 다음 판에 자동으로 다시 시도된다.
 // ⚠️ touch가 아니다: last_touched_at·touch_count를 안 건드리므로 §2-3은 지켜진다.
 if (stats.picked) {
-  await sb.from('fragments').update({ discover_next: false }).eq('discover_next', true);
-  log(`지정 ${stats.picked}개 소비`);
+  const madeAngle = angles.filter((a) => a.from_picked).length;
+  if (madeAngle) {
+    const { error: pe } = await sb.from('fragments').update({ discover_next: false }).eq('discover_next', true);
+    if (pe) log(`⚠️ 지정 해제 실패: ${pe.message}`);
+    else log(`지정 ${stats.picked}개 소비 (각도 ${madeAngle}개가 됐다 — 표시 내림)`);
+  } else {
+    log(`⚠️ 지정 ${stats.picked}개가 각도조차 안 됐다 — 표시를 안 내린다 (다음 판에 다시 시도)`);
+  }
 }
