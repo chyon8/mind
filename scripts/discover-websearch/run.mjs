@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // 발견 **1번** — 클코 + 클로드 WebSearch, **루프 없이**.
+// **2026-07-31: 3파전 채택됨.** 유저가 매일 이 커맨드를 손으로 치고 앱에서 확인한다
+// (자동화는 안 함 — 유저 지시). 그래서 기본이 저장이다.
 //
-//   node scripts/discover-websearch/run.mjs             ← 만들고 .work/에만 남긴다
+//   node scripts/discover-websearch/run.mjs             ← 만들고 원장에 저장, 앱에서 보면 된다
 //   node scripts/discover-websearch/run.mjs --material  ← 재료만 뽑고 종료 (LLM 안 태움, 공짜)
-//   node scripts/discover-websearch/run.mjs --save      ← 원장(rudy.utterances)에도 넣는다
+//   node scripts/discover-websearch/run.mjs --no-save   ← 실험용. 저장 안 하고 .work/에만 남긴다
 //
 // ── 이게 뭔가 (2026-07-30 유저 지시)
 //
@@ -34,10 +36,11 @@ const ROOT = new URL('../../', import.meta.url);
 const WORK = new URL('.work/', HERE);
 const MODEL = process.env.DISCOVER_WS_MODEL ?? 'claude-opus-5';
 
-// ⚠️ 기본이 **저장 안 함**이다 (`discover-claude`는 기본이 저장이었다). 이건 비교용이라
-//    원장에 넣으면 ① 다음 실행 재료의 <이미 다룬 주제>에 들어가 **비교 조건이 바뀌고**
+// ⚠️ **기본이 저장이다** (2026-07-31, 채택 후 뒤집음 — `discover-claude`와 동일 기본값).
+//    비교 실험을 또 하려면 `--no-save`를 써라. 그땐 위 이유가 다시 적용된다:
+//    ① 원장에 넣으면 다음 실행 재료의 <이미 다룬 주제>가 바뀌어 비교 조건이 흔들리고
 //    ② 앱 발견 탭에서 다른 판 결과와 구분이 안 된다(전부 trigger='pull').
-const save = process.argv.includes('--save');
+const save = !process.argv.includes('--no-save');
 const materialOnly = process.argv.includes('--material');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const log = (...a) => console.log(`[discover-ws]`, ...a);
@@ -118,7 +121,7 @@ if (!text || text === '(없음)') {
   process.exit(0);
 }
 if (!save) {
-  log('저장 안 함 — 원장에도 넣으려면 --save');
+  log('저장 안 함 (--no-save)');
   console.log(`\n${text}\n`);
   process.exit(0);
 }

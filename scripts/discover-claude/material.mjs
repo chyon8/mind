@@ -54,7 +54,10 @@ export async function buildMaterial(sb) {
       .gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())
       .order('created_at', { ascending: false }).limit(60),
     // 이미 저장한 링크 — 저장한 걸 "발견"이라고 되돌려주는 사고를 막는다 (07-28에 실제로 터짐).
-    sb.from('fragments').select('content, link_title').eq('type', 'link')
+    // ⚠️ **무덤(archived)도 일부러 가져온다.** 묻었어도 이 사람이 가진 링크라, 빼면 07-28 사고가
+    //    그대로 재발한다(Pushary·TouchGrass가 지금 무덤이다). 대신 `archived`를 같이 읽어
+    //    아래에서 `(묻음)`으로 표시한다 — 빼는 게 아니라 표시하는 게 처방이다.
+    sb.from('fragments').select('content, link_title, archived').eq('type', 'link')
       .order('created_at', { ascending: false }).limit(300),
   ]);
 
@@ -99,7 +102,7 @@ export async function buildMaterial(sb) {
     .slice(0, 250);
 
   const savedLinks = (linkRes.data ?? [])
-    .map((l) => `  - ${l.link_title ?? ''} ${l.content}`.trim())
+    .map((l) => `  - ${l.link_title ?? ''}${l.archived ? ' (묻음)' : ''} ${l.content}`.trim())
     .filter(Boolean);
 
   const block = (p) =>
@@ -143,6 +146,9 @@ export async function buildMaterial(sb) {
     '=== 이미 저장한 링크 — "발견"이라고 되돌려주지 마라 ===',
     '※ 이 사람이 이미 아는 것이다. 그리고 **여기 있는 제품의 공식 사이트를 목적지로 삼지 마라**',
     '   (Product Hunt에서 저장한 걸 그 제품 홈페이지로 다시 물어오는 사고가 실제로 났다).',
+    '※ ⚠️ 이건 **막는 목록이지 재료가 아니다.** 여기서 출발점을 고르지 마라.',
+    '※ `(묻음)`은 이 사람이 손으로 묻은 것이다 — 지금 관심사가 아니다.',
+    '   **"저장해둔 X"처럼 현재형으로 부르지 마라.** 막는 데만 쓴다.',
     savedLinks.join('\n') || '(없음)',
   ].join('\n');
 

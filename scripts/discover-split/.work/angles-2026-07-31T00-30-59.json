@@ -1,0 +1,66 @@
+[
+  {
+    "slot": "expansion",
+    "query": "hobbyist-built niche app birding bouldering aquarium paying subscribers indie developer",
+    "from": "2026-07-30 [link] 앱 아이디어 찾는 법: 창업자의 $25K MRR '취미 우선' 방법 (Stork.AI)",
+    "why": "저장한 건 방법론 글 한 편인데, 실제로 자기 취미 씬 안에서 돈 받고 파는 개인들이 어디에 얼마나 있는지가 빠져 있다",
+    "motive": null,
+    "from_picked": false
+  },
+  {
+    "slot": "expansion",
+    "query": "screen-free kids audio player and timer device Yoto Toniebox competitors 2026",
+    "from": "2026-07-28 [text] Times lock box 약간 애기들 용으로 해도괜찮을즛",
+    "why": "어른 의지 장치로만 봤던 락박스가 아이 대상으로 가면 완전히 다른 시장이고 이미 물건들이 팔리고 있다",
+    "motive": null,
+    "from_picked": false
+  },
+  {
+    "slot": "expansion",
+    "query": "self-hosted home server apps Umbrel CasaOS r/selfhosted replacing paid subscriptions",
+    "from": "2026-07-30 [link] Flint: The Ambient Smart Desk Display Powered by FlintOS (Hackster.io)",
+    "why": "저장한 개인 하드웨어들이 공통으로 서 있는 바닥은 화면이 아니라 '집에 서버 하나 두고 구독을 끊는' 씬이다",
+    "motive": null,
+    "from_picked": false
+  },
+  {
+    "slot": "idea",
+    "query": "quantified self n-of-1 self experiment community tools",
+    "from": "2026-07-29 [text] 루틴 관리 앱 흠 도움이 될까 학습 같은것들 → 동기",
+    "why": "자기한테 뭐가 듣는지를 직접 재고 비교하는 사람들의 도구·모임 영역",
+    "motive": "내가 정한 방식이 정말 나한테 듣는지 못 믿으면서도 계속 새로 시험해보고, 결과를 눈으로 확인하고 싶다",
+    "from_picked": false
+  },
+  {
+    "slot": "idea",
+    "query": "future self letter time capsule kit sealed until next year",
+    "from": "2026-07-30 [text] Flashback은 여행 사진을 24시간 뒤에야 열리는 공동 일기로 만든다 → 동기",
+    "why": "지연 자체를 상품으로 파는 물건들이 있는 영역",
+    "motive": "지금 바로 확인하고 싶은 마음을 일부러 늦추면 그 시간이 더 진해진다고 믿는다",
+    "from_picked": false
+  },
+  {
+    "slot": "idea",
+    "query": "일력 데일리 카드덱 매일 한 장 문구 브랜드",
+    "from": "2026-07-27 [link] Inku Calendar: Watch your day flicker to life → 동기",
+    "why": "매일 한 장씩 소모되는 종이 물건을 만들어 파는 문구 씬",
+    "motive": "매일 아침 나를 기다리는 작은 변화가 있어야 하루가 시작된 느낌이 든다",
+    "from_picked": false
+  },
+  {
+    "slot": "lens",
+    "query": "리페어 카페 수리 워크숍 공구도서관 고쳐 쓰기 문화",
+    "from": "2026-07-29 [text] 손으로 뭔가 하기 (목공이나 그런거, 요리는 하고있고)",
+    "why": "지금까지 이 파편은 늘 '새로 만들기'로 풀렸는데 고치는 쪽은 재료도 목표도 다르다",
+    "motive": null,
+    "from_picked": false
+  },
+  {
+    "slot": "resurface",
+    "query": "",
+    "from": "2026-07-23 [text] My stream deck 프로젝트 임베디드 일단 소프트웨어 개발 먼저",
+    "why": "직접 소프트웨어부터라고 적어놓고 그 뒤 일주일간 저장한 게 전부 남이 완성해서 파는 하드웨어다",
+    "motive": null,
+    "from_picked": false
+  }
+]
