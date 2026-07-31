@@ -113,20 +113,24 @@ export async function loadMaterial(supabase) {
   const since = new Date(Date.now() - 90 * 86_400_000).toISOString();
   const cols = 'id, created_at, type, content, link_title, link_description, note';
   const [projRes, fragRes, mapRes, pickRes] = await Promise.all([
-    supabase.from('projects').select('id, name, status, description').order('created_at'),
+    supabase.from('projects').select('id, name, status, description, discover_skip').order('created_at'),
     supabase
       .from('fragments')
       .select(cols)
-      .eq('archived', false).gte('created_at', since).order('created_at', { ascending: false }),
+      .eq('archived', false).eq('discover_skip', false)
+      .gte('created_at', since).order('created_at', { ascending: false }),
     supabase.from('fragment_projects').select('fragment_id, project_id'),
-    supabase.from('fragments').select(cols).eq('discover_next', true),
+    supabase.from('fragments').select(cols).eq('discover_next', true).eq('discover_skip', false),
   ]);
   const frags = fragRes.data ?? [];
   const fragById = new Map(frags.map((f) => [f.id, f]));
+  const skipped = new Set((projRes.data ?? []).filter((p) => p.discover_skip).map((p) => p.id));
   const byProject = new Map();
   const inProject = new Set();
+  const hidden = new Set(); // 제외된 프로젝트 소속 — 미소속으로도 안 새어나간다 (discover-claude/material.mjs와 동일)
   for (const m of mapRes.data ?? []) {
     inProject.add(m.fragment_id);
+    if (skipped.has(m.project_id)) hidden.add(m.fragment_id);
     const f = fragById.get(m.fragment_id);
     if (!f) continue;
     if (!byProject.has(m.project_id)) byProject.set(m.project_id, []);
@@ -143,7 +147,8 @@ export async function loadMaterial(supabase) {
   };
   // status='active'만 프로젝트. 나머지(💡·글감·paused·done)는 리스트 — material.ts와 같은 갈림.
   const withFrags = (projRes.data ?? [])
-    .map((p) => ({ ...p, fragments: byProject.get(p.id) ?? [] }))
+    .filter((p) => !p.discover_skip)
+    .map((p) => ({ ...p, fragments: (byProject.get(p.id) ?? []).filter((f) => !hidden.has(f.id)) }))
     .filter((p) => p.fragments.length > 0)
     .filter((p) => p.status !== 'done'); // 끝난 일은 재료가 아니다 (material.ts와 같은 규칙)
   const projects = withFrags
@@ -159,7 +164,7 @@ export async function loadMaterial(supabase) {
       ...p.fragments.map(fragLine),
     ].join('\n'))
     .join('\n\n');
-  const loose = frags.filter((f) => !inProject.has(f.id));
+  const loose = frags.filter((f) => !inProject.has(f.id) && !hidden.has(f.id));
   const picked = pickRes.data ?? [];
   const block = [
     ...(picked.length

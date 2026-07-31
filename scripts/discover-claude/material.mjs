@@ -7,7 +7,7 @@
 //      · 구획 3분리, **lists 구획에 "프로젝트"라는 단어를 쓰지 않는다** (라벨이 캡 소속을 정한다)
 //      · `discover_next`(유저 지정)는 창·archived를 무시하고 맨 위에
 //      · `fragLine`에 파편 id를 안 싣는다 (UUID가 재료의 28%를 먹었다). URL은 남긴다
-//    ✅ 여기만 다른 것: **`discover_skip`을 반영한다** (`_discovery-lib.mjs`엔 아직 없다).
+//    ✅ `discover_skip`을 반영한다 (2026-07-31부터 `_discovery-lib.mjs`도 동기화됨).
 
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
