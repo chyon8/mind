@@ -81,10 +81,14 @@ export async function findAxes(
   now = new Date(),
   onUsage?: UsageSink,
   meta?: Record<string, string>,
+  // 엣지 소스만 갈아끼운다 (rudy-morning.sql). 채팅은 프로젝트 소속 파편을 뺀 암묵 클러스터를
+  // 보지만, 아침 관찰은 "내가 요즘 어떤가"라 그 파편들이 핵심이라 안 뺀 판을 본다.
+  // 묶기·라벨링·시간모양은 완전히 같아야 한다 — 갈라지면 채팅과 아침이 다른 축을 말한다.
+  rpc: 'cluster_edges' | 'morning_edges' = 'cluster_edges',
 ): Promise<Axis[]> {
   const { data: edges, error } = await supabase
     .schema('rudy')
-    .rpc('cluster_edges', { days: WINDOW_DAYS, min_sim: MIN_SIM });
+    .rpc(rpc, { days: WINDOW_DAYS, min_sim: MIN_SIM });
   if (error) throw error;
   if (!edges?.length) return [];
 

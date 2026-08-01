@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CalendarStrip } from '@/components/CalendarStrip';
 import { FragmentBullet } from '@/components/FragmentBullet';
+import { MorningCard } from '@/components/MorningCard';
 import { RecallSection } from '@/components/RecallSection';
 import { SelectionBar } from '@/components/SelectionBar';
 import { SwipeableRow } from '@/components/SwipeableRow';
@@ -118,6 +119,9 @@ export function DailyView() {
       <Text style={styles.dateTitle}>{feedDateLabel(selected.toISOString())}요일</Text>
 
       <ScrollView contentContainerStyle={styles.list}>
+        {/* 아침 브리핑 입구. 떠오르기와 같은 이유로 오늘을 볼 때만 선다. */}
+        <MorningCard visible={isToday} />
+
         {dayFragments.length === 0 ? (
           <Text style={styles.emptyText}>이 날은 아무것도 던지지 않았다</Text>
         ) : (
