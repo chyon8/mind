@@ -126,29 +126,41 @@ const axes = (Array.isArray(out.axes) ? out.axes : [])
   .filter(Boolean)
   .slice(0, 8);
 
-const patternIds = idsOf(out.pattern?.refs);
-const pattern = out.pattern?.text
-  ? { kind: String(out.pattern.kind ?? '').trim(), text: String(out.pattern.text).trim(), items: itemsOf(patternIds) }
-  : null;
-
 const strings = (v) =>
   Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : [];
-// 파편 링크를 걸지 말라고 했지만 걸어도 화면이 안 깨지게 마크업만 벗긴다.
-const plain = (s) => s.replace(/\[([^\]]+)\]\((?:mind|https?):\/\/[^)]+\)/g, '$1');
+// 프롬프트로 모델의 습관을 막으려 하지 마라 — **파서가 견딘다** (RUDY-STATUS 교훈).
+//  ① 파편 링크: 걸지 말라고 했지만 걸어도 화면이 안 깨지게 마크업만 벗긴다.
+//  ② `#N` 참조: 재료 안에서만 뜻이 있는 번호라 본문에 남으면 화면에선 뜻 없는 숫자다.
+//     2026-08-01 첫 실행이 실제로 `(#5, #6)`·`(#28, #41…)`을 본문에 박았다. 프롬프트에도 금지를
+//     넣었지만 여기서 한 번 더 벗긴다 — 괄호째 지우고, 남은 겹공백·문장부호 앞 공백을 정리한다.
+const plain = (s) =>
+  s
+    .replace(/\[([^\]]+)\]\((?:mind|https?):\/\/[^)]+\)/g, '$1')
+    .replace(/\s*[（(]\s*#\d+(?:\s*[,·、]\s*#\d+)*\s*[)）]/g, '')
+    .replace(/\s*#\d+/g, '')
+    .replace(/ {2,}/g, ' ')
+    .replace(/ ([,.;:)）])/g, '$1')
+    .trim();
 
 const written = {
-  headline: typeof out.headline === 'string' ? out.headline.trim() : '',
+  headline: typeof out.headline === 'string' ? plain(out.headline) : '',
   reading: strings(out.reading).map(plain),
-  rejected: strings(out.rejected),
+  rejected: strings(out.rejected).map(plain),
 };
 
+const patternIds = idsOf(out.pattern?.refs);
+const pattern = out.pattern?.text
+  ? { kind: String(out.pattern.kind ?? '').trim(), text: plain(String(out.pattern.text)), items: itemsOf(patternIds) }
+  : null;
+const questionText = typeof out.question === 'string' ? plain(out.question) : '';
+
 log(`헤드라인: ${written.headline}`);
-log(`문단 ${written.reading.length} · 결 ${axes.length} · 패턴 ${pattern ? `${pattern.kind}(근거 ${pattern.items.length})` : '없음'} · 질문 ${out.question ? '있음' : '없음'}`);
-writeFileSync(new URL(`brief-${stamp}.json`, WORK), JSON.stringify({ ...written, pattern, axes, question: out.question }, null, 2));
+log(`문단 ${written.reading.length} · 결 ${axes.length} · 패턴 ${pattern ? `${pattern.kind}(근거 ${pattern.items.length})` : '없음'} · 질문 ${questionText ? '있음' : '없음'}`);
+writeFileSync(new URL(`brief-${stamp}.json`, WORK), JSON.stringify({ ...written, pattern, axes, question: questionText }, null, 2));
 
 if (!save) {
   log('저장 안 함 (--no-save)');
-  console.log(`\n${written.headline}\n\n${written.reading.join('\n\n')}\n\n[패턴] ${pattern?.text ?? '없음'}\n[질문] ${out.question ?? '없음'}\n`);
+  console.log(`\n${written.headline}\n\n${written.reading.join('\n\n')}\n\n[패턴] ${pattern?.text ?? '없음'}\n[질문] ${questionText || '없음'}\n`);
   process.exit(0);
 }
 
@@ -161,8 +173,8 @@ const insertUtterance = async (row) => {
 };
 
 let question = null;
-if (typeof out.question === 'string' && out.question.trim()) {
-  const text = out.question.trim();
+if (questionText) {
+  const text = questionText;
   question = {
     utteranceId: await insertUtterance({
       surface: 'briefing', kind: 'question', trigger: 'push',
