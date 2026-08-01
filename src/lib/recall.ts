@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { dayKey } from './dates';
 import {
   fetchCollisionCandidates,
   fetchFragmentsByIds,
@@ -12,10 +11,18 @@ import {
 import type { Fragment } from './types';
 import { vividness } from './vividness';
 
-// 하루에 몇 개. 큐도, 개수 표시도, 진행률도 없다 — 그걸 넣는 순간 생산성 앱이 되고 죽는다.
+// 한 판에 몇 개. 큐도 진행률도 없다.
 // 2026-07-30 유저 지시로 2 → 4. 실측(코퍼스 353개 중 살아있는 95개)으로 감쇠 조건을 통과하는
 // 후보가 50개라 4개는 넉넉히 채워진다. 더 늘릴 땐 이 숫자만 만지면 된다.
 const RECALL_COUNT = 4;
+
+// 판이 갈리는 주기. 하루 1판이었을 땐 오후에 열면 아침에 본 것 그대로라 죽은 화면이었다.
+// 2026-07-31 유저 지시로 4시간 — 하루 6판, 판당 4개.
+const RECALL_TTL_MS = 4 * 3_600_000;
+
+// 최근 본 것 제외 (FIFO). 4시간마다 새로 뽑으면 풀이 50개뿐이라 같은 게 금방 다시 온다.
+// 24개 ≈ 6판 = 하루치. 하루 안에서는 안 겹치고, 그 너머는 다시 우연에 맡긴다.
+const SEEN_LIMIT = 24;
 
 // 충돌 회상 (RUDY.md §4-A1). 하루치 중 1개까지만 충돌이 가져간다 —
 // 나머지는 영원히 순수 랜덤(§4-F2 반-룹 장치). Rudy가 우연의 자리를 못 먹게.
@@ -115,26 +122,37 @@ async function collisionPick(now: Date): Promise<{ fr: Fragment; seedId: string 
 }
 
 type Saved = {
-  day: string;
+  at: number; // 이 판을 뽑은 시각. TTL의 기준 — 옛 기기엔 대신 day 문자열이 들어 있다.
   ids: string[];
+  seen: string[]; // 최근 판들에 떴던 것 (FIFO, 최대 SEEN_LIMIT)
   reason?: { fragmentId: string; seedId: string };
   // 충돌 발화의 원장 id — 기억하기/흘려보내기가 여기에 응답을 적는다 (§6-6)
   utteranceId?: string;
 };
 
-// 오늘 떠오른 것. 하루 안에서는 같은 파편이 계속 떠 있어야 하므로 선택을 기기에 남긴다.
-// 없으면 빈 배열 — "오늘은 떠오른 게 없다" 같은 문구도 띄우지 않는다. 없으면 그냥 없는 것이다.
-export async function todayRecall(): Promise<Fragment[]> {
-  const now = new Date();
-  const today = dayKey(now.toISOString());
+async function readSaved(): Promise<Saved | null> {
+  const raw = await AsyncStorage.getItem(STORE_KEY);
+  return raw ? (JSON.parse(raw) as Saved) : null;
+}
 
-  const saved = await AsyncStorage.getItem(STORE_KEY);
-  if (saved) {
-    const { day, ids } = JSON.parse(saved) as Saved;
-    if (day === today) {
-      const frs = await fetchFragmentsByIds(ids);
-      return frs.filter((fr) => stillFading(fr, now)); // 손댄 건 조용히 빠진다
-    }
+// 이 판이 아직 살아 있나. `at`이 없으면(옛 `{day,...}` 형태가 남은 기기) 만료로 본다.
+// 아래 세 함수가 전부 이걸 통해서만 판단한다 — "지금 판인가"의 기준이 갈리면 안 된다.
+function isFresh(saved: Saved | null): saved is Saved {
+  return !!saved?.at && Date.now() - saved.at < RECALL_TTL_MS;
+}
+
+// 지금 떠오른 것. 한 판(4시간) 안에서는 같은 파편이 계속 떠 있어야 하므로 선택을 기기에 남긴다.
+// 없으면 빈 배열 — "떠오른 게 없다" 같은 문구도 띄우지 않는다. 없으면 그냥 없는 것이다.
+export async function currentRecall(): Promise<Fragment[]> {
+  const now = new Date();
+
+  const saved = await readSaved();
+  // 판이 갈려도 이건 살아남는다 (옛 형태엔 없으므로 []). 최근 본 것 제외는 랜덤 뽑기에만 건다 —
+  // 충돌 픽은 원장 30일 쿨다운이 이미 막고 있다.
+  const seen = saved?.seen ?? [];
+  if (isFresh(saved)) {
+    const frs = await fetchFragmentsByIds(saved.ids);
+    return frs.filter((fr) => stillFading(fr, now)); // 손댄 건 조용히 빠진다
   }
 
   // 충돌 1개(있으면) + 랜덤 1개. 임계 미달이면 그냥 랜덤 2개 — 슬롯을 억지로 채우지 않는다.
@@ -147,13 +165,18 @@ export async function todayRecall(): Promise<Fragment[]> {
   }
 
   const pool = (await fetchRecallPool()).filter((fr) => stillFading(fr, now));
-  const random = weightedSample(
-    pool.filter((fr) => fr.id !== collision?.fr.id),
-    RECALL_COUNT - (collision ? 1 : 0),
-  );
+  const eligible = pool.filter((fr) => fr.id !== collision?.fr.id);
+  const want = RECALL_COUNT - (collision ? 1 : 0);
+  const unseen = eligible.filter((fr) => !seen.includes(fr.id));
+  // 못 채울 만큼 마르면 seen을 통째로 무시한다. 겹쳐 보이는 게 텅 빈 것보단 낫다.
+  const random = weightedSample(unseen.length >= want ? unseen : eligible, want);
   const picked = collision ? [collision.fr, ...random] : random;
 
-  const next: Saved = { day: today, ids: picked.map((fr) => fr.id) };
+  const next: Saved = {
+    at: now.getTime(),
+    ids: picked.map((fr) => fr.id),
+    seen: [...seen, ...picked.map((fr) => fr.id)].slice(-SEEN_LIMIT),
+  };
   if (collision) {
     next.reason = { fragmentId: collision.fr.id, seedId: collision.seedId };
     // 원장에 남긴다 — 이게 30일 쿨다운의 근거이자 §6-6 성적표의 원료다.
@@ -172,20 +195,16 @@ export async function todayRecall(): Promise<Fragment[]> {
 // 기억하기/흘려보내기가 루디의 발화에 대한 응답인지 알려준다 (§6-6 acted/dismissed).
 // 랜덤으로 뜬 파편에 대한 반응은 루디에 대한 평가가 아니므로 null이다.
 export async function recallUtteranceId(fragmentId: string): Promise<string | null> {
-  const saved = await AsyncStorage.getItem(STORE_KEY);
-  if (!saved) return null;
-  const { day, reason, utteranceId } = JSON.parse(saved) as Saved;
-  if (day !== dayKey(new Date().toISOString())) return null;
-  return reason?.fragmentId === fragmentId ? (utteranceId ?? null) : null;
+  const saved = await readSaved();
+  if (!isFresh(saved)) return null;
+  return saved.reason?.fragmentId === fragmentId ? (saved.utteranceId ?? null) : null;
 }
 
 // "왜 지금" (§4-A1 요청 시 가시성) — 탭했을 때만 읽힌다. 평소엔 조용하다.
-// 연결은 저장하지 않는다(Mind SPEC §7) — 오늘 고른 이유를 기기에 하루치 남길 뿐이다.
+// 연결은 저장하지 않는다(Mind SPEC §7) — 이번 판을 고른 이유를 기기에 한 판치 남길 뿐이다.
 export async function recallSeed(): Promise<{ fragmentId: string; seed: Fragment } | null> {
-  const saved = await AsyncStorage.getItem(STORE_KEY);
-  if (!saved) return null;
-  const { day, reason } = JSON.parse(saved) as Saved;
-  if (day !== dayKey(new Date().toISOString()) || !reason) return null;
-  const [seed] = await fetchFragmentsByIds([reason.seedId]);
-  return seed ? { fragmentId: reason.fragmentId, seed } : null;
+  const saved = await readSaved();
+  if (!isFresh(saved) || !saved.reason) return null;
+  const [seed] = await fetchFragmentsByIds([saved.reason.seedId]);
+  return seed ? { fragmentId: saved.reason.fragmentId, seed } : null;
 }

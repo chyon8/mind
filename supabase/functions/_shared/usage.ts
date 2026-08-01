@@ -6,14 +6,18 @@
 //   gpt-4o $2.50/$10.00 (in/out, per 1M) · gpt-4o-mini $0.15/$0.60 · gpt-5.5 $5.00/$30.00
 //   (캐시 입력 $0.50/1M).
 //
+// ⚠️ 캐시 입력 단가를 빠뜨리면 캐시가 걸려도 비용이 안 떨어져 "캐싱이 안 된다"로 오진한다
+//    (2026-07-31에 실제로 그랬다 — 4o 계열 cachedIn이 없어서 `p.cachedIn ?? p.in` 폴백이
+//    캐시 토큰을 정가로 쳤다). 4o 계열 캐시 할인은 50%, gpt-5 계열은 90%.
+//
 // ⚠️ 단가를 모르는 모델(오타·모델 교체·env로 바꾼 값)은 0으로 속이지 않는다 — null을 반환해
 //    "공짜"와 "단가 모름"을 구분한다. 조용히 0으로 새면 다음 "왜 이렇게 쌌지"가 또 터진다.
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 const PRICE_PER_1M: Record<string, { in: number; out: number; cachedIn?: number }> = {
-  'gpt-4o': { in: 2.5, out: 10.0 },
-  'gpt-4o-mini': { in: 0.15, out: 0.6 },
+  'gpt-4o': { in: 2.5, out: 10.0, cachedIn: 1.25 },
+  'gpt-4o-mini': { in: 0.15, out: 0.6, cachedIn: 0.075 },
   'gpt-5.5': { in: 5.0, out: 30.0, cachedIn: 0.5 },
 };
 

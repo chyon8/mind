@@ -45,7 +45,7 @@ language sql stable as $$
   where f.archived = false
     and not (e.fragment_id = any(exclude_ids))
     -- 아래 세 줄은 rudy-collision.sql과 같은 정의다. 바꿀 땐 양쪽 같이 바꾼다.
-    and (f.let_go_at is null or f.let_go_at < now() - interval '60 days')
+    and (f.let_go_at is null or f.let_go_at < now() - interval '7 days')
     and f.tier <> 'pinned'
     and f.last_touched_at < now() - make_interval(days => min_age_days)
   order by e.embedding <=> q_embed

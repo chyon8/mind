@@ -10,6 +10,7 @@ import {
   countDiscoverNext,
   deleteFragment,
   fetchProjects,
+  fetchSimilarFragments,
   getFragment,
   rememberFragment,
   setFragmentProjects,
@@ -33,20 +34,11 @@ const TIERS: { value: Tier; label: string }[] = [
 // "안 물어본 걸 물어온다"는 발견의 본질이 죽는다 (2026-07-25 유저 지시).
 const DISCOVER_MAX = 5;
 
-// 원탭 진입의 질문은 파편 내용을 품어야 한다 — "이거 관련 뭐 있었지"만 보내면
-// 임베딩에 주제가 없어서 RAG가 아무거나 물어온다. 화면의 "이거"를 문장에 풀어 넣는다.
-function rudyQuestions(fr: Fragment): { label: string; question?: string }[] {
+// 칩이 보내는 문장은 파편 내용을 품어야 한다 — "같은 종류로 뭐 있을까"만 보내면
+// 서버가 무엇의 종류인지 모른다. 화면의 "이거"를 문장에 풀어 넣는다.
+function subjectOf(fr: Fragment): string {
   const raw = (fr.link_title || fr.content || '').replace(/\s+/g, ' ').trim();
-  const subject = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
-  const chips: { label: string; question?: string }[] = [
-    { label: '이거 관련 뭐 있었지', question: `『${subject}』 관련해서 내가 저장해둔 게 또 뭐가 있지?` },
-    { label: '이거 다음 뭐 볼까', question: `『${subject}』 다음으로 뭘 보면 좋을까?` },
-  ];
-  // ⚠️ 자리만 잡아둔 칩이다 (question 없음 = 아직 동작 안 함).
-  // Exa findSimilar를 실측해보니 같은 제품 파는 쇼핑몰·미러 사이트만 나와서 배선을 뺐다.
-  // 무엇으로 채울지는 미정 — RUDY-STATUS.md "more like this" 항목 참고.
-  chips.push({ label: 'more like this' });
-  return chips;
+  return raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
 }
 
 // 화면 4: 원문 전체 + 인라인 수정 + 덧붙임 + tier 토글 + 프로젝트 + 묻기 + 삭제.
@@ -64,22 +56,16 @@ export default function FragmentDetail() {
   // 내용이 있으면 기본은 읽기 모드, 탭하면 편집으로 전환.
   const [noteEditing, setNoteEditing] = useState(false);
   const [selectedPiece, setSelectedPiece] = useState<MergedPiece | null>(null);
-  // 아직 동작 안 하는 칩을 눌렀을 때 그 칩만 잠깐 "아직 준비중"으로 바뀐다
-  const [soon, setSoon] = useState<string | null>(null);
-  // 표시가 5개 꽉 찼을 때 잠깐 뜨는 안내 (soon과 같은 결 — 토스트를 새로 들이지 않는다)
+  // "이거 관련 뭐 있었지" — 이 화면 안에서 펼쳐지는 안쪽 목록. null = 아직 안 눌렀다.
+  const [similar, setSimilar] = useState<Fragment[] | null>(null);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  // 표시가 5개 꽉 찼을 때 잠깐 뜨는 안내 (토스트를 새로 들이지 않는다 — 그 자리 글자로만 말한다)
   const [discoverFull, setDiscoverFull] = useState(false);
 
   // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
   // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
   const latest = useRef({ content: '', note: '', fragment: null as Fragment | null });
   latest.current = { content, note, fragment };
-
-  // "아직 준비중"은 잠깐 보였다가 원래 라벨로 돌아온다
-  useEffect(() => {
-    if (!soon) return;
-    const t = setTimeout(() => setSoon(null), 1600);
-    return () => clearTimeout(t);
-  }, [soon]);
 
   useEffect(() => {
     if (!discoverFull) return;
@@ -214,6 +200,20 @@ export default function FragmentDetail() {
     setFragment({ ...fragment!, project_ids: next });
   }
 
+  // "이거 관련 뭐 있었지" — 채팅으로 나가지 않고 여기서 편다. 임베딩만 쓰므로 공짜다.
+  // 다시 누르면 접힌다. 접었다 펴도 다시 안 가져온다 — 그 사이 바뀔 게 없다.
+  function toggleSimilar() {
+    if (similar) {
+      setSimilar(null);
+      return;
+    }
+    setSimilarLoading(true);
+    fetchSimilarFragments(fragment!.id)
+      .then(setSimilar)
+      .catch(() => setSimilar([])) // 실패도 "없다"로 보여준다 — 빈 화면보단 낫다
+      .finally(() => setSimilarLoading(false));
+  }
+
   async function remove() {
     if (!(await confirmDelete())) return;
     await deleteFragment(fragment!);
@@ -326,22 +326,57 @@ export default function FragmentDetail() {
         <View style={styles.divider} />
 
         {/* 원탭 진입 (RUDY.md §4-C1) — 파편 하나하나가 Rudy로 들어가는 문.
-            타이핑 마찰이 wow 사이의 평일 사용을 죽인다. */}
+            타이핑 마찰이 wow 사이의 평일 사용을 죽인다.
+            셋의 역할이 겹치지 않게 갈랐다: **안쪽 / 자유 / 바깥.** */}
         <View style={styles.askRow}>
-          {rudyQuestions(fragment).map((q) => (
-            <Pressable
-              key={q.label}
-              onPress={() =>
-                q.question
-                  ? router.push(`/chat?q=${encodeURIComponent(q.question)}`)
-                  : setSoon(q.label)
-              }
-              style={styles.askChip}
-            >
-              <Text style={styles.askLabel}>{soon === q.label ? '아직 준비중' : q.label}</Text>
-            </Pressable>
-          ))}
+          <Pressable onPress={toggleSimilar} style={styles.askChip}>
+            <Text style={styles.askLabel}>이거 관련 뭐 있었지</Text>
+          </Pressable>
+          {/* 물고만 들어간다 — 자동 전송 없음. 뭘 물을지는 거기서 정한다. */}
+          <Pressable
+            onPress={() => router.push(`/chat?fid=${fragment.id}`)}
+            style={styles.askChip}
+          >
+            <Text style={styles.askLabel}>채팅하기</Text>
+          </Pressable>
+          {/* 바깥. 소재의 이름이 아니라 **종류**로 찾는다 — 그 분기는 서버가 mode로 받는다. */}
+          <Pressable
+            onPress={() =>
+              router.push(
+                `/chat?mode=more_like&q=${encodeURIComponent(
+                  `『${subjectOf(fragment)}』 같은 종류로 바깥에 뭐가 또 있을까?`,
+                )}`,
+              )
+            }
+            style={styles.askChip}
+          >
+            <Text style={styles.askLabel}>more like this</Text>
+          </Pressable>
         </View>
+
+        {/* 안쪽 목록 — 열면 touch되지 않는다(이 화면 자체가 그렇다). 무덤도 나온다. */}
+        {similarLoading && <Text style={styles.similarEmpty}>찾는 중…</Text>}
+        {similar && !similarLoading && (
+          <View style={styles.similarList}>
+            {similar.length === 0 ? (
+              <Text style={styles.similarEmpty}>
+                닿는 게 아직 없다 — 방금 저장한 파편이면 잠시 뒤 다시 눌러봐라
+              </Text>
+            ) : (
+              similar.map((s) => (
+                <Pressable key={s.id} onPress={() => router.push(`/fragment/${s.id}`)}>
+                  <Text style={styles.similarDate}>
+                    {feedDateLabel(s.created_at)}
+                    {s.archived ? ' · 무덤' : ''}
+                  </Text>
+                  <Text style={styles.similarText} numberOfLines={2}>
+                    {(s.link_title || s.content || '').replace(/\s+/g, ' ').trim()}
+                  </Text>
+                </Pressable>
+              ))
+            )}
+          </View>
+        )}
 
         <View style={styles.divider} />
 
@@ -640,6 +675,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxs,
   },
   askLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  // 안쪽 유사 파편 — 날짜 + 본문 두 줄. 카드로 만들지 않는다(여긴 목록이 아니라 각주다).
+  similarList: { gap: spacing.md, marginTop: spacing.md },
+  similarDate: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
+  similarText: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  similarEmpty: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, marginTop: spacing.sm },
   // 살리기는 칩들과 같은 결이되 혼자 있는 행동이라 한 줄을 차지한다
   reviveBtn: {
     alignSelf: 'flex-start',

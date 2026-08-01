@@ -331,7 +331,9 @@ export async function fetchFragmentProjectMap(
 
 // ============ 회상 (SPEC §5의 없어진 반쪽) ============
 
-const LET_GO_COOLDOWN_DAYS = 60;
+// 2026-07-31: 60 → 7. 판이 4시간마다 갈리면서 60일 쿨다운은 풀을 너무 오래 갉아먹었다.
+// ⚠️ 같은 값이 네 곳에 복제돼 있다 (fixtures.ts · rudy-collision.sql · rudy-chat.sql). 같이 바꾼다.
+const LET_GO_COOLDOWN_DAYS = 7;
 
 // 회상 후보 — 가장 오래 안 건드린 것부터. 흘려보낸 지 얼마 안 된 건 뺀다.
 // 어느 게 실제로 잊히기 직전인지는 선명도를 계산해봐야 알므로 판정은 recall.ts에서.
@@ -387,6 +389,22 @@ export async function fetchCollisionCandidates(seedIds: string[]): Promise<Colli
     .rpc('collision_candidates', { seed_ids: seedIds });
   if (error) throw error;
   return (data ?? []) as CollisionHit[];
+}
+
+// 파편 하나와 뜻이 닿는 것들 (파편 상세의 "이거 관련 뭐 있었지"). 무덤도 포함한다 —
+// 찾으러 온 행위라 회상 필터를 안 건다 (rudy-similar.sql 참고).
+// 임베딩은 저장 후 비동기로 생기므로 갓 저장한 파편은 빈 배열이 정상이다.
+export async function fetchSimilarFragments(id: string): Promise<Fragment[]> {
+  if (!isConfigured) return [];
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .rpc('similar_fragments', { source_id: id });
+  if (error) throw error;
+  // 유사도 순서는 fetchFragmentsByIds가 보존하지 않는다 — 여기서 다시 건다 (searchFragments와 같은 수법)
+  const ids = ((data ?? []) as { id: string }[]).map((h) => h.id);
+  const order = new Map(ids.map((fid, i) => [fid, i]));
+  const frs = await fetchFragmentsByIds(ids);
+  return frs.sort((a, b) => order.get(a.id)! - order.get(b.id)!);
 }
 
 // ── 원장 (RUDY.md §5) — 루디가 한 말의 기록. §2-2 같은 말 금지의 물리적 실체.

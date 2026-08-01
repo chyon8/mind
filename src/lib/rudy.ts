@@ -164,9 +164,13 @@ type Handlers = {
 // 반환값 = 서버가 이력 저장까지 끝냈는지. false면 화면의 답을 지우면 안 된다 —
 // 다시 읽어도 거기 없어서 답이 통째로 증발한다.
 // signal로 중단할 수 있다 — 중단하면 AbortError가 던져지고, 서버는 부분 답까지 저장한다.
+// opts.pinnedId — 파편 상세에서 물고 들어온 파편. 서버가 <물고있는파편> 블록 하나를 더한다.
+// opts.mode — 'more_like'면 서버가 검색어 뽑는 프롬프트를 바꾼다(소재의 이름 대신 종류로 찾게).
+//   갈래(intent) 판정에는 손대지 않는다.
 export async function askRudy(
   conversationId: string,
   question: string,
+  opts: { pinnedId?: string; mode?: string },
   h: Handlers,
   signal?: AbortSignal,
 ): Promise<boolean> {
@@ -179,7 +183,7 @@ export async function askRudy(
   const res = await streamingFetch(FUNCTIONS_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversationId, question }),
+    body: JSON.stringify({ conversationId, question, pinnedId: opts.pinnedId, mode: opts.mode }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`chat ${res.status}`);

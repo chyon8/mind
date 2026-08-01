@@ -64,8 +64,9 @@ type Turn = { key: string; at: string; q: string; a: string; cited: string[]; no
 // 시각 규칙: 파편은 카드에 담기지만 Rudy의 말은 담기지 않는다. 왼쪽 세로 규칙 하나만
 // 두고 본문으로 흐른다 — 여백에 적힌 사서의 메모처럼. 유저 말은 오른쪽 카드로 접힌다.
 export default function Chat() {
-  // 원탭 진입 (§4-C1) — 파편 상세의 칩이 질문을 들고 들어온다
-  const { q } = useLocalSearchParams<{ q?: string }>();
+  // 원탭 진입 (§4-C1) — 파편 상세의 칩이 질문을 들고 들어온다.
+  // q = 받자마자 자동 전송 / fid = 파편을 물고만 들어온다(전송 안 함) / mode = 서버 프롬프트 분기.
+  const { q, fid, mode: entryMode } = useLocalSearchParams<{ q?: string; fid?: string; mode?: string }>();
   const [mode, setMode] = useState<'home' | 'chat'>('home');
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -80,6 +81,8 @@ export default function Chat() {
   // 자발적 연결로 나온 파편 → 원장 id. 그 파편을 열면 루디에 대한 acted다 (§6-6).
   const linked = useRef<Record<string, string>>({});
   const autoSent = useRef(false);
+  // 물고 있는 파편 (fid 진입). 놓을 때까지 이 대화의 모든 턴에 같이 간다.
+  const [pinned, setPinned] = useState<Fragment | null>(null);
   const insets = useSafeAreaInsets();
 
   // 근거 칩 이름은 파편을 따로 읽어야 안다 (messages엔 id만 있다)
@@ -118,7 +121,8 @@ export default function Chat() {
   }, [refreshHistory]);
 
   const send = useCallback(
-    async (question: string) => {
+    // askMode = 서버 프롬프트 분기('more_like'). 화면 모드(mode 상태)와 다른 것이라 이름을 가른다.
+    async (question: string, askMode?: string) => {
       const text = question.trim();
       if (!text || phase !== 'idle') return;
       setInput('');
@@ -141,6 +145,7 @@ export default function Chat() {
         const saved = await askRudy(
           convId,
           text,
+          { pinnedId: pinned?.id, mode: askMode },
           {
             onToken: (t) => {
               answer += t;
@@ -189,7 +194,7 @@ export default function Chat() {
         setPhase('idle');
       }
     },
-    [conversationId, phase, open],
+    [conversationId, phase, open, pinned],
   );
 
   // 원탭 진입은 타이핑 없이 바로 물어본다 — 프리필만 하면 결국 한 번 더 눌러야 한다.
@@ -197,13 +202,23 @@ export default function Chat() {
   const sendRef = useRef(send);
   sendRef.current = send;
   // 원탭 진입은 목록을 거치지 않는다 — 질문을 들고 들어온 것이므로 바로 새 대화로 간다.
+  // mode는 이 첫 턴에만 실린다. 이어서 타이핑하는 말은 평소 갈래 판정을 그대로 받는다.
   useEffect(() => {
     if (q && !autoSent.current) {
       autoSent.current = true;
       setMode('chat');
-      sendRef.current(q);
+      sendRef.current(q, entryMode);
     }
-  }, [q]);
+  }, [q, entryMode]);
+
+  // fid 진입 — 전송하지 않는다. 파편만 물고 대화 화면에 들어간다(뭘 물을지는 여기서 정한다).
+  useEffect(() => {
+    if (!fid) return;
+    setMode('chat');
+    fetchFragmentsByIds([fid])
+      .then(([fr]) => setPinned(fr ?? null))
+      .catch(() => {});
+  }, [fid]);
 
   // 마크다운 링크 라우팅: mind://fragment/… → 파편 상세, mind://project/… → 프로젝트 상세,
   // 그 외(http…)는 브라우저로. 자발적 연결이었던 파편이면 acted를 적는다(§6-6).
@@ -395,6 +410,21 @@ export default function Chat() {
             ))}
           </ScrollView>
 
+          {/* 물고 있는 파편 — 입력창 바로 위에 둔다. 뭘 물어도 이게 같이 간다는 걸 보여주는 자리라
+              대화 흐름(위)이 아니라 내가 지금 쥔 것(아래)에 붙어야 한다. */}
+          {pinned && (
+            <View style={styles.pinnedRow}>
+              <Pressable style={styles.flex} onPress={() => openFragment(pinned.id)}>
+                <Text style={styles.pinnedText} numberOfLines={1}>
+                  물고 있음 — {chipLabel(pinned)}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => setPinned(null)} hitSlop={12}>
+                <Text style={styles.pinnedDrop}>놓기</Text>
+              </Pressable>
+            </View>
+          )}
+
           <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, spacing.sm) }]}>
             <TextInput
               style={[styles.input, noFocusRing]}
@@ -493,6 +523,16 @@ const styles = StyleSheet.create({
   },
   chipText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
 
+  // 물고 있는 파편 — 입력창의 부속이라 같은 좌우 여백을 쓰되 테두리는 없다(입력창이 주인공)
+  pinnedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  pinnedText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
+  pinnedDrop: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sansMedium },
   // 입력창은 한 줄짜리 밑줄이 아니라 넉넉한 필드다 — 길게 물어볼 수 있어야 한다
   composer: {
     flexDirection: 'row',

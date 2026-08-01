@@ -17,7 +17,8 @@ import { costTracker } from '../_shared/usage.ts';
 import { systemPrompt } from './prompt.ts';
 import { axesBlock, findAxes, MIN_SIM as CLUSTER_MIN_SIM, type Axis } from './clusters.ts';
 import { buildOrient, orientBlock, type OrientResult } from './orient.ts';
-import { captureAnswer, logQuestion, pickQuestion, questionSubject, type Target } from './intent.ts';
+// pickQuestion·logQuestion(늦은 의도 §4-F1)은 2026-08-01에 호출을 뺐다 — intent.ts엔 그대로 있다.
+import { captureAnswer, questionSubject } from './intent.ts';
 import { kstDate, kstRange, kstToday, PERIOD_LABEL, type Period } from '../_shared/time.ts';
 import { exaSearch } from '../discovery/search.ts';
 
@@ -31,10 +32,12 @@ const CITE_COUNT = 10; // 근거로 넘길 파편 수
 // 관련 파편도 0.28~0.43에 깔려서, 어떤 바닥이든 신호를 자른다(충돌 튜닝 때 본 이방성과 동일).
 // 관련성 판정은 근거를 직접 보는 모델이 한다 — 숫자 하나로 미리 자르는 게 더 나쁘다.
 
-// 자발적 연결 임계. 회상의 0.42를 그대로 안 쓴다 — 질문↔파편은 파편↔파편과 유사도 분포가
-// 다르다(위 실측과 같은 이유). 잠정값이고, 판정마다 gate_log에 실측을 남긴다(§6-4).
-const LINK_THRESHOLD = 0.34;
-const LINK_COOLDOWN_DAYS = 30; // 되살리기와 같은 쿨다운 (§4-C1 표면 간 중복 방지)
+// ⚠️ 자발적 연결(§4-C1)은 2026-08-01에 **껐다.** 임계(0.34)를 넘긴 연결이 실제로는 무관해서,
+//    모델이 "이게 지금과 무슨 관련이 있는지 모르겠어"라고 쓴 채로 파편을 들이밀었다(실측).
+//    유저 결정: "내가 관련있는 거 물어보지 않으면 굳이 안 띄우는 게 좋겠다."
+//    그 자리는 파편 상세의 `이거 관련 뭐 있었지` 칩이 받는다 — 사람이 눌렀을 때만, 공짜로.
+//    되살리려면 이 커밋 이전의 findLink/LINK_THRESHOLD/LINK_COOLDOWN_DAYS를 보면 된다.
+//    (RPC `collision_by_embedding`은 그대로 둔다 — 지우면 되살릴 때 SQL부터 다시 붙여야 한다.)
 const HISTORY_LIMIT = 20; // 맥락으로 넘길 이전 메시지 수
 const PERIOD_LIMIT = 40; // 기간 조회 상한 (하루에 40개 넘게 던지면 최신순으로 자른다)
 // 전량 조회 상한 (2026-07-25 열거 경로 → 2026-07-29 기본 경로로 확대).
@@ -206,6 +209,29 @@ outward — 바깥(웹)에서 찾는 것과의 관계. **단, 이 사람의 세�
 
 JSON만 출력: {"topics":["..."],"type":null,"period":null,"intent":"other","outward":"no"}`;
 
+// more_like 모드 (파편 상세의 "more like this", 2026-07-31) — EXTRACT_SYS를 통째로 갈아끼운다.
+//
+// ⚠️ **질문 문구만 바꿔서는 안 막힌다. 검색어를 만드는 자리가 여기다.**
+//    바깥(Exa)에 가는 건 topics인데, EXTRACT_SYS는 그걸 **저장소 검색용 소재어**로 뽑는다.
+//    그래서 파편을 던지면 제품명이 그대로 Exa로 가고, findSimilar를 뺀 그 실패
+//    (같은 물건 파는 다른 쇼핑몰·미러 사이트)가 그대로 재현된다.
+// → 이름이 아니라 **종류**를 뽑게 한다. 발견의 `[아이디어]` 슬롯을 고친 2단계 분리와 같은 약.
+// 호출 수는 안 는다 — 이미 도는 재작성 호출의 system만 바뀐다.
+const MORE_LIKE_SYS = `사용자가 저장해둔 것 하나를 준다. 그것과 **같은 종류의 다른 것**을 바깥(웹)에서
+찾기 위한 검색어를 만든다.
+
+topics — 웹 검색어 1~3개:
+- 먼저 이게 **어떤 종류의** 것인지 규정해라 (무슨 물건인지, 무슨 장르인지, 무슨 방식인지).
+  그 다음 그 종류를 찾는 말로 쓴다.
+- ⚠️ **소재의 이름·브랜드·모델명·제목·URL·사이트명을 검색어에 넣지 마라.**
+  넣으면 같은 물건을 파는 다른 쇼핑몰과 미러 사이트만 돌아온다. 실측으로 확인된 실패다.
+- 예: "Teenage Engineering OP-1" → ["휴대용 신디사이저", "포터블 샘플러"]
+- 예: "무인양품 벽걸이 CD 플레이어" → ["미니멀 오디오 가전", "벽걸이형 스피커 디자인"]
+- 예: "리액트 상태관리 라이브러리 비교 글" → ["프론트엔드 상태관리 비교", "상태관리 설계 패턴"]
+- 종류를 못 정하겠으면 빈 배열. 억지로 이름을 넣지는 마라.
+
+JSON만 출력: {"topics":["..."]}`;
+
 const INTENTS = ['trend', 'orient', 'enumerate'];
 
 type OutwardMode = 'no' | 'ask' | 'go';
@@ -225,24 +251,30 @@ const PERIODS = ['today', 'yesterday', 'week', 'month'];
 async function searchQueries(
   question: string,
   recent: string,
+  moreLike: boolean,
   onUsage?: UsageSink,
   meta?: Record<string, string>,
 ): Promise<Extracted> {
   const user = recent ? `<최근대화>\n${recent}\n</최근대화>\n\n질문: ${question}` : question;
   const raw = await complete(
     [
-      { role: 'system', content: EXTRACT_SYS },
-      { role: 'user', content: user },
+      { role: 'system', content: moreLike ? MORE_LIKE_SYS : EXTRACT_SYS },
+      { role: 'user', content: moreLike ? question : user },
     ],
     FAST_MODEL,
     onUsage,
     meta,
   );
   const p = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim());
+  const topics = Array.isArray(p?.topics)
+    ? p.topics.filter((s: unknown) => typeof s === 'string' && s.trim()).slice(0, 3)
+    : [];
+  // more_like는 칩 하나가 만든 고정 요청이다 — 갈래도 기간도 판정할 게 없고 바깥은 확정이다.
+  if (moreLike) {
+    return { topics, type: null, period: null, intent: 'other', outward: 'go' };
+  }
   return {
-    topics: Array.isArray(p?.topics)
-      ? p.topics.filter((s: unknown) => typeof s === 'string' && s.trim()).slice(0, 3)
-      : [],
+    topics,
     type: TYPES.includes(p?.type) ? p.type : null,
     period: PERIODS.includes(p?.period) ? (p.period as Period) : null,
     intent: INTENTS.includes(p?.intent) ? p.intent : 'other',
@@ -282,48 +314,14 @@ function logGate(
     .then(undefined, (e) => console.warn('[gate_log]', e));
 }
 
-// 자발적 연결 (§4-C1 킬러 무브) — 묻지도 않았는데 잊고 있던 과거가 대화에 걸어 들어온다.
-// 임계 미달이면 null. 억지로 이으면 유저는 무시를 학습하고 마법이 통째로 죽는다(§2-8).
-async function findLink(qEmbed: number[], excludeIds: string[]): Promise<Frag | null> {
-  // 쿨다운 — 되살리기와 원장을 공유하므로 떠오른 것에서 이미 본 파편은 여기서 안 나온다.
-  const since = new Date(Date.now() - LINK_COOLDOWN_DAYS * 86_400_000).toISOString();
-  const { data: recent } = await supabase
-    .schema('rudy')
-    .from('utterances')
-    .select('item_ids')
-    .eq('kind', 'resurface')
-    .gte('created_at', since);
-  const cooled = new Set((recent ?? []).flatMap((r) => (r.item_ids ?? []) as string[]));
-
-  const { data: hits, error } = await supabase
-    .schema('rudy')
-    .rpc('collision_by_embedding', { q_embed: qEmbed, exclude_ids: excludeIds });
-  if (error) throw error;
-
-  const fresh = ((hits ?? []) as { id: string; similarity: number }[]).filter(
-    (h) => !cooled.has(h.id),
-  );
-  const top = fresh[0];
-  const passed = !!top && top.similarity >= LINK_THRESHOLD;
-  logGate(
-    'similarity',
-    passed,
-    passed ? '자발적 연결 성립' : '임계 미달 — 억지로 잇지 않고 침묵',
-    { best: top?.similarity ?? null, threshold: LINK_THRESHOLD, pool: fresh.length },
-  );
-  if (!passed) return null;
-
-  const { data } = await supabase.from('fragments').select(FRAG_COLS).eq('id', top.id).single();
-  return (data as Frag) ?? null;
-}
-
 // 클라이언트로는 NDJSON 한 줄씩 흘린다 — 청크 경계가 어디서 잘리든 줄 단위로 다시 맞춰진다.
 const line = (o: unknown) => new TextEncoder().encode(`${JSON.stringify(o)}\n`);
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
-  const { conversationId, question } = await req.json();
+  // pinnedId = 파편 상세에서 물고 들어온 파편(§판 B). mode = 'more_like'면 검색어 프롬프트가 바뀐다.
+  const { conversationId, question, pinnedId, mode } = await req.json();
   if (!conversationId || !question?.trim()) {
     return new Response(JSON.stringify({ error: 'conversationId·question 필요' }), {
       status: 400,
@@ -368,9 +366,11 @@ Deno.serve(async (req) => {
     .join('\n');
 
   // 검색어를 뽑는다. 실패하면 질문 그대로 — 재작성이 죽어도 채팅은 살아야 한다.
+  const moreLike = mode === 'more_like';
   const { topics, type, period, intent, outward } = await searchQueries(
     question,
     recent,
+    moreLike,
     cost.track('chat.rewrite', FAST_MODEL),
     cost.meta('chat.rewrite'),
   ).catch((e) => {
@@ -380,8 +380,13 @@ Deno.serve(async (req) => {
 
   // 바깥 검색은 **명시적 요청(go)일 때만** 뻗는다 (§2-8 침묵 기본값 + 유저 통제). RAG와 병렬로.
   // 'ask'면 안 뒤지고 프롬프트가 "바깥에서 찾아볼까?"를 물어보게 한다. 실패해도 채팅은 산다.
-  const outwardPromise: Promise<string> = outward === 'go'
-    ? outwardBlock(topics.length ? topics : [question]).catch((e) => {
+  //
+  // ⚠️ more_like는 질문 원문으로 폴백하지 않는다. 원문에 소재의 **이름**이 들어 있어서
+  //    (칩이 파편 내용을 문장에 심는다) 그대로 Exa에 가면 MORE_LIKE_SYS로 막으려던 그 실패가
+  //    뒷문으로 재현된다. 종류를 못 뽑았으면 바깥은 그냥 안 간다 (§2-8 침묵).
+  const outwardQueries = topics.length ? topics : moreLike ? [] : [question];
+  const outwardPromise: Promise<string> = outward === 'go' && outwardQueries.length
+    ? outwardBlock(outwardQueries).catch((e) => {
         console.warn('[chat] 바깥 검색 실패 → 없이 진행', e);
         return '';
       })
@@ -478,7 +483,6 @@ Deno.serve(async (req) => {
 
   let citedIds: string[] = [];
   let evidence = '';
-  let link: Frag | null = null;
   let periodNote = '';
   // 전량 블록은 **기본 갈래에서만** 붙인다. 나머지 갈래는 이미 자기 재료가 "전부"라서
   // (기간=그 기간 전부 / 열거=전 파편 / 축·오늘=계산된 것), 전량을 겹치면 모델이
@@ -542,9 +546,7 @@ Deno.serve(async (req) => {
     //    검색을 없앤 게 아니라 **역할을 바꿨다** — 전엔 검색이 모델이 보는 전부였다.
     corpus = await corpusBlock();
 
-    // 자발적 연결은 질문 원문 기준이라 원문 임베딩도 필요하다 — 한 번에 받는다
-    const embeds = await embedMany([...queries, question]);
-    const qEmbed = embeds[embeds.length - 1];
+    const embeds = await embedMany(queries);
 
     // 근거 검색 — 기존 하이브리드 RPC 그대로 쓴다 (검색과 채팅이 같은 랭킹을 봐야 말이 맞다).
     // 질의별로 돌리고 파편별 최고점으로 합친다.
@@ -597,29 +599,22 @@ Deno.serve(async (req) => {
       }
     }
     evidence = cited.map((f) => fragBlock(f, projByFrag.get(f.id) ?? [])).join('\n');
-
-    // 연결이 죽어도 대화는 살아야 한다 — 부가 기능이 본 기능을 인질로 잡지 않게.
-    try {
-      link = await findLink(qEmbed, citedIds);
-    } catch (e) {
-      console.warn('[chat] 자발적 연결 실패 → 연결 없이 진행', e);
-    }
   }
 
-  // 늦은 의도 (§4-F1). 축이 있으면 축에 묶인 파편을 우선한다 — 답 하나가 축 전체를
-  // 추측에서 확인으로 올리기 때문. 예산·쿨다운은 pickQuestion 안에서 걸린다.
-  let ask: Target | null = null;
-  try {
-    ask = await pickQuestion(
-      supabase,
-      new Set(axes.flatMap((a) => a.items.map((f) => f.id))),
-      (g, p, r, d) => logGate(g, p, r, d, 'question'),
-    );
-  } catch (e) {
-    console.warn('[chat] 늦은 의도 실패 → 안 묻고 진행', e);
-  }
+  // ⚠️ 늦은 의도 질문(§4-F1)도 2026-08-01에 **껐다** — 유저: "이거 그냥 안 물어봐도 될 것 같은데 굳이?"
+  //    답 끝에 "관심 있는 거 맞아?"가 붙는 게 대화를 늘어지게 했다. pickQuestion·logQuestion은
+  //    intent.ts에 그대로 있다(되살리려면 여기서 다시 부르면 된다).
+  //    captureAnswer는 남긴다 — 이미 물어놓고 답을 기다리는 질문이 24시간 안에 있을 수 있다.
 
   const web = await outwardPromise; // 바깥 검색 결과 (없으면 빈 문자열). history는 위에서 이미 읽음.
+
+  // 물고 들어온 파편 (§판 B) — 유저가 "이걸 놓고 얘기하자"고 명시한 것이다. 검색 결과가 아니라서
+  // <근거>에 섞지 않는다. 갈래 판정에도 안 쓴다 — 여기 손대면 채팅 전체가 흔들린다.
+  let pinnedBlock = '';
+  if (pinnedId) {
+    const { data } = await supabase.from('fragments').select(FRAG_COLS).eq('id', pinnedId).single();
+    if (data) pinnedBlock = fragBlock(data as Frag, []);
+  }
 
   // ⚠️ UTC가 아니라 KST 기준 오늘. UTC로 넣으면 KST 새벽에 루디가 어제를 오늘로 안다.
   const today = kstToday();
@@ -633,12 +628,11 @@ Deno.serve(async (req) => {
           : useAxes
             ? `<축>\n${evidence}\n</축>`
             : `<근거>\n${evidence || '(없음)'}\n</근거>`,
+    pinnedBlock ? `<물고있는파편>\n${pinnedBlock}\n</물고있는파편>` : '',
     web ? `<바깥>\n${web}\n</바깥>` : '',
     // 'ask' = 바깥이 도움될 수 있지만 안 뒤졌다. 억지 말고 도움되면 끝에 "바깥에서 찾아볼까?" 묻게.
     outward === 'ask' ? `<바깥가능>\n바깥에서 찾으면 도움될 수 있다. 억지로 말고, 정말 도움되겠으면 답 끝에 짧게 "바깥에서 찾아볼까?"라고만 물어라.\n</바깥가능>` : '',
-    link ? `<연결>\n${fragBlock(link, [])}\n</연결>` : '',
     answered ? `<방금답함>\n${questionSubject(answered)}\n</방금답함>` : '',
-    ask ? `<물어볼것>\n${questionSubject(ask)}\n</물어볼것>` : '',
     question,
   ]
     .filter(Boolean)
@@ -657,21 +651,10 @@ Deno.serve(async (req) => {
     { role: 'user', content: context },
   ];
 
-  // 원장은 자발적 연결만 적는다. 평범한 채팅 답변은 안 적는다 —
-  // 원장은 §2-2 "먼저 거는 말"의 중복 방지 장치인데, 질문에 답한 걸 전부 넣으면
-  // 반복 게이트가 오염된다(§6-4 ⑤도 채팅 응답은 무예산). 묻지 않고 나간 말만 기록 대상이다.
-  let utteranceId: string | null = null;
-  if (link) {
-    const { data } = await supabase
-      .schema('rudy')
-      .from('utterances')
-      .insert({ surface: 'chat', kind: 'resurface', item_ids: [link.id] })
-      .select('id')
-      .single();
-    utteranceId = data?.id ?? null;
-  }
-  // 질문도 원장에 남긴다 — 같은 파편을 두 번 묻지 않기 위한 쿨다운이 이걸로 성립한다.
-  if (ask) await logQuestion(supabase, ask);
+  // 원장(rudy.utterances)에 이 턴이 적는 것은 이제 없다. 채팅이 원장에 남기던 두 가지가
+  // 자발적 연결(resurface)과 늦은 의도(question)였는데 둘 다 껐다 — 위 주석 참고.
+  // 평범한 채팅 답변은 원래도 안 적는다: 원장은 §2-2 "먼저 거는 말"의 중복 방지 장치라,
+  // 질문에 답한 걸 전부 넣으면 반복 게이트가 오염된다.
 
   // 클라이언트가 중단(■)하면 cancel이 불린다 — 그만 만들고, 받은 데까지 저장한다.
   let cancelled = false;
@@ -693,7 +676,7 @@ Deno.serve(async (req) => {
         // 모델이 링크를 안 걸어도 이 칩이 있으면 검색과 같은 수준으로 결과가 보인다.
         if (outward === 'go') push({ t: 'web' }); // 바깥을 뒤졌다 — 앱이 "바깥에서 찾아봤다"를 표시
         push({ t: 'cite', ids: citedIds });
-        if (link && utteranceId) push({ t: 'link', fragmentId: link.id, utteranceId });
+        // 'link' 이벤트(자발적 연결)는 더 안 나간다 — 앱의 수신부는 남아 있다(되살릴 때를 위해).
         for await (const delta of chatStream(
           messages,
           CHAT_MODEL,

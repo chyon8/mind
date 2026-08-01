@@ -1,8 +1,9 @@
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { FragmentCard } from '@/components/FragmentCard';
 import { dayKey } from '@/lib/dates';
-import { recallSeed, recallUtteranceId, todayRecall } from '@/lib/recall';
+import { currentRecall, recallSeed, recallUtteranceId } from '@/lib/recall';
 import { letGoFragment, recordUtteranceResponse, rememberFragment } from '@/lib/supabase';
 import { colors, fonts, spacing, type } from '@/lib/theme';
 import type { Fragment } from '@/lib/types';
@@ -20,8 +21,10 @@ function seedLabel(seed: Fragment): string {
 // 별도 화면으로 만들지 않는다 — 가야 하는 곳이 되는 순간 안 가게 된다.
 // 이미 가는 곳(오늘의 데일리)에, 오늘 파편들 아래에 조용히 놓인다.
 //
-// 카드는 상세로 넘어가지 않는다. 상세는 열리는 순간 touch되어 선명해지므로,
-// 링크를 걸면 "그냥 봤다고 선명해지면 안 된다"는 원칙이 뒷문으로 깨진다.
+// 2026-08-01: **카드를 탭하면 상세로 간다.** 전엔 막아뒀는데("상세는 열리는 순간 touch된다"),
+// 그 전제가 2026-07-19에 이미 깨졌다 — 파편 상세는 그 뒤로 **여는 것만으론 touch하지 않고**
+// 실질 편집(내용·덧붙임·tier·프로젝트)이 있을 때만 touch한다(fragment/[id].tsx 확인).
+// 그래서 "그냥 봤다고 선명해지면 안 된다"(SPEC §5-1)는 그대로 지켜진다.
 export function RecallSection({ visible }: { visible: boolean }) {
   const [items, setItems] = useState<Fragment[]>([]);
   // 충돌로 올라온 파편과 그 씨앗. 평소엔 안 보이고 탭해야 읽힌다 (§4-A1 요청 시 가시성).
@@ -29,7 +32,7 @@ export function RecallSection({ visible }: { visible: boolean }) {
   const [shown, setShown] = useState(false);
 
   const load = useCallback(() => {
-    todayRecall()
+    currentRecall()
       .then(setItems)
       .catch(() => {});
     setShown(false);
@@ -40,6 +43,16 @@ export function RecallSection({ visible }: { visible: boolean }) {
 
   useEffect(() => {
     if (visible) load();
+  }, [visible, load]);
+
+  // 판이 4시간마다 갈리므로 앱을 켜둔 채 넘어가는 경우가 실제로 생긴다.
+  // 돌아올 때마다 다시 읽는다 — 아직 같은 판이면 currentRecall이 저장된 판을 그대로 돌려준다.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') load();
+    });
+    return () => sub.remove();
   }, [visible, load]);
 
   if (!visible || items.length === 0) return null; // 없으면 그냥 없는 것이다
@@ -72,18 +85,21 @@ export function RecallSection({ visible }: { visible: boolean }) {
       <Text style={styles.eyebrow}>떠오른 것</Text>
       {items.map((fr) => (
         <View key={fr.id} style={styles.item}>
-          {/* 탭은 "왜 지금"만 편다 — 상세로는 여전히 안 넘어간다(열면 touch되어 선명해지므로) */}
-          {why?.fragmentId === fr.id ? (
-            <Pressable onPress={() => setShown((v) => !v)}>
-              <FragmentCard fragment={fr} opacity={1} />
-            </Pressable>
-          ) : (
+          {/* 카드 탭 = 상세로. 열어도 touch되지 않으므로 선명해지지 않는다. */}
+          <Pressable onPress={() => router.push(`/fragment/${fr.id}`)}>
             <FragmentCard fragment={fr} opacity={1} />
-          )}
+          </Pressable>
           {why?.fragmentId === fr.id && shown && (
             <Text style={styles.why}>{seedLabel(why.seed)}</Text>
           )}
           <View style={styles.actions}>
+            {/* "왜 지금"은 카드에서 떼어 여기로 왔다 — 카드 탭이 상세로 갔으므로 (§4-A1 요청 시 가시성) */}
+            {why?.fragmentId === fr.id && (
+              <Pressable onPress={() => setShown((v) => !v)} hitSlop={8}>
+                <Text style={styles.whyBtn}>왜 지금?</Text>
+              </Pressable>
+            )}
+            <View style={styles.spacer} />
             <Pressable onPress={() => letGo(fr)} hitSlop={8}>
               <Text style={styles.letGo}>흘려보내기</Text>
             </Pressable>
@@ -106,9 +122,11 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
     gap: spacing.md,
   },
+  // "왜 지금?"은 왼쪽, 판단 버튼은 오른쪽 — 사이를 이게 민다
+  spacer: { flex: 1 },
+  whyBtn: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans },
   // 흘려보내기가 기본값처럼 조용하다 — 대부분은 그대로 가라앉는 게 맞다
   letGo: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   rememberBtn: {

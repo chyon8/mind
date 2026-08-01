@@ -32,8 +32,8 @@ language sql stable as $$
     ) s
     where f.archived = false
       and not (e.fragment_id = any(seed_ids))         -- 씨앗 자신 제외
-      -- 흘려보낸 것의 쿨다운 60일 (supabase.ts fetchRecallPool과 같은 정의)
-      and (f.let_go_at is null or f.let_go_at < now() - interval '60 days')
+      -- 흘려보낸 것의 쿨다운 7일 (supabase.ts fetchRecallPool과 같은 정의)
+      and (f.let_go_at is null or f.let_go_at < now() - interval '7 days')
       -- 고정된 파편은 흐려지지 않는다 = 회상 후보가 될 수 없다 (vividness.ts: pinned → 1)
       and f.tier <> 'pinned'
       -- ⚠️ 선명도 자체는 계산하지 않는다 (SPEC §5: 저장 안 함, 판정은 화면에서).

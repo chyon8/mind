@@ -172,7 +172,7 @@ export function fixtureUpdateFragment(id: string, patch: Partial<Fragment>): voi
   store = store.map((fr) => (fr.id === id ? { ...fr, ...patch } : fr));
 }
 
-const LET_GO_COOLDOWN_MS = 60 * 86_400_000;
+const LET_GO_COOLDOWN_MS = 7 * 86_400_000; // supabase.ts LET_GO_COOLDOWN_DAYS와 같은 값
 
 export function fixtureRecallPool(): Fragment[] {
   const cutoff = Date.now() - LET_GO_COOLDOWN_MS;
