@@ -8,67 +8,11 @@
 // SVG 라이브러리를 안 쓴다 — 전부 View다. Design.md의 "line-weight vector, ink on white"가
 // 원래 이 결이고, 네이티브 모듈이 늘면 dev client를 다시 빌드해야 한다.
 
-import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  FadeIn,
-  FadeOut,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 
 // 바닥(0.15)에 닿아도 완전히 안 보이면 "없음"과 구분이 안 된다 — 최소 가시성을 준다.
 const ink = (v: number) => Math.max(0.18, Math.min(1, v));
-
-// 생성 중 스켈레톤. 스피너를 안 쓰는 이유는 이 앱 어디에도 스피너가 없기 때문이다 —
-// 감쇠가 이 앱의 언어라, 기다림도 **숨쉬는 opacity**로 말한다.
-//
-// ⚠️ 단계 문구는 **시간 기반**이지 서버 이벤트가 아니다. 실제 순서(재료 → 축 → 쓰기)와 같게
-//    맞춰놨을 뿐 진행률이 아니다. 나중에 이걸 진짜 진행 신호로 착각하고 튜닝하지 마라.
-const STAGES = ['재료를 읽는 중', '축을 세우는 중', '경향을 재는 중', '쓰는 중'];
-
-export function MorningSkeleton() {
-  const breath = useSharedValue(0.3);
-  const [stage, setStage] = useState(0);
-
-  useEffect(() => {
-    breath.value = withRepeat(
-      withTiming(0.75, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      true,
-    );
-  }, [breath]);
-
-  useEffect(() => {
-    const t = setInterval(() => setStage((s) => Math.min(s + 1, STAGES.length - 1)), 5000);
-    return () => clearInterval(t);
-  }, []);
-
-  const pulse = useAnimatedStyle(() => ({ opacity: breath.value }));
-
-  return (
-    <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)} style={styles.skel}>
-      <Animated.View style={[styles.skelBar, { width: '72%', height: 22 }, pulse]} />
-      <Animated.View style={[styles.skelBar, { width: '48%', height: 22 }, pulse]} />
-      <View style={styles.skelCard}>
-        <Animated.View style={[styles.skelBar, { width: '92%' }, pulse]} />
-        <Animated.View style={[styles.skelBar, { width: '84%' }, pulse]} />
-        <Animated.View style={[styles.skelBar, { width: '61%' }, pulse]} />
-      </View>
-      <View style={styles.skelCard}>
-        <Animated.View style={[styles.skelBar, { width: '88%' }, pulse]} />
-        <Animated.View style={[styles.skelBar, { width: '55%' }, pulse]} />
-      </View>
-      <Animated.Text key={stage} entering={FadeIn.duration(400)} style={styles.skelStage}>
-        {STAGES[stage]}
-      </Animated.Text>
-    </Animated.View>
-  );
-}
 
 export function Eyebrow({ children, right }: { children: string; right?: string }) {
   return (
@@ -269,18 +213,6 @@ export function ItemLine({
 }
 
 const styles = StyleSheet.create({
-  skel: { gap: spacing.sm, paddingTop: spacing.xs },
-  skelBar: { height: 12, borderRadius: 3, backgroundColor: colors.hairline },
-  skelCard: {
-    borderColor: colors.hairline,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderRadius: rounded.md,
-    padding: spacing.card,
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  skelStage: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, marginTop: spacing.xs },
-
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   eyebrow: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
   eyebrowRight: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono, marginLeft: 'auto' },

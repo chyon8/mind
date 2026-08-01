@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -9,16 +9,11 @@ import {
   BandBar,
   Eyebrow,
   ItemLine,
-  MorningSkeleton,
   QuietRow,
   RhythmBars,
 } from '@/components/MorningViz';
 import { feedDateLabel } from '@/lib/dates';
-import {
-  fetchTodayMorning,
-  generateMorning,
-  type MorningBrief,
-} from '@/lib/morning';
+import { answerQuestion, fetchTodayMorning, type MorningBrief } from '@/lib/morning';
 import {
   fetchFragmentsByIds,
   letGoFragment,
@@ -33,13 +28,16 @@ import type { Fragment } from '@/lib/types';
 // 데일리에 인라인으로 박지 않는다 — 관찰·축·지형·넛지가 다 들어가면 오늘 파편을 밀어낸다.
 // 데일리엔 카드 한 장(MorningCard)만 두고, 내용은 여기 있다.
 //
+// **여기서 만들지 않는다** (2026-08-02). 만드는 건 맥에서 `node scripts/morning/run.mjs`가 한다 —
+// 파편 전량을 읽으려면 클코가 필요하고, 그러면 앱은 아침에 이미 있는 걸 읽기만 하면 된다.
+// 스피너도 없고 탭할 때 돈도 안 나간다.
+//
 // 화면의 순서 = 읽는 순서다. **주장 먼저, 근거는 그 다음.** 숫자를 먼저 보여주면
 // 대시보드가 되고, 대시보드는 유저가 스스로 해석해야 하는 숙제를 남긴다(§4-F5의 "서사" 요구).
 export default function MorningScreen() {
   const [brief, setBrief] = useState<MorningBrief | null>(null);
   const [nudgeFrag, setNudgeFrag] = useState<Fragment | null>(null);
-  const [gen, setGen] = useState(false);
-  const [error, setError] = useState('');
+  const [answer, setAnswer] = useState('');
   const alive = useRef(true);
 
   useEffect(() => {
@@ -64,18 +62,8 @@ export default function MorningScreen() {
       .catch(() => {});
   }, [attach]);
 
-  const run = useCallback(() => {
-    if (gen) return;
-    setGen(true);
-    setError('');
-    generateMorning()
-      .then((b) => alive.current && attach(b))
-      .catch((e) => alive.current && setError(String(e?.message ?? e)))
-      .finally(() => alive.current && setGen(false));
-  }, [gen, attach]);
-
   // 넛지의 판단은 떠오르기와 같은 두 버튼이다 — 새 개념을 만들지 않는다 (§4-A3).
-  const answer = useCallback(
+  const answerNudge = useCallback(
     async (response: 'acted' | 'dismissed') => {
       const fr = nudgeFrag;
       const utteranceId = brief?.nudge?.utteranceId;
@@ -89,6 +77,22 @@ export default function MorningScreen() {
     [nudgeFrag, brief],
   );
 
+  // 성찰 질문. 답하면 자기 진술로 쌓이고(§4-B2), 넘기면 그냥 사라진다 — 재촉하지 않는다(§4-F3).
+  const sendAnswer = useCallback(async () => {
+    const q = brief?.question;
+    const text = answer.trim();
+    if (!q?.utteranceId || !text) return;
+    setAnswer('');
+    setBrief((cur) => (cur ? { ...cur, question: null } : cur));
+    await answerQuestion(q.utteranceId, brief?.pattern?.items.map((it) => it.id) ?? [], text);
+  }, [brief, answer]);
+
+  const skipQuestion = useCallback(async () => {
+    const id = brief?.question?.utteranceId;
+    setBrief((cur) => (cur ? { ...cur, question: null } : cur));
+    if (id) await recordUtteranceResponse(id, 'dismissed');
+  }, [brief]);
+
   const s = brief?.stats;
 
   return (
@@ -98,21 +102,11 @@ export default function MorningScreen() {
           <Text style={styles.headerBtn}>‹ 뒤로</Text>
         </Pressable>
         <Text style={styles.wordmark}>아침</Text>
-        <Pressable onPress={run} disabled={gen} hitSlop={12}>
-          <Text style={[styles.headerBtn, gen && styles.headerBtnOff]}>
-            {gen ? '읽는 중' : brief ? '다시' : '만들기'}
-          </Text>
-        </Pressable>
+        <View style={styles.headerPad} />
       </View>
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.list}>
-        {!brief && !gen && (
-          <Text style={styles.empty}>
-            {error || '아직 오늘 아침을 안 읽었다. 오른쪽 위 만들기.'}
-          </Text>
-        )}
-        {gen && !brief && <MorningSkeleton />}
-        {!!error && brief && <Text style={styles.error}>{error}</Text>}
+        {!brief && <Text style={styles.empty}>오늘 아침은 아직 없다.</Text>}
 
         {brief && s && (
           <>
@@ -121,13 +115,27 @@ export default function MorningScreen() {
               <Text style={styles.headline}>{brief.headline}</Text>
             </Animated.View>
 
-            {/* ── 읽기. 집계만 말한다 — 개별 파편을 인용하지 않는다 (morning/prompt.ts 3차 참고) ── */}
+            {/* ── 읽기 ── */}
             {brief.reading.length > 0 && (
               <Animated.View entering={FadeInDown.duration(420).delay(80)} style={styles.card}>
                 {brief.reading.map((para, i) => (
                   <Text key={i} style={styles.reading}>
                     {para}
                   </Text>
+                ))}
+              </Animated.View>
+            )}
+
+            {/* ── 패턴 하나. 근거를 같이 보여주는 게 이 카드의 전부다 —
+                 두 개로 본 건지 여덟 개로 본 건지 안 보이면 억지인지 알 수가 없다. ── */}
+            {brief.pattern && (
+              <Animated.View entering={FadeInDown.duration(420).delay(110)} style={styles.patternCard}>
+                <Eyebrow right={`근거 ${brief.pattern.items.length}개`}>{brief.pattern.kind}</Eyebrow>
+                <Text style={styles.reading}>{brief.pattern.text}</Text>
+                {brief.pattern.items.map((it) => (
+                  <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                    <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                  </Pressable>
                 ))}
               </Animated.View>
             )}
@@ -152,10 +160,10 @@ export default function MorningScreen() {
                 <Text style={styles.nudgeQuestion}>{brief.nudge.question}</Text>
                 <View style={styles.actions}>
                   <View style={styles.spacer} />
-                  <Pressable onPress={() => answer('dismissed')} hitSlop={8}>
+                  <Pressable onPress={() => answerNudge('dismissed')} hitSlop={8}>
                     <Text style={styles.letGo}>흘려보내기</Text>
                   </Pressable>
-                  <Pressable onPress={() => answer('acted')} hitSlop={8} style={styles.rememberBtn}>
+                  <Pressable onPress={() => answerNudge('acted')} hitSlop={8} style={styles.rememberBtn}>
                     <Text style={styles.remember}>기억하기</Text>
                   </Pressable>
                 </View>
@@ -242,6 +250,37 @@ export default function MorningScreen() {
               </View>
             )}
 
+            {/* ── 하루의 마지막 한 줄. 답을 요구하지 않는다 — 넘겨도 아무 일도 안 일어난다. ── */}
+            {brief.question && (
+              <View style={styles.questionCard}>
+                <Eyebrow>오늘의 질문</Eyebrow>
+                <Text style={styles.question}>{brief.question.text}</Text>
+                <TextInput
+                  style={styles.answerInput}
+                  multiline
+                  value={answer}
+                  onChangeText={setAnswer}
+                  placeholder="답해두면 다음부터 이걸 근거로 말한다 (선택)"
+                  placeholderTextColor={colors.faint}
+                  keyboardAppearance="dark"
+                />
+                <View style={styles.actions}>
+                  <View style={styles.spacer} />
+                  <Pressable onPress={skipQuestion} hitSlop={8}>
+                    <Text style={styles.letGo}>넘기기</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={sendAnswer}
+                    disabled={!answer.trim()}
+                    hitSlop={8}
+                    style={[styles.rememberBtn, !answer.trim() && styles.rememberBtnOff]}
+                  >
+                    <Text style={styles.remember}>남기기</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
             {/* ── 보이는 거절 (RUDY-DISCOVERY §6 — 유저가 명시적으로 좋아하는 자리) ── */}
             {brief.rejected.length > 0 && (
               <View style={styles.rejectCard}>
@@ -278,11 +317,11 @@ const styles = StyleSheet.create({
   },
   wordmark: { ...type.monoEyebrow, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 2 },
   headerBtn: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
-  headerBtnOff: { color: colors.faint },
+  // 뒤로 버튼과 균형을 맞추는 빈 자리 — 만들기 버튼이 있던 곳이다(이제 앱은 만들지 않는다)
+  headerPad: { minWidth: 44 },
   list: { padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.md },
 
   empty: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans, marginTop: spacing.xl },
-  error: { ...type.bodySm, color: colors.error, fontFamily: fonts.sans },
 
   headlineBlock: { gap: spacing.xs, marginTop: spacing.xs, marginBottom: spacing.xs },
   date: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
@@ -314,7 +353,17 @@ const styles = StyleSheet.create({
   kindText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono },
   axisMeta: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, marginLeft: 'auto' },
 
-  // 넛지는 판단을 요구하는 유일한 카드라 테두리를 한 단계 올려 구분한다
+  // 패턴은 이 브리핑의 알맹이라 읽기 카드 바로 뒤에서 한 단계 도드라지게 둔다
+  patternCard: {
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.mute,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderRadius: rounded.md,
+    padding: spacing.card,
+    gap: spacing.sm,
+  },
+
+  // 넛지·질문은 판단을 요구하는 카드라 테두리를 한 단계 올려 구분한다
   nudgeCard: {
     backgroundColor: colors.canvasElevated,
     borderColor: colors.mute,
@@ -336,6 +385,28 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxs,
   },
   remember: { ...type.bodySm, color: colors.ink, fontFamily: fonts.sansMedium },
+  rememberBtnOff: { opacity: 0.4 },
+
+  questionCard: {
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.mute,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderRadius: rounded.md,
+    padding: spacing.card,
+    gap: spacing.sm,
+  },
+  question: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sans },
+  answerInput: {
+    ...type.bodyMd,
+    color: colors.body,
+    fontFamily: fonts.sans,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: rounded.sm,
+    padding: spacing.sm,
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
 
   rejectCard: { gap: spacing.xs, paddingHorizontal: spacing.xxs },
   rejectText: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },

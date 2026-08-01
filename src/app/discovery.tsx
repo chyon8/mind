@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatCost } from '@/lib/cost';
-import { dayKey, feedDateLabel, formatTime } from '@/lib/dates';
+import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
-import { type Briefing, deleteBriefing, fetchBriefings, streamBriefing, type BriefStage } from '@/lib/rudy';
+import { type Briefing, deleteBriefing, fetchBriefings } from '@/lib/rudy';
 import {
   existingFragmentContents,
   fetchFragmentProjectMap,
@@ -30,17 +30,13 @@ import type { Project } from '@/lib/types';
 
 // 발견 브리핑 (RUDY.md §4-E · §7-4). 당기는 표면 — 내가 열 때만 바깥을 물어온다.
 //
-// 열면 **기록 목록**부터 보여준다 — 바로 생성하지 않는다. 지난 것을 고르거나 `새로 발견하기`를 눌러야 생성.
-// 생성은 스트리밍(단계 스테퍼 + 카드가 차오름). **화면을 나가도 생성은 백그라운드에서 끝까지 돌아
-// 원장에 저장된다** — 다시 열면 기록에 있다(중간에 나가도 유실 없음).
-
-
-const STAGES: { id: BriefStage; label: (n?: number) => string }[] = [
-  { id: 'reading', label: () => '저장한 걸 읽는 중' },
-  { id: 'angles', label: () => '뭘 찾을지 고르는 중' },
-  { id: 'search', label: (n) => `바깥 ${n ?? ''}곳 뒤지는 중` },
-  { id: 'writing', label: () => '브리핑 쓰는 중' },
-];
+// **이 화면은 읽기 전용이다** (2026-08-02, 유저 지시: "발견도 클코만 남기고 앱버튼 없애").
+// 만드는 건 맥에서 `node scripts/discover-websearch/run.mjs`가 한다 — 앱은 원장을 읽어 보여줄 뿐이다.
+// 같은 날 삭제한 것: `새로 발견하기`(Edge `discovery` 스트리밍)와 `모닝 브리핑 만들기`.
+// 후자는 아침 브리핑이 자기 표면(`/morning`)을 갖게 되면서 이름만 겹치는 옛 물건이 됐다.
+//
+// ⚠️ Edge Function `discovery`는 **안 지웠다.** 부르는 사람이 없으면 안 돈다. 되살릴 때 배포부터
+//    다시 하지 않으려고 남겼다 — `streamBriefing`(`lib/rudy.ts`)도 같은 이유로 남아 있다.
 
 function openLink(href: string) {
   if (/^https?:\/\//.test(href)) Linking.openURL(href).catch(() => {});
@@ -197,55 +193,13 @@ function Card({
   );
 }
 
-// 단계 스테퍼 — 지금 뭐 하는 중인지. 현재 단계 점이 숨쉰다.
-function Stepper({ stage, count }: { stage: BriefStage; count?: number }) {
-  const idx = STAGES.findIndex((s) => s.id === stage);
-  const pulse = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [pulse]);
-
-  return (
-    <View style={styles.stepper}>
-      {STAGES.map((s, i) => {
-        const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
-        return (
-          <View key={s.id} style={styles.step}>
-            {state === 'active' ? (
-              <Animated.View style={[styles.dot, styles.dotActive, { opacity: pulse }]} />
-            ) : (
-              <View style={[styles.dot, state === 'done' && styles.dotDone]} />
-            )}
-            <Text style={[styles.stepLabel, state === 'active' && styles.stepLabelActive, state === 'todo' && styles.stepLabelTodo]}>
-              {s.label(count)}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
 type Mode = 'home' | 'result';
-type ResultKind = 'live' | 'saved' | 'empty' | 'error';
 
 export default function Discovery() {
   const [mode, setMode] = useState<Mode>('home');
-  const [gen, setGen] = useState(false); // 생성 진행 중 (화면을 나가도 유지 — 서버는 계속 돈다)
-  const [kind, setKind] = useState<ResultKind>('live');
-  const [stage, setStage] = useState<BriefStage>('reading');
-  const [count, setCount] = useState<number>();
   const [md, setMd] = useState('');
-  const [error, setError] = useState('');
   const [list, setList] = useState<Briefing[]>([]);
-  // 화면이 떠 있는 동안만 setState. 나가도 생성은 백그라운드에서 계속 돌아 저장된다(유실 방지).
+  // 화면이 떠 있는 동안만 setState.
   const alive = useRef(true);
   const started = useRef(false);
   useEffect(() => {
@@ -314,60 +268,7 @@ export default function Discovery() {
     [thrownIds, cardProjects],
   );
 
-  // 새 브리핑 생성 (스트리밍). ⚠️ signal을 안 넘긴다 — 나가도 서버가 끝까지 만들어 저장하게.
-  // morning=true — '모닝 브리핑' 버튼. 관찰 한 줄이 붙고 trigger='push'로 남는다(하루 1회,
-  // 서버가 다시 확인한다 — observation.ts를 cron과 공유).
-  const generate = useCallback(
-    (morning = false) => {
-      if (gen) return; // 이미 생성 중이면 무시 (버튼 잠금)
-      setGen(true);
-      setKind('live');
-      setStage('reading');
-      setCount(undefined);
-      setMd('');
-      setError('');
-      setMode('result');
-
-      streamBriefing(
-        {
-          onStage: (s, n) => {
-            if (!alive.current) return;
-            setStage(s);
-            setCount(n);
-          },
-          // md는 화면을 나가도 갱신한다(돌아오면 최신). phase(모드)는 안 건드린다 — 유저가 목록에 있으면 목록 유지.
-          onToken: (t) => alive.current && setMd((prev) => prev + t),
-        },
-        undefined,
-        morning,
-      )
-        .then(({ empty }) => {
-          if (alive.current) {
-            setGen(false);
-            setKind(empty ? 'empty' : 'live');
-            setMd((cur) => {
-              syncThrown(cur); // 완성 시 이미 던진 게 있으면 상태 복원
-              return cur;
-            });
-          }
-          refreshList(); // 완성분이 원장에 저장됐다 — 목록 갱신
-        })
-        .catch((e) => {
-          if (alive.current) {
-            setGen(false);
-            setError(String(e?.message ?? e));
-            setKind('error');
-          }
-        });
-    },
-    [gen, refreshList, syncThrown],
-  );
-
-  // 오늘 이미 모닝 브리핑을 만들었는지 — 목록에서 바로 판단(왕복 없음). 서버도 다시 확인하지만
-  // 버튼 단계에서 미리 보여주면 눌러서 헛수고하는 일이 없다.
-  const morningDoneToday = list.some((b) => b.trigger === 'push' && dayKey(b.created_at) === dayKey(new Date().toISOString()));
-
-  // 열 때: 기록 목록을 읽어 보여준다. 바로 생성하지 않는다.
+  // 열 때: 기록 목록을 읽어 보여준다.
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -377,7 +278,6 @@ export default function Discovery() {
   const view = useCallback(
     (b: Briefing) => {
       setMd(b.text);
-      setKind('saved');
       setMode('result');
       syncThrown(b.text);
     },
@@ -422,8 +322,7 @@ export default function Discovery() {
     [thrownIds],
   );
 
-  const cards = mode === 'result' && kind !== 'empty' && kind !== 'error' ? parseCards(md) : [];
-  const showStepper = mode === 'result' && kind === 'live' && !md;
+  const cards = mode === 'result' ? parseCards(md) : [];
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -433,44 +332,22 @@ export default function Discovery() {
             <Text style={styles.headerBtn}>‹ 뒤로</Text>
           </Pressable>
         ) : (
-          // 목록으로 가도 생성은 abort 안 함 — 백그라운드에서 계속 만들어 저장된다.
           <Pressable onPress={() => setMode('home')} hitSlop={12}>
             <Text style={styles.headerBtn}>‹ 목록</Text>
           </Pressable>
         )}
         <Text style={styles.wordmark}>발견</Text>
-        <View style={styles.headerRight}>
-          {gen && <Text style={styles.genPill}>생성 중</Text>}
-        </View>
+        <View style={styles.headerRight} />
       </View>
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.list}>
         {mode === 'home' && (
           <>
-            <Pressable
-              style={[styles.generate, gen && styles.generateOff]}
-              onPress={() => generate()}
-              disabled={gen}
-            >
-              <Text style={styles.generateText}>{gen ? '생성 중…' : '새로 발견하기'}</Text>
-              <Text style={styles.generateSub}>
-                {gen ? '다 되면 기록에 얹힌다 · 나가도 계속 돈다' : '바깥에서 물어온다 · 30초쯤'}
+            {list.length === 0 && (
+              <Text style={styles.emptyList}>
+                아직 기록이 없다. 맥에서 `node scripts/discover-websearch/run.mjs`.
               </Text>
-            </Pressable>
-            {/* 모닝 브리핑 (§10-8, cron 폐기 후 수동 대체) — 하루 1회, 관찰 한 줄 + "아침" 배지 */}
-            <Pressable
-              style={[styles.morning, (gen || morningDoneToday) && styles.generateOff]}
-              onPress={() => generate(true)}
-              disabled={gen || morningDoneToday}
-            >
-              <Text style={styles.morningText}>
-                {morningDoneToday ? '오늘 모닝 브리핑 완료' : '모닝 브리핑 만들기'}
-              </Text>
-              <Text style={styles.generateSub}>
-                {morningDoneToday ? '내일 다시' : '어제 뭘 남겼는지 한 줄 + 발견 · 하루 1번'}
-              </Text>
-            </Pressable>
-            {list.length === 0 && <Text style={styles.emptyList}>아직 기록이 없다. 위 버튼으로 시작.</Text>}
+            )}
             {list.map((b) => (
               <Pressable key={b.id} style={styles.histRow} onPress={() => view(b)}>
                 <View style={styles.flex}>
@@ -499,8 +376,6 @@ export default function Discovery() {
           </>
         )}
 
-        {showStepper && <Stepper stage={stage} count={count} />}
-
         {cards.map((c, i) => (
           <Card
             key={i}
@@ -518,22 +393,6 @@ export default function Discovery() {
           />
         ))}
 
-        {mode === 'result' && kind === 'empty' && (
-          <View style={styles.center}>
-            <Text style={styles.hint}>오늘은 가져올 만한 게 없다.</Text>
-            <Text style={styles.hintSmall}>없는 날은 없다고 말한다.</Text>
-          </View>
-        )}
-
-        {mode === 'result' && kind === 'error' && (
-          <View style={styles.center}>
-            <Text style={styles.errorText}>못 가져왔다.</Text>
-            <Text style={styles.hintSmall}>{error}</Text>
-            <Pressable style={styles.retry} onPress={() => setMode('home')}>
-              <Text style={styles.retryText}>목록으로</Text>
-            </Pressable>
-          </View>
-        )}
       </ScrollView>
 
       {/* 발견을 읽다 떠오른 걸 그 자리에서 던진다 — 카드의 "↑ 던지기"(카드 내용을 저장)와는 다르다. */}
@@ -628,56 +487,6 @@ const styles = StyleSheet.create({
   projectChipText: { ...type.bodySm, color: colors.body, fontFamily: fonts.sans },
   projectChipTextActive: { color: colors.onInk },
 
-  stepper: { gap: spacing.md, paddingTop: spacing.xl, paddingHorizontal: spacing.sm },
-  step: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.hairline },
-  dotActive: { backgroundColor: colors.ink },
-  dotDone: { backgroundColor: colors.mute },
-  stepLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
-  stepLabelActive: { color: colors.ink, fontFamily: fonts.sansMedium },
-  stepLabelTodo: { color: colors.faint },
-
-  center: { alignItems: 'center', paddingTop: spacing.xl * 2, gap: spacing.sm },
-  hint: { ...type.bodyLg, color: colors.body, fontFamily: fonts.sans },
-  hintSmall: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans, textAlign: 'center' },
-  errorText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansMedium },
-  retry: {
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: 8,
-    borderColor: colors.hairline,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  retryText: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
-
-  genPill: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono, letterSpacing: 1 },
-
-  generate: {
-    backgroundColor: colors.canvasElevated,
-    borderColor: colors.hairline,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: rounded.md ?? 14,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    gap: spacing.xxs,
-  },
-  generateOff: { opacity: 0.6 },
-  morning: {
-    backgroundColor: colors.canvasElevated,
-    borderColor: colors.hairline,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: rounded.md ?? 14,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    gap: spacing.xxs,
-    marginTop: spacing.sm,
-  },
-  morningText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansSemiBold },
-  generateText: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansSemiBold },
-  generateSub: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
   emptyList: { ...type.bodyMd, color: colors.faint, fontFamily: fonts.sans, textAlign: 'center', paddingTop: spacing.lg },
 
   histRow: {

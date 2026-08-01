@@ -664,7 +664,11 @@ export async function updateProject(id: string, patch: Partial<Project>): Promis
     const { fixtureUpdateProject } = await import('./fixtures');
     return fixtureUpdateProject(id, fields);
   }
-  const { error } = await supabase().from('projects').update(fields).eq('id', id);
+  // 상태가 바뀐 시각을 남긴다 (supabase/rudy-project-status.sql). 이게 없으면 아침 브리핑이
+  // "이번 주에 Caselab을 끝냈다"를 원리상 못 본다 — 파편 0개가 침묵인지 완료인지 구분이 안 되고,
+  // 실제로 2026-08-01에 그걸 "완전히 멈췄다"로 오독했다.
+  const stamped = 'status' in fields ? { ...fields, status_changed_at: new Date().toISOString() } : fields;
+  const { error } = await supabase().from('projects').update(stamped).eq('id', id);
   if (error) throw error;
 }
 
