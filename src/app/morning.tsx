@@ -12,8 +12,17 @@ import {
   QuietRow,
   RhythmBars,
 } from '@/components/MorningViz';
-import { feedDateLabel } from '@/lib/dates';
-import { answerQuestion, fetchTodayMorning, type MorningBrief } from '@/lib/morning';
+import { formatCost } from '@/lib/cost';
+import { feedDateLabel, formatTime } from '@/lib/dates';
+import {
+  answerQuestion,
+  deleteMorning,
+  fetchMorningById,
+  fetchMorningList,
+  fetchTodayMorning,
+  type MorningBrief,
+  type MorningListItem,
+} from '@/lib/morning';
 import {
   fetchFragmentsByIds,
   letGoFragment,
@@ -34,10 +43,18 @@ import type { Fragment } from '@/lib/types';
 //
 // 화면의 순서 = 읽는 순서다. **주장 먼저, 근거는 그 다음.** 숫자를 먼저 보여주면
 // 대시보드가 되고, 대시보드는 유저가 스스로 해석해야 하는 숙제를 남긴다(§4-F5의 "서사" 요구).
+type Mode = 'detail' | 'list';
+
 export default function MorningScreen() {
   const [brief, setBrief] = useState<MorningBrief | null>(null);
   const [nudgeFrag, setNudgeFrag] = useState<Fragment | null>(null);
   const [answer, setAnswer] = useState('');
+  // 지난 기록 목록 (§4-F4 확장 — 발견 화면과 같은 자리). 기본은 오늘 것 바로 보여주기라
+  // discovery.tsx와 달리 'list'가 아니라 'detail'이 초기 모드다 — "열면 이미 있어야 하는 물건"이라서.
+  const [mode, setMode] = useState<Mode>('detail');
+  const [list, setList] = useState<MorningListItem[]>([]);
+  // 목록에서 들어왔는지 — 뒤로가기가 화면을 나갈지 목록으로 돌아갈지 갈린다.
+  const [cameFromList, setCameFromList] = useState(false);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -61,6 +78,44 @@ export default function MorningScreen() {
       .then((b) => alive.current && attach(b))
       .catch(() => {});
   }, [attach]);
+
+  const refreshList = useCallback(() => {
+    fetchMorningList()
+      .then((l) => alive.current && setList(l))
+      .catch(() => {});
+  }, []);
+
+  const openList = useCallback(() => {
+    refreshList();
+    setMode('list');
+  }, [refreshList]);
+
+  const openItem = useCallback(
+    (id: string) => {
+      fetchMorningById(id)
+        .then((b) => {
+          if (!alive.current) return;
+          attach(b);
+          setCameFromList(true);
+          setMode('detail');
+        })
+        .catch(() => {});
+    },
+    [attach],
+  );
+
+  const backFromDetail = useCallback(() => {
+    if (cameFromList) setMode('list');
+    else router.back();
+  }, [cameFromList]);
+
+  const removeItem = useCallback(
+    (item: MorningListItem) => {
+      setList((cur) => cur.filter((x) => x.id !== item.id)); // 낙관적 제거
+      deleteMorning(item.id).catch(() => refreshList()); // 실패하면 되돌린다
+    },
+    [refreshList],
+  );
 
   // 넛지의 판단은 떠오르기와 같은 두 버튼이다 — 새 개념을 만들지 않는다 (§4-A3).
   const answerNudge = useCallback(
@@ -98,17 +153,53 @@ export default function MorningScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Text style={styles.headerBtn}>‹ 뒤로</Text>
-        </Pressable>
+        {mode === 'list' ? (
+          <Pressable onPress={() => setMode('detail')} hitSlop={12}>
+            <Text style={styles.headerBtn}>‹ 뒤로</Text>
+          </Pressable>
+        ) : (
+          <Pressable onPress={backFromDetail} hitSlop={12}>
+            <Text style={styles.headerBtn}>{cameFromList ? '‹ 목록' : '‹ 뒤로'}</Text>
+          </Pressable>
+        )}
         <Text style={styles.wordmark}>아침</Text>
-        <View style={styles.headerPad} />
+        {mode === 'detail' ? (
+          <Pressable onPress={openList} hitSlop={12}>
+            <Text style={styles.headerBtn}>지난 기록</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.headerPad} />
+        )}
       </View>
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.list}>
-        {!brief && <Text style={styles.empty}>오늘 아침은 아직 없다.</Text>}
+        {mode === 'list' && (
+          <>
+            {list.length === 0 && <Text style={styles.empty}>아직 기록이 없다.</Text>}
+            {list.map((item) => (
+              <Pressable key={item.id} style={styles.histRow} onPress={() => openItem(item.id)}>
+                <View style={styles.flex}>
+                  <View style={styles.histMeta}>
+                    <Text style={styles.histDate}>
+                      {feedDateLabel(item.createdAt)} · {formatTime(item.createdAt)}
+                    </Text>
+                    <Text style={styles.histCost}>{formatCost(item.costUsd)}</Text>
+                  </View>
+                  <Text style={styles.histSnip} numberOfLines={1}>
+                    {item.headline || '(제목 없음)'}
+                  </Text>
+                </View>
+                <Pressable onPress={() => removeItem(item)} hitSlop={10} style={styles.histDel}>
+                  <Text style={styles.histDelText}>지우기</Text>
+                </Pressable>
+              </Pressable>
+            ))}
+          </>
+        )}
 
-        {brief && s && (
+        {mode === 'detail' && !brief && <Text style={styles.empty}>오늘 아침은 아직 없다.</Text>}
+
+        {mode === 'detail' && brief && s && (
           <>
             <Animated.View entering={FadeInDown.duration(420)} style={styles.headlineBlock}>
               <Text style={styles.date}>{feedDateLabel(brief.createdAt)}요일</Text>
@@ -322,6 +413,22 @@ const styles = StyleSheet.create({
   list: { padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.md },
 
   empty: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans, marginTop: spacing.xl },
+
+  // 지난 기록 목록 — discovery.tsx의 histRow와 같은 결
+  histRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomColor: colors.hairline,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  histMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xxs },
+  histDate: { ...type.bodySm, color: colors.mute, fontFamily: fonts.mono },
+  histCost: { ...type.bodySm, color: colors.faint, fontFamily: fonts.mono, marginLeft: spacing.xxs },
+  histSnip: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
+  histDel: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xxs },
+  histDelText: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans },
 
   headlineBlock: { gap: spacing.xs, marginTop: spacing.xs, marginBottom: spacing.xs },
   date: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },

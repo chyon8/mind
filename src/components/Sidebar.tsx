@@ -48,6 +48,17 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
         >
           <Text style={styles.rowLabel}>Rudy</Text>
         </Pressable>
+        {/* 아침 브리핑 (RUDY.md §4-F4) — 데일리 카드는 오늘 날짜를 보고 있을 때만 뜬다.
+            과거 날짜를 보거나 오늘 것이 아직 없으면 카드 자체가 없어서, 여기가 항상 있는 유일한 문이다. */}
+        <Pressable
+          style={styles.row}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/morning');
+          }}
+        >
+          <Text style={styles.rowLabel}>아침</Text>
+        </Pressable>
         {/* 발견 피드 (RUDY.md §7-4) — 바깥에서 물어온다. 되떠오름과 분리된 능동적으로 노는 곳 */}
         <Pressable
           style={styles.row}

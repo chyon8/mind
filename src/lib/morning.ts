@@ -79,6 +79,37 @@ export type MorningBrief = {
   costUsd: number | null;
 };
 
+type BriefRow = { id: string; created_at: string; text: string | null; cost_usd: number | null };
+
+// 원장 행 하나를 화면이 쓰는 형태로 푼다. `fetchTodayMorning`·`fetchMorningById`가 공유한다.
+async function parseBriefRow(row: BriefRow): Promise<MorningBrief | null> {
+  if (!row.text) return null;
+  let p: Record<string, unknown>;
+  try {
+    p = JSON.parse(row.text);
+  } catch {
+    return null; // 옛 형식(마크다운)이 남아 있으면 없는 셈 친다
+  }
+  const nudge = (p.nudge ?? null) as MorningNudge | null;
+  const question = (p.question ?? null) as MorningQuestion | null;
+  const [nudgeDone, questionDone] = await Promise.all([
+    answered(nudge?.utteranceId),
+    answered(question?.utteranceId),
+  ]);
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    costUsd: row.cost_usd ?? null,
+    headline: (p.headline as string) ?? '',
+    reading: (p.reading as string[]) ?? [],
+    pattern: (p.pattern ?? null) as MorningPattern | null,
+    question: questionDone ? null : question,
+    rejected: (p.rejected as string[]) ?? [],
+    stats: p.stats as MorningStats,
+    nudge: nudgeDone ? null : nudge,
+  };
+}
+
 // 오늘 이미 만든 브리핑. 없으면 null — 없으면 그냥 없는 것이다(§2-8).
 export async function fetchTodayMorning(): Promise<MorningBrief | null> {
   if (!isConfigured) return null;
@@ -94,31 +125,63 @@ export async function fetchTodayMorning(): Promise<MorningBrief | null> {
 
   const today = dayKey(new Date().toISOString());
   const row = (data ?? []).find((r) => dayKey(r.created_at as string) === today);
-  if (!row?.text) return null;
-  let p: Record<string, unknown>;
-  try {
-    p = JSON.parse(row.text as string);
-  } catch {
-    return null; // 옛 형식(마크다운)이 남아 있으면 없는 셈 친다
+  return row ? parseBriefRow(row as BriefRow) : null;
+}
+
+// 지난 브리핑 목록 — 제목 줄(headline)만 가볍게 뽑는다. 상세는 fetchMorningById에서.
+export type MorningListItem = {
+  id: string;
+  createdAt: string;
+  headline: string;
+  costUsd: number | null;
+};
+
+export async function fetchMorningList(): Promise<MorningListItem[]> {
+  if (!isConfigured) return [];
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .from('utterances')
+    .select('id, created_at, text, cost_usd')
+    .eq('surface', 'briefing')
+    .eq('kind', 'pattern')
+    .not('text', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(60);
+  if (error) throw error;
+  const items: MorningListItem[] = [];
+  for (const r of (data ?? []) as BriefRow[]) {
+    try {
+      const p = JSON.parse(r.text as string);
+      items.push({
+        id: r.id,
+        createdAt: r.created_at,
+        headline: (p.headline as string) ?? '',
+        costUsd: r.cost_usd ?? null,
+      });
+    } catch {
+      // 옛 형식은 목록에서도 건너뛴다
+    }
   }
-  const nudge = (p.nudge ?? null) as MorningNudge | null;
-  const question = (p.question ?? null) as MorningQuestion | null;
-  const [nudgeDone, questionDone] = await Promise.all([
-    answered(nudge?.utteranceId),
-    answered(question?.utteranceId),
-  ]);
-  return {
-    id: row.id as string,
-    createdAt: row.created_at as string,
-    costUsd: (row.cost_usd as number | null) ?? null,
-    headline: (p.headline as string) ?? '',
-    reading: (p.reading as string[]) ?? [],
-    pattern: (p.pattern ?? null) as MorningPattern | null,
-    question: questionDone ? null : question,
-    rejected: (p.rejected as string[]) ?? [],
-    stats: p.stats as MorningStats,
-    nudge: nudgeDone ? null : nudge,
-  };
+  return items;
+}
+
+export async function fetchMorningById(id: string): Promise<MorningBrief | null> {
+  if (!isConfigured) return null;
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .from('utterances')
+    .select('id, created_at, text, cost_usd')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? parseBriefRow(data as BriefRow) : null;
+}
+
+// 기록에서 지우기 — discovery.tsx의 deleteBriefing과 같은 자리(사후 폐기).
+export async function deleteMorning(id: string): Promise<void> {
+  if (!isConfigured) return;
+  const { error } = await supabase().schema('rudy').from('utterances').delete().eq('id', id);
+  if (error) throw error;
 }
 
 // ⚠️ 브리핑 본문은 원장에 **JSON으로 굳어 있다** — 답해도 그 JSON은 안 바뀐다.
