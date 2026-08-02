@@ -119,8 +119,8 @@ export function DailyView() {
       <Text style={styles.dateTitle}>{feedDateLabel(selected.toISOString())}요일</Text>
 
       <ScrollView contentContainerStyle={styles.list}>
-        {/* 아침 브리핑 입구. 떠오르기와 같은 이유로 오늘을 볼 때만 선다. */}
-        <MorningCard visible={isToday} />
+        {/* 아침 브리핑 입구. 보고 있는 그 날짜의 브리핑이 있으면 선다. */}
+        <MorningCard date={selected} />
 
         {dayFragments.length === 0 ? (
           <Text style={styles.emptyText}>이 날은 아무것도 던지지 않았다</Text>

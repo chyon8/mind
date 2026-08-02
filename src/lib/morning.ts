@@ -6,7 +6,6 @@
 //
 // 타입이 `scripts/morning/{material,run}.mjs`가 만드는 페이로드와 짝이다 — 한쪽만 고치면 조용히 갈라진다.
 
-import { dayKey } from './dates';
 import { isConfigured, supabase } from './supabase';
 
 export type MorningItem = {
@@ -112,19 +111,29 @@ async function parseBriefRow(row: BriefRow): Promise<MorningBrief | null> {
 
 // 오늘 이미 만든 브리핑. 없으면 null — 없으면 그냥 없는 것이다(§2-8).
 export async function fetchTodayMorning(): Promise<MorningBrief | null> {
+  return fetchMorningByDate(new Date());
+}
+
+// 특정 날짜에 만든 브리핑 — 데일리에서 그 날짜를 보고 있을 때 그 날의 카드를 보여주는 용도.
+export async function fetchMorningByDate(date: Date): Promise<MorningBrief | null> {
   if (!isConfigured) return null;
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
   const { data, error } = await supabase()
     .schema('rudy')
     .from('utterances')
     .select('id, created_at, text, cost_usd')
     .eq('surface', 'briefing')
     .eq('kind', 'pattern')
+    .gte('created_at', start.toISOString())
+    .lt('created_at', end.toISOString())
     .order('created_at', { ascending: false })
-    .limit(3);
+    .limit(1);
   if (error) throw error;
 
-  const today = dayKey(new Date().toISOString());
-  const row = (data ?? []).find((r) => dayKey(r.created_at as string) === today);
+  const row = (data ?? [])[0];
   return row ? parseBriefRow(row as BriefRow) : null;
 }
 

@@ -189,7 +189,11 @@ export default function Input() {
               style={styles.projectScroll}
             >
               <View style={styles.projectRow}>
-                {[{ id: null as string | null, name: 'Inbox' }, ...projects].map((p) => {
+                {[
+                  { id: null as string | null, name: 'Inbox' },
+                  // 완료·중단된 프로젝트는 던지기 대상에서 뺀다 — 끝난 프로젝트에 새 파편이 붙는 걸 막는다
+                  ...projects.filter((p) => p.status !== 'done' && p.status !== 'paused'),
+                ].map((p) => {
                   const active =
                     p.id === null ? projectIds.length === 0 : projectIds.includes(p.id);
                   return (
