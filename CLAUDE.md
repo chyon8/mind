@@ -18,6 +18,10 @@
   물을 때만 연다. **RUDY-BUILD.md도 마찬가지 — 착수 순서표가 이미 폐기됐다.**
 - **RUDY-DISCOVERY.md** — 발견 브리핑(§10-7)의 판단 기준·렌즈·통한 예시. **발견/브리핑 작업
   전 반드시 읽는다.** 퀄리티가 코드가 아니라 이 기준에서 나오므로 유일한 기준 문서다.
+- **RUDY-DISCOVERY-ARCHIVE.md — 열지 마라.** 발견 기준의 개발 기록(실사용 튜닝 §7-b~§7-f ·
+  만료된 결정 §0·§8 · Edge 전용 §10)이다. 2026-08-02에 RUDY-DISCOVERY가 501줄까지 자라
+  **발견을 한 번 돌릴 때마다 모델이 전문을 읽고 있어서** 갈랐다. 절 번호는 원본 그대로라
+  코드 주석의 `RUDY-DISCOVERY §7-f` 같은 참조는 여기서 찾으면 된다.
 
 스택: Expo(React Native + TypeScript) + expo-share-intent + Supabase. 사용자는 한 명.
 
