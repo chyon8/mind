@@ -97,6 +97,19 @@ function fragBlock(f: Frag, projects: Proj[]): string {
   return lines.join('\n');
 }
 
+// more_like가 종류를 뽑을 재료 (2026-08-02). 예전엔 앱이 만든 질문 문장(제목 80자)이 전부였다.
+// 링크인데 제목이 아직 안 붙었으면 남는 건 퍼센트 인코딩된 URL뿐이라 종류를 못 뽑는다 —
+// 실측: 잘린 apps.apple.com URL에서 "지키자"만 건져 앱 차단 앱을 퍼즐 게임으로 읽고
+// 테트리스·애니팡을 물어왔다. 그럴 땐 null로 돌려 바깥에 아예 안 나간다 (§2-8 침묵).
+function moreLikeMaterial(f: Frag): string | null {
+  const title = (f.type === 'link' ? f.link_title : f.content)?.replace(/\s+/g, ' ').trim();
+  if (!title) return null;
+  const lines = [`제목: ${title.slice(0, 300)}`];
+  if (f.link_description) lines.push(`설명: ${f.link_description.replace(/\s+/g, ' ').slice(0, 600)}`);
+  if (f.note) lines.push(`내가 덧붙인 말: ${f.note.replace(/\s+/g, ' ').slice(0, 400)}`);
+  return lines.join('\n');
+}
+
 // 열거 경로용 한 줄 (2026-07-25). fragBlock은 파편 하나가 여러 줄이라 전 파편에 곱하면
 // 컨텍스트가 터진다 — 여기선 한 파편 = 한 줄. 링크의 URL은 안 싣는다(제목·설명이 신호 전부고,
 // 원본 주소가 필요하면 유저가 그 파편을 탭한다). id는 남긴다 — 답에서 링크로 걸어야 하니까.
@@ -220,6 +233,13 @@ JSON만 출력: {"topics":["..."],"type":null,"period":null,"intent":"other","ou
 const MORE_LIKE_SYS = `사용자가 저장해둔 것 하나를 준다. 그것과 **같은 종류의 다른 것**을 바깥(웹)에서
 찾기 위한 검색어를 만든다.
 
+입력은 제목 한 줄이 아니라 파편 원본이다 — 제목 / 설명 / 내가 덧붙인 말이 온다.
+- **설명이 종류를 정한다.** 제목은 낚시거나 은유일 수 있다. 실측: 유튜브 제목
+  "Make anything sound cinematic"만 보고 "시네마틱 사운드 도구"로 잡았는데, 설명엔
+  "effects pedal"이라고 적혀 있었다 — 하드웨어 페달을 두고 플러그인 쇼핑몰을 물어왔다.
+- **덧붙인 말이 있으면 그게 각도다.** 이 사람이 왜 저장했는지가 거기 있다.
+  그 각도로 종류를 좁혀라 (예: 덧이 "직접 만드는 판이 있다"면 완제품이 아니라 자작 쪽).
+
 topics — 웹 검색어 1~3개:
 - 먼저 이게 **어떤 종류의** 것인지 규정해라 (무슨 물건인지, 무슨 장르인지, 무슨 방식인지).
   그 다음 그 종류를 찾는 말로 쓴다.
@@ -248,18 +268,20 @@ const PERIODS = ['today', 'yesterday', 'week', 'month'];
 
 // recent = 최근 대화 몇 줄. "그거/이거" 같은 지시어를 여기서 실제 소재로 풀어야 검색이 조준된다.
 // 이게 없어서 "오늘 뭐 남겼지 → 그거 찾아봐"의 '그거'가 헛돌았다 (2026-07-21 유저 지적).
+//
+// material — more_like일 때 종류를 뽑을 재료(파편 원본). 있으면 질문 문장 대신 이게 간다.
 async function searchQueries(
   question: string,
   recent: string,
-  moreLike: boolean,
+  material: string | null,
   onUsage?: UsageSink,
   meta?: Record<string, string>,
 ): Promise<Extracted> {
   const user = recent ? `<최근대화>\n${recent}\n</최근대화>\n\n질문: ${question}` : question;
   const raw = await complete(
     [
-      { role: 'system', content: moreLike ? MORE_LIKE_SYS : EXTRACT_SYS },
-      { role: 'user', content: moreLike ? question : user },
+      { role: 'system', content: material ? MORE_LIKE_SYS : EXTRACT_SYS },
+      { role: 'user', content: material ?? user },
     ],
     FAST_MODEL,
     onUsage,
@@ -270,7 +292,7 @@ async function searchQueries(
     ? p.topics.filter((s: unknown) => typeof s === 'string' && s.trim()).slice(0, 3)
     : [];
   // more_like는 칩 하나가 만든 고정 요청이다 — 갈래도 기간도 판정할 게 없고 바깥은 확정이다.
-  if (moreLike) {
+  if (material) {
     return { topics, type: null, period: null, intent: 'other', outward: 'go' };
   }
   return {
@@ -333,6 +355,17 @@ Deno.serve(async (req) => {
   // 하나의 request_id로 묶는다. "각 응답마다 얼마" 표시의 원천.
   const cost = costTracker(supabase, { requestId: crypto.randomUUID(), conversationId });
 
+  // 물고 있는 파편은 두 군데서 쓴다: more_like의 검색어 재료(바로 아래)와 <물고있는파편> 블록(맨 끝).
+  // 한 번만 읽고 promise를 돌려 쓴다.
+  const pinnedPromise: Promise<Frag | null> = pinnedId
+    ? supabase
+        .from('fragments')
+        .select(FRAG_COLS)
+        .eq('id', pinnedId)
+        .single()
+        .then(({ data }) => (data as Frag) ?? null, () => null)
+    : Promise.resolve(null);
+
   // 이력은 질문과 무관하게 읽을 수 있다 — 임베딩·검색과 병렬로 (첫 토큰까지의 시간이 체감이다)
   const historyPromise = supabase
     .schema('rudy')
@@ -366,17 +399,25 @@ Deno.serve(async (req) => {
     .join('\n');
 
   // 검색어를 뽑는다. 실패하면 질문 그대로 — 재작성이 죽어도 채팅은 살아야 한다.
+  //
+  // more_like의 재료는 **질문 문장이 아니라 파편 원본**이다 (2026-08-02). 앱이 만든 문장엔
+  // 제목 80자밖에 안 들어 있어서 설명·덧붙임에 있는 결정적 단서(무슨 물건인지, 왜 저장했는지)를
+  // 통째로 버리고 있었다. 재료가 없으면(제목 미도착) 종류를 못 뽑으므로 바깥에 안 나간다.
   const moreLike = mode === 'more_like';
-  const { topics, type, period, intent, outward } = await searchQueries(
-    question,
-    recent,
-    moreLike,
-    cost.track('chat.rewrite', FAST_MODEL),
-    cost.meta('chat.rewrite'),
-  ).catch((e) => {
-    console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
-    return { topics: [] as string[], type: null, period: null, intent: 'other', outward: 'no' as OutwardMode };
-  });
+  const pinnedFrag = await pinnedPromise; // 위에서 이미 띄운 조회 (물고 온 게 없으면 즉시 null)
+  const material = moreLike && pinnedFrag ? moreLikeMaterial(pinnedFrag) : null;
+  const { topics, type, period, intent, outward } = moreLike && !material
+    ? { topics: [] as string[], type: null, period: null, intent: 'other', outward: 'no' as OutwardMode }
+    : await searchQueries(
+        question,
+        recent,
+        material,
+        cost.track('chat.rewrite', FAST_MODEL),
+        cost.meta('chat.rewrite'),
+      ).catch((e) => {
+        console.warn('[chat] 질의 재작성 실패 → 질문 원문으로 검색', e);
+        return { topics: [] as string[], type: null, period: null, intent: 'other', outward: 'no' as OutwardMode };
+      });
 
   // 바깥 검색은 **명시적 요청(go)일 때만** 뻗는다 (§2-8 침묵 기본값 + 유저 통제). RAG와 병렬로.
   // 'ask'면 안 뒤지고 프롬프트가 "바깥에서 찾아볼까?"를 물어보게 한다. 실패해도 채팅은 산다.
@@ -609,12 +650,9 @@ Deno.serve(async (req) => {
   const web = await outwardPromise; // 바깥 검색 결과 (없으면 빈 문자열). history는 위에서 이미 읽음.
 
   // 물고 들어온 파편 (§판 B) — 유저가 "이걸 놓고 얘기하자"고 명시한 것이다. 검색 결과가 아니라서
-  // <근거>에 섞지 않는다. 갈래 판정에도 안 쓴다 — 여기 손대면 채팅 전체가 흔들린다.
-  let pinnedBlock = '';
-  if (pinnedId) {
-    const { data } = await supabase.from('fragments').select(FRAG_COLS).eq('id', pinnedId).single();
-    if (data) pinnedBlock = fragBlock(data as Frag, []);
-  }
+  // <근거>에 섞지 않는다. 평소 갈래 판정에도 안 쓴다 — 여기 손대면 채팅 전체가 흔들린다.
+  // (예외는 more_like 하나. 거긴 이 파편이 곧 질문이라 검색어를 여기서 뽑는다 — 위 참조.)
+  const pinnedBlock = pinnedFrag ? fragBlock(pinnedFrag, []) : '';
 
   // ⚠️ UTC가 아니라 KST 기준 오늘. UTC로 넣으면 KST 새벽에 루디가 어제를 오늘로 안다.
   const today = kstToday();

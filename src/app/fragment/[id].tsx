@@ -229,6 +229,8 @@ export default function FragmentDetail() {
   }
 
   const isLink = fragment.type === 'link';
+  // 링크 메타(제목)는 저장 뒤에 따로 붙는다 — 그 전엔 바깥으로 나갈 재료가 없다
+  const titlePending = isLink && !fragment.link_title;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -278,6 +280,10 @@ export default function FragmentDetail() {
             multiline
             autoFocus={noteEditing}
             value={note}
+            // 빈 덧붙임에 바로 탭해 들어온 경우 noteEditing이 false다 — 첫 글자를 치는 순간
+            // note가 채워져 이 분기(`!note`)가 깨지고 TextInput이 통째로 사라졌다(키보드 꺼짐).
+            // 포커스 자체를 편집 시작으로 본다.
+            onFocus={() => setNoteEditing(true)}
             onChangeText={setNote}
             onEndEditing={saveNote}
             onBlur={() => {
@@ -339,20 +345,31 @@ export default function FragmentDetail() {
           >
             <Text style={styles.askLabel}>채팅하기</Text>
           </Pressable>
-          {/* 바깥. 소재의 이름이 아니라 **종류**로 찾는다 — 그 분기는 서버가 mode로 받는다. */}
+          {/* 바깥. 소재의 이름이 아니라 **종류**로 찾는다 — 그 분기는 서버가 mode로 받는다.
+              종류를 뽑는 재료는 이 문장이 아니라 **파편 원본**이다 — fid로 물려 보낸다.
+              제목 한 줄만 보내던 때는 유튜브 제목의 "cinematic"만 보고 플러그인 쇼핑몰을
+              물어왔다(2026-08-02 로그). 설명·덧붙임에 "이펙터 페달"이 적혀 있었는데도.
+              문장은 전송하지 않고 입력창에 채워만 둔다 — 고치고 보낼 수 있어야 한다. */}
           <Pressable
             onPress={() =>
               router.push(
-                `/chat?mode=more_like&q=${encodeURIComponent(
+                `/chat?fid=${fragment.id}&mode=more_like&draft=${encodeURIComponent(
                   `『${subjectOf(fragment)}』 같은 종류로 바깥에 뭐가 또 있을까?`,
                 )}`,
               )
             }
-            style={styles.askChip}
+            disabled={titlePending}
+            style={[styles.askChip, titlePending && styles.askChipOff]}
           >
-            <Text style={styles.askLabel}>more like this</Text>
+            <Text style={[styles.askLabel, titlePending && styles.askLabelOff]}>more like this</Text>
           </Pressable>
         </View>
+
+        {/* 링크 제목이 아직 안 붙은 채로 나가면 남는 재료가 퍼센트 인코딩된 URL뿐이라
+            종류를 못 뽑는다 — 실제로 앱 차단 앱을 "퍼즐 게임"으로 읽고 애니팡을 물어왔다. */}
+        {titlePending && (
+          <Text style={styles.similarEmpty}>링크 제목을 아직 못 가져왔다 — 잠시 뒤 다시 열면 바깥으로 나갈 수 있다</Text>
+        )}
 
         {/* 안쪽 목록 — 열면 touch되지 않는다(이 화면 자체가 그렇다). 무덤도 나온다. */}
         {similarLoading && <Text style={styles.similarEmpty}>찾는 중…</Text>}
@@ -675,6 +692,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxs,
   },
   askLabel: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  askChipOff: { borderColor: colors.faint, opacity: 0.5 },
+  askLabelOff: { color: colors.faint },
   // 안쪽 유사 파편 — 날짜 + 본문 두 줄. 카드로 만들지 않는다(여긴 목록이 아니라 각주다).
   similarList: { gap: spacing.md, marginTop: spacing.md },
   similarDate: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },

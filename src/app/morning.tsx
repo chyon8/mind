@@ -132,6 +132,30 @@ export default function MorningScreen() {
     [nudgeFrag, brief],
   );
 
+  // 넛지에서 한 발 더 (§4-A3 → §4-D1). 안 건드린 이유가 **리서치를 안 해서**일 수 있으니
+  // 판단을 재촉하는 대신 재료를 대신 구해온다. 칩을 누르는 것이 D1의 승인이다.
+  //
+  // 여기서 검색하지 않는다 — 바깥으로 나가는 길은 이미 채팅에 있다(`mode=more_like`).
+  // 그 모드라야 소재의 **이름**이 아니라 **종류**로 검색어를 뽑는다. 이름으로 가면
+  // 같은 물건 파는 쇼핑몰·미러 사이트만 돌아온다(chat/index.ts MORE_LIKE_SYS의 실측 실패).
+  //
+  // 원장엔 안 적는다. 이건 넛지에 대한 **답이 아니라** 답하기 위한 우회라서, 갔다 와도
+  // 카드는 그대로 남고 판단은 여전히 흘려보내기/기억하기 둘 중 하나로 한다.
+  //
+  // 파편은 fid로 물려 보낸다 — 서버가 종류를 뽑는 재료는 이 문장이 아니라 파편 원본(설명·덧붙임)이다.
+  // 문장은 입력창에 채워만 둔다(전송 안 함). 칩을 누르는 것이 D1의 승인이고, 보내기가 확인이다.
+  const researchNudge = useCallback(() => {
+    const fr = nudgeFrag;
+    if (!fr) return;
+    const raw = (fr.link_title || fr.content || '').replace(/\s+/g, ' ').trim();
+    const subject = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
+    router.push(
+      `/chat?fid=${fr.id}&mode=more_like&draft=${encodeURIComponent(
+        `『${subject}』 — 저장해두고 계속 안 건드렸어. 할지 말지 정하게 바깥에서 후보를 찾아서 추려줘.`,
+      )}`,
+    );
+  }, [nudgeFrag]);
+
   // 성찰 질문. 답하면 자기 진술로 쌓이고(§4-B2), 넘기면 그냥 사라진다 — 재촉하지 않는다(§4-F3).
   const sendAnswer = useCallback(async () => {
     const q = brief?.question;
@@ -250,6 +274,15 @@ export default function MorningScreen() {
                 </Pressable>
                 <Text style={styles.nudgeQuestion}>{brief.nudge.question}</Text>
                 <View style={styles.actions}>
+                  {/* link 타입에만 건다 — 실측(2026-08-03): 넛지 후보 50개 중 88%가 text
+                      (에세이·개발 메모·생각 조각)라 "바깥에서 후보 찾아줄까"가 말이 안 됐다.
+                      link만 "이거 같은 종류로 또 뭐 있나"가 자연스러운 질문이 된다.
+                      판단(흘려보내기·기억하기)과 다른 종류의 행동이라 반대쪽에 둔다. */}
+                  {nudgeFrag.type === 'link' && (
+                    <Pressable onPress={researchNudge} hitSlop={8} style={styles.nudgeAsk}>
+                      <Text style={styles.nudgeAskLabel}>후보 찾아줄까</Text>
+                    </Pressable>
+                  )}
                   <View style={styles.spacer} />
                   <Pressable onPress={() => answerNudge('dismissed')} hitSlop={8}>
                     <Text style={styles.letGo}>흘려보내기</Text>
@@ -481,6 +514,15 @@ const styles = StyleSheet.create({
   },
   nudgeBody: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sans },
   nudgeQuestion: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  // 파편 상세의 원탭 칩과 같은 결 — 둘 다 "루디에게 넘기는 문"이라 모양을 맞춘다
+  nudgeAsk: {
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: rounded.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  nudgeAskLabel: { ...type.bodySm, color: colors.body, fontFamily: fonts.sans },
   actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   spacer: { flex: 1 },
   letGo: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },

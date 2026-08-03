@@ -65,8 +65,8 @@ type Turn = { key: string; at: string; q: string; a: string; cited: string[]; no
 // 두고 본문으로 흐른다 — 여백에 적힌 사서의 메모처럼. 유저 말은 오른쪽 카드로 접힌다.
 export default function Chat() {
   // 원탭 진입 (§4-C1) — 파편 상세의 칩이 질문을 들고 들어온다.
-  // q = 받자마자 자동 전송 / fid = 파편을 물고만 들어온다(전송 안 함) / mode = 서버 프롬프트 분기.
-  const { q, fid, mode: entryMode } = useLocalSearchParams<{ q?: string; fid?: string; mode?: string }>();
+  // draft = 입력창에 채워만 둔다(전송 안 함) / fid = 파편을 물고 들어온다 / mode = 서버 프롬프트 분기.
+  const { draft, fid, mode: entryMode } = useLocalSearchParams<{ draft?: string; fid?: string; mode?: string }>();
   const [mode, setMode] = useState<'home' | 'chat'>('home');
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -80,7 +80,6 @@ export default function Chat() {
   const abortRef = useRef<AbortController | null>(null);
   // 자발적 연결로 나온 파편 → 원장 id. 그 파편을 열면 루디에 대한 acted다 (§6-6).
   const linked = useRef<Record<string, string>>({});
-  const autoSent = useRef(false);
   // 물고 있는 파편 (fid 진입). 놓을 때까지 이 대화의 모든 턴에 같이 간다.
   const [pinned, setPinned] = useState<Fragment | null>(null);
   const insets = useSafeAreaInsets();
@@ -197,19 +196,23 @@ export default function Chat() {
     [conversationId, phase, open, pinned],
   );
 
-  // 원탭 진입은 타이핑 없이 바로 물어본다 — 프리필만 하면 결국 한 번 더 눌러야 한다.
-  // send를 ref로 참조해 effect가 send 재생성마다 다시 돌지 않게 한다.
-  const sendRef = useRef(send);
-  sendRef.current = send;
   // 원탭 진입은 목록을 거치지 않는다 — 질문을 들고 들어온 것이므로 바로 새 대화로 간다.
-  // mode는 이 첫 턴에만 실린다. 이어서 타이핑하는 말은 평소 갈래 판정을 그대로 받는다.
+  // 자동 전송은 안 한다 (2026-08-02에 뒤집었다). 예전엔 칩이 곧바로 쐈는데, 바깥 검색은
+  // 되돌릴 수 없고 문장이 파편 제목으로 기계 생성돼서 고칠 자리가 필요했다. 보내기 한 번이
+  // 확인을 겸한다.
   useEffect(() => {
-    if (q && !autoSent.current) {
-      autoSent.current = true;
-      setMode('chat');
-      sendRef.current(q, entryMode);
-    }
-  }, [q, entryMode]);
+    if (!draft) return;
+    setMode('chat');
+    setInput(draft);
+  }, [draft]);
+
+  // mode는 이 첫 턴에만 실린다. 이어서 타이핑하는 말은 평소 갈래 판정을 그대로 받는다.
+  const entryModeRef = useRef(entryMode);
+  const sendInput = useCallback(() => {
+    const m = entryModeRef.current;
+    entryModeRef.current = undefined;
+    send(input, m);
+  }, [input, send]);
 
   // fid 진입 — 전송하지 않는다. 파편만 물고 대화 화면에 들어간다(뭘 물을지는 여기서 정한다).
   useEffect(() => {
@@ -441,7 +444,7 @@ export default function Chat() {
               </Pressable>
             ) : (
               <Pressable
-                onPress={() => send(input)}
+                onPress={sendInput}
                 disabled={!input.trim()}
                 style={[styles.send, !input.trim() && styles.sendOff]}
                 hitSlop={8}
