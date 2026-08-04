@@ -49,19 +49,23 @@ export function MorningCard({ date }: { date: Date }) {
       style={[styles.card, !brief && styles.cardIdle]}
       onPress={() => router.push('/morning')}
     >
-      <View style={styles.head}>
-        <Text style={styles.eyebrow}>아침</Text>
-        <Text style={styles.chevron}>›</Text>
-      </View>
       {brief ? (
         <>
+          <View style={styles.head}>
+            <Text style={styles.eyebrow}>아침</Text>
+            <Text style={styles.chevron}>›</Text>
+          </View>
           <Text style={styles.headline} numberOfLines={3}>
             {brief.headline}
           </Text>
           <BandBar bands={brief.stats.bands} />
         </>
       ) : (
-        <Text style={styles.idle}>오늘 아침은 아직 없다</Text>
+        <View style={styles.idleRow}>
+          <Text style={styles.eyebrow}>아침</Text>
+          <Text style={styles.idle}>아직 없다</Text>
+          <Text style={styles.chevron}>›</Text>
+        </View>
       )}
     </Pressable>
   );
@@ -79,10 +83,12 @@ const styles = StyleSheet.create({
   },
   // 아직 만들어지지 않았을 때 — 같은 카드 결에서 전체를 한 단계 죽여 "덜 와 있음"을 나타낸다.
   // 밴드 바·조용한 프로젝트 게이지와 같은 문법(opacity로 결을 뺀다), 새 모양을 안 만든다.
-  cardIdle: { opacity: 0.55 },
+  // 세로 패딩만 줄인다 — 내용이 한 줄뿐이라 브리핑 카드와 같은 여백이 굳이 필요 없다.
+  cardIdle: { opacity: 0.55, paddingVertical: spacing.xs },
   head: { flexDirection: 'row', alignItems: 'center' },
+  idleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   eyebrow: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono, letterSpacing: 1 },
   chevron: { ...type.bodyMd, color: colors.faint, fontFamily: fonts.sans, marginLeft: 'auto' },
   headline: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansMedium, marginTop: spacing.xxs },
-  idle: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans, marginTop: spacing.xxs },
+  idle: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sans },
 });
