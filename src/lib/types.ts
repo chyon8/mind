@@ -30,6 +30,9 @@ export interface Fragment {
   let_go_at: string | null; // 회상에서 흘려보낸 시각. 보여준 것만으론 기록되지 않는다
   // "다음 발견에 포함" 표시. 브리핑이 한 번 돌면 서버가 전부 내린다 — 선명도와 무관하다
   discover_next: boolean;
+  // 지정할 때 유저가 고른 슬롯 — 발견이 이걸 [확장]으로 낼지 [아이디어]로 낼지.
+  // null = 슬롯 버튼이 생기기 전(2026-08-03)에 눌린 것. 모델이 알아서 고른다.
+  discover_next_slot: 'expansion' | 'idea' | null;
   // "발견에서 제외" 표시 — discover_next의 대칭. 켜져 있으면 브리핑 재료에서 빠진다.
   // 발견에만 건다: 채팅·검색은 그대로 다 본다 (discover-skip.sql). 선명도와 무관하다.
   discover_skip: boolean;

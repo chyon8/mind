@@ -70,6 +70,7 @@ const f = (
   touch_count: 0,
   let_go_at: null,
   discover_next: false,
+  discover_next_slot: null,
   discover_skip: false,
   project_ids: [],
   ...extra,

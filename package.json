@@ -53,7 +53,8 @@
     "lint": "expo lint",
     "test": "jest",
     "morning": "node ./scripts/morning/run.mjs",
-    "discover": "node ./scripts/discover-websearch/run.mjs"
+    "discover": "node ./scripts/discover-websearch/run.mjs",
+    "discover:old": "node ./scripts/discover-websearch-old/run.mjs"
   },
   "private": true,
   "jest": {

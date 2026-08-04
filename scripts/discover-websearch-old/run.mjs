@@ -1,34 +1,26 @@
 #!/usr/bin/env node
-// 발견 **1번** — 클코 + 클로드 WebSearch, **루프 없이**.
-// **2026-07-31: 3파전 채택됨.** 유저가 매일 이 커맨드를 손으로 치고 앱에서 확인한다
-// (자동화는 안 함 — 유저 지시). 그래서 기본이 저장이다.
+// 발견 — 지금 채택판(`discover-websearch`)의 **RUDY-DISCOVERY 501줄 원본판**.
+// 2026-08-04, 유저가 "예전 기준 문서로도 돌려보고 싶다"고 해서 만들었다.
 //
-//   node scripts/discover-websearch/run.mjs             ← 만들고 원장에 저장, 앱에서 보면 된다
-//   node scripts/discover-websearch/run.mjs --material  ← 재료만 뽑고 종료 (LLM 안 태움, 공짜)
-//   node scripts/discover-websearch/run.mjs --no-save   ← 실험용. 저장 안 하고 .work/에만 남긴다
+// `discover-websearch/`를 **그대로 복사**해서 딱 하나만 바꿨다 — prompt.md가 읽는 기준
+// 문서를 `RUDY-DISCOVERY.md`(201줄, 지금 기준) 대신 `RUDY-DISCOVERY-OLD.md`(501줄, 2026-08-02
+// 자르기 전 스냅샷, 루트에 얼려둠)로 지정. 나머지 로직·모델·재시도 정책은 채택판과 동일 —
+// 그래야 "문서가 501줄이면 달라지나"만 순수하게 비교된다.
 //
-// ── 이게 뭔가 (2026-07-30 유저 지시)
+//   node scripts/discover-websearch-old/run.mjs             ← 만들고 원장에 저장, 앱에서 보면 된다
+//   node scripts/discover-websearch-old/run.mjs --material  ← 재료만 뽑고 종료 (LLM 안 태움, 공짜)
+//   node scripts/discover-websearch-old/run.mjs --no-save   ← 저장 안 하고 .work/에만 남긴다
 //
-// `discover-claude/`를 **그대로 복사**해서 **루프 지시 문단만 뒤집은** 판이다.
-// 그쪽 원본은 손대지 않았다 — 언제든 되돌아갈 안전망이다(`node scripts/discover-claude/run.mjs`).
-// `prompt.md`도 `cp`로 복사한 뒤 「하는 일」 절만 고쳤다: 재시도 금지 + 검색 병렬.
-// 나머지 문장은 글자 그대로다. `diff scripts/discover-claude/prompt.md scripts/discover-websearch/prompt.md`
-// 로 뭐가 달라졌는지 전부 볼 수 있다.
-//
-// 왜: 루프판 2차 실측이 **28턴 · 933초 · 세션 사용량 39%**였다. 원장 단가로 가르면 비싼 건
-// 재료도 검색도 아니고 **왕복 횟수**였다. 재시도를 끄면 얼마나 줄고 품질이 얼마나 상하는지 잰다.
-//
-// ⚠️ **`discover-split/`(2번)과 각도 프롬프트가 다르다.** 1번은 한 호출이 각도·검색·조립을
-//    다 하고, 2번은 각도/조립을 쪼갠 뒤 검색을 Exa로 한다. 둘을 나란히 놓고 보려는 건
-//    **"어제가 좋았던 게 프롬프트냐 WebSearch냐"** 다.
+// ⚠️ **채택판과 똑같이 `discover_next`(다음 발견에 포함) 지정을 소비하고 끈다.** 지금 지정된
+//    파편이 있으면 이 판을 돌려도 그게 없어진다 — 비교만 하고 싶으면 먼저 `--material`로
+//    재료만 보거나, 지정을 잠깐 없는 상태에서 돌려라.
 //
 // ⚠️ 실행 결과는 stdout에만 남으면 사라진다 (RUDY-STATUS 교훈) — 재료·원출력을 `.work/`에
-//    타임스탬프로 남긴다. 프롬프트를 고칠 때 뭐가 달랐는지 비교할 유일한 근거다.
+//    타임스탬프로 남긴다.
 
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-// 재료 로더는 `discover-claude/`의 것을 **가져다 쓴다 — 복제하지 않는다.**
-// 세 판(claude / websearch / split)이 같은 재료를 봐야 비교가 성립한다.
+// 재료 로더는 `discover-claude/`의 것을 그대로 쓴다 — 재료 자체는 비교 변수가 아니다.
 import { buildMaterial, client } from '../discover-claude/material.mjs';
 
 const HERE = new URL('.', import.meta.url);
@@ -36,14 +28,11 @@ const ROOT = new URL('../../', import.meta.url);
 const WORK = new URL('.work/', HERE);
 const MODEL = process.env.DISCOVER_WS_MODEL ?? 'claude-opus-5';
 
-// ⚠️ **기본이 저장이다** (2026-07-31, 채택 후 뒤집음 — `discover-claude`와 동일 기본값).
-//    비교 실험을 또 하려면 `--no-save`를 써라. 그땐 위 이유가 다시 적용된다:
-//    ① 원장에 넣으면 다음 실행 재료의 <이미 다룬 주제>가 바뀌어 비교 조건이 흔들리고
-//    ② 앱 발견 탭에서 다른 판 결과와 구분이 안 된다(전부 trigger='pull').
+// 기본이 저장이다 — 채택판과 같은 기본값(다른 값이면 "안 켜서 그런가"가 비교에 섞인다).
 const save = !process.argv.includes('--no-save');
 const materialOnly = process.argv.includes('--material');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const log = (...a) => console.log(`[discover-ws]`, ...a);
+const log = (...a) => console.log(`[discover-ws-old]`, ...a);
 
 mkdirSync(WORK, { recursive: true });
 

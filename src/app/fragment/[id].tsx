@@ -160,18 +160,23 @@ export default function FragmentDetail() {
   // "다음 발견에 포함" (RUDY-STATUS.md ①) — 다음 브리핑이 이 파편을 반드시 각도로 만든다.
   // 브리핑이 한 번 돌면 서버가 전부 내린다(brief.ts) — 한 번 나오고 끝, 또 원하면 또 누른다.
   // touch 안 한다(patch 기본값) — 표시는 "이걸 봐줘"라는 지시지 "아직 중요해"라는 판단이 아니다.
-  async function toggleDiscoverNext() {
-    if (fragment!.discover_next) {
-      await patch({ discover_next: false });
+  //
+  // 슬롯을 같이 받는다 (2026-08-03). 지정 파편은 재료 맨 위에 통째로 박히니 모델이 소재를
+  // 따라가 거의 매번 [확장]으로 착지했다 — 누를 때 유저가 이미 아는 걸 버리고 모델에게
+  // 다시 추측시키던 자리다. 판정을 시키지 않고 유저가 고른 값을 그대로 재료에 싣는다.
+  async function toggleDiscoverNext(slot: 'expansion' | 'idea') {
+    // 같은 걸 또 누르면 끈다. 다른 걸 누르면 슬롯만 갈아끼운다(개수가 안 느니 캡도 안 센다).
+    if (fragment!.discover_next && (fragment!.discover_next_slot ?? 'expansion') === slot) {
+      await patch({ discover_next: false, discover_next_slot: null });
       return;
     }
     // 상한 5개 — 다 지정하면 브리핑이 통째로 지시 이행이 되고 발견이 죽는다
-    if ((await countDiscoverNext()) >= DISCOVER_MAX) {
+    if (!fragment!.discover_next && (await countDiscoverNext()) >= DISCOVER_MAX) {
       setDiscoverFull(true);
       return;
     }
     // 포함과 제외는 같이 켜질 수 없다 — 서로를 끈다
-    await patch({ discover_next: true, discover_skip: false });
+    await patch({ discover_next: true, discover_next_slot: slot, discover_skip: false });
   }
 
   // "발견에서 제외" — 포함의 대칭. 브리핑 재료에서 이 파편이 빠진다(material.ts).
@@ -181,7 +186,7 @@ export default function FragmentDetail() {
     await patch(
       fragment!.discover_skip
         ? { discover_skip: false }
-        : { discover_skip: true, discover_next: false },
+        : { discover_skip: true, discover_next: false, discover_next_slot: null },
     );
   }
 
@@ -231,6 +236,8 @@ export default function FragmentDetail() {
   const isLink = fragment.type === 'link';
   // 링크 메타(제목)는 저장 뒤에 따로 붙는다 — 그 전엔 바깥으로 나갈 재료가 없다
   const titlePending = isLink && !fragment.link_title;
+  // 지금 켜진 슬롯. 슬롯 버튼 이전에 지정한 것(null)은 여태 사실상 [확장]으로 나갔으니 그렇게 보인다.
+  const pickedSlot = fragment.discover_next ? (fragment.discover_next_slot ?? 'expansion') : null;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -441,14 +448,23 @@ export default function FragmentDetail() {
             ⚠️ 라벨은 상태에 따라 **바꾸지 않는다** — 폭이 튄다. 켜짐은 채움으로만 말한다
             (projectChipActive와 같은 관용구). 안내·경고도 버튼이 아니라 아래 한 줄이 받는다. */}
         <Text style={styles.sectionLabel}>발견</Text>
-        {/* 포함/제외는 서로 배타적이라 한 줄에 나란히 둔다 — 둘 중 하나만 채워진다 */}
+        {/* 포함/제외는 서로 배타적이라 한 줄에 나란히 둔다 — 셋 중 하나만 채워진다.
+            포함이 둘로 갈린 건 슬롯 때문이다 — 어느 걸 눌렀냐가 곧 [확장]이냐 [아이디어]냐다. */}
         <View style={styles.discoverRow}>
           <Pressable
-            onPress={() => toggleDiscoverNext().catch(() => {})}
-            style={[styles.discoverBtn, fragment.discover_next && styles.discoverBtnOn]}
+            onPress={() => toggleDiscoverNext('expansion').catch(() => {})}
+            style={[styles.discoverBtn, pickedSlot === 'expansion' && styles.discoverBtnOn]}
           >
-            <Text style={[styles.discoverLabel, fragment.discover_next && styles.discoverLabelOn]}>
-              다음 브리핑에 포함
+            <Text style={[styles.discoverLabel, pickedSlot === 'expansion' && styles.discoverLabelOn]}>
+              더 파줘
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => toggleDiscoverNext('idea').catch(() => {})}
+            style={[styles.discoverBtn, pickedSlot === 'idea' && styles.discoverBtnOn]}
+          >
+            <Text style={[styles.discoverLabel, pickedSlot === 'idea' && styles.discoverLabelOn]}>
+              비슷한 딴 거
             </Text>
           </Pressable>
           <Pressable
@@ -465,9 +481,11 @@ export default function FragmentDetail() {
             ? `최대 ${DISCOVER_MAX}개까지 지정할 수 있다`
             : fragment.discover_skip
               ? '브리핑 재료에서 빠진다 — 검색·채팅에는 그대로 나온다'
-              : fragment.discover_next
-                ? '다음 브리핑에 한 번 나오고 자동으로 꺼진다'
-                : '지정하면 다음 브리핑이 이걸 반드시 다룬다'}
+              : pickedSlot === 'expansion'
+                ? '이 소재가 가리키는 방향을 더 판다 — 한 번 나오고 자동으로 꺼진다'
+                : pickedSlot === 'idea'
+                  ? '소재는 끊고 같은 동기를 채우는 딴 물건을 찾는다 — 한 번 나오고 자동으로 꺼진다'
+                  : '더 파줘 = 이 소재를 더 / 비슷한 딴 거 = 소재는 끊고 같은 동기의 다른 물건'}
         </Text>
 
         <View style={styles.divider} />

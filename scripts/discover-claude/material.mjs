@@ -14,7 +14,8 @@ import { createClient } from '@supabase/supabase-js';
 
 const ROOT = new URL('../../', import.meta.url);
 const WINDOW_DAYS = 90;
-const FRAG_COLS = 'id, created_at, type, content, link_title, link_description, note';
+const FRAG_COLS =
+  'id, created_at, type, content, link_title, link_description, note, discover_next_slot';
 
 export function client() {
   for (const line of readFileSync(new URL('.env', ROOT), 'utf8').split('\n')) {
@@ -107,6 +108,15 @@ export async function buildMaterial(sb) {
 
   const block = (p) =>
     [`[프로젝트: ${p.name}]`, `  설명: ${p.description ?? '(없음)'}`, ...p.fragments.map(fragLine)].join('\n');
+  // 지정 파편은 슬롯까지 유저가 골라서 누른다 (2026-08-03) — 모델이 고르는 게 아니다.
+  // 앱에서 슬롯 버튼이 생기기 전에 눌린 건 null이라 예전대로 모델에게 맡긴다(사실상 [확장]).
+  const pickedLine = (f) =>
+    f.discover_next_slot === 'idea'
+      ? `${fragLine(f)}\n      → **[아이디어]로 내라.** 이 소재 말고, 이걸 저장한 동기를 채우는 **다른 물건**을 찾아라.`
+      : f.discover_next_slot === 'expansion'
+        ? `${fragLine(f)}\n      → **[확장]으로 내라.** 이 소재가 가리키는 방향을 더 판다.`
+        : fragLine(f);
+
   const listBlock = (p) =>
     [
       `[${p.name}]${p.status === 'paused' ? ' (paused)' : ''}`,
@@ -119,7 +129,8 @@ export async function buildMaterial(sb) {
       ? [
           '=== 내가 지정한 것 (유저가 직접 "다음 발견에 포함"을 누른 파편) ===',
           '※ 이건 유저의 명시적 지시다. 반드시 각도로 만들어라.',
-          picked.map(fragLine).join('\n'),
+          '※ **슬롯도 유저가 눌러서 골랐다. 붙어 있으면 그대로 따라라 — 네가 고르는 게 아니다.**',
+          picked.map(pickedLine).join('\n'),
           '',
         ]
       : []),

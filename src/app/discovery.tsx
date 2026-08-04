@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Easing,
   Linking,
@@ -286,8 +287,17 @@ export default function Discovery() {
 
   const remove = useCallback(
     (b: Briefing) => {
-      setList((cur) => cur.filter((x) => x.id !== b.id)); // 낙관적 제거
-      deleteBriefing(b.id).catch(() => refreshList()); // 실패하면 되돌린다
+      Alert.alert('발견을 지울까?', '되돌릴 수 없다.', [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '지우기',
+          style: 'destructive',
+          onPress: () => {
+            setList((cur) => cur.filter((x) => x.id !== b.id)); // 낙관적 제거
+            deleteBriefing(b.id).catch(() => refreshList()); // 실패하면 되돌린다
+          },
+        },
+      ]);
     },
     [refreshList],
   );
