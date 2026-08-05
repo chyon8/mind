@@ -51,3 +51,4 @@ example
 
 # 클코 작업물 (재료·원출력 — 디버깅용, 커밋 안 함)
 scripts/*/.work/
+scripts/.compare/

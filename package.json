@@ -55,6 +55,7 @@
     "morning": "node ./scripts/morning/run.mjs",
     "discover": "node ./scripts/discover-websearch/run.mjs",
     "discover:p": "node ./scripts/discover-parallel/run.mjs",
+    "discover:compare": "node ./scripts/compare-discover.mjs",
     "discover:old": "node ./scripts/discover-websearch-old/run.mjs"
   },
   "private": true,
