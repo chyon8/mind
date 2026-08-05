@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CalendarStrip } from '@/components/CalendarStrip';
 import { FragmentBullet } from '@/components/FragmentBullet';
 import { MorningCard } from '@/components/MorningCard';
@@ -21,7 +21,15 @@ import { vividness } from '@/lib/vividness';
 // 화면 6.1 — 데일리 뷰. 주간 스트립의 점 투명도 = 그 파편의 현재 선명도.
 // 캘린더 스트립 자체가 기억의 지도가 된다.
 export function DailyView() {
-  const today = useMemo(() => new Date(), []);
+  // 자정을 넘겨 앱을 켜둔 채로 두면 "오늘"이 어제로 고정돼 진짜 오늘 셀이 미래로 막힌다 —
+  // 포그라운드로 돌아올 때마다 다시 잰다 (MorningCard·RecallSection과 같은 패턴).
+  const [today, setToday] = useState(() => new Date());
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') setToday(new Date());
+    });
+    return () => sub.remove();
+  }, []);
   const [selected, setSelected] = useState<Date>(today);
   const [anchor, setAnchor] = useState<Date>(today); // 스트립이 넘겨보고 있는 위치
   const [away, setAway] = useState(false); // 스트립이 오늘을 벗어났나
@@ -87,7 +95,6 @@ export function DailyView() {
   useEffect(() => onFragmentUpdated(() => loadRange(...range.current)), [loadRange]);
 
   const now = new Date();
-  const isToday = dayKey(selected.toISOString()) === dayKey(today.toISOString());
   const dayFragments = byDay[dayKey(selected.toISOString())] ?? [];
 
   async function removeFragment(fr: Fragment) {
@@ -171,8 +178,8 @@ export function DailyView() {
           })
         )}
 
-        {/* 오늘을 보고 있을 때만 떠오른다. 과거를 들여다보는 중엔 방해하지 않는다. */}
-        <RecallSection visible={isToday} />
+        {/* 어떤 날짜를 보고 있어도 항상 뜬다 — 떠오름은 오늘 파편이 아니라 감쇠재고라 날짜를 안 탄다. */}
+        <RecallSection visible />
       </ScrollView>
 
       {/* 다른 날을 보고 있거나, 스트립이 오늘이 없는 주/달을 넘겨보고 있을 때 */}

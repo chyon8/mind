@@ -54,30 +54,24 @@ const ROOT = new URL('../../', import.meta.url);
 const WORK = new URL('.work/', HERE);
 const MODEL = process.env.DISCOVER_P_MODEL ?? 'claude-opus-5';
 
-// thinking 예산 — **여기가 유일한 직접 손잡이다** (시간=출력토큰÷56, 그 95%가 thinking).
-// 단계마다 다르게 준다. 아래는 2026-08-04 A/B 실측이고 추측이 아니다:
+// thinking 예산 — **기본은 안 건드린다(설정 상속, 지금은 high).**
 //
-//   expansion  low 22초/1,174토큰  vs  medium 202초/12,436토큰 → **10배.**
-//              그런데 각도가 오히려 3개→5개로 늘고 더 구체적이었다
-//              ("BLDC haptic knob module for sale", "Jazzmaster vs Telecaster 픽업 구조").
-//              생각을 더 시킬수록 좋아지는 단계가 아니다.
-//   motive     low 389토큰 → 동기가 덜 추상화돼서 **아이디어 4개 중 3개가 앱으로 쏠렸다.**
-//              `_discovery-lib.mjs` MOTIVE_SYS가 경고한 바로 그 함정("감정에 제일 가까운
-//              상품 카테고리가 앱이라 그쪽으로 빨려간다"). medium이 25초뿐이니 여기만 산다.
-//   idea       low 253 vs medium 254토큰 — **차이가 없다.** 동기만 보는 짧은 일이라 그렇다.
-//   search     각도당 검색 1회 + 정리. 판단이 얕아도 되는 자리고, N개가 동시에 돈다.
-//   assemble   글의 질이 바로 걸린다. effort를 안 넘겨 **설정 상속값(high)**을 그대로 쓴다.
+// ⚠️ 한때 단계별로 낮춰뒀다가 되돌렸다 (2026-08-04, 유저 지적 "effort 뭐하러 고쳐?
+//    그대로 high로 둬도 빨라지는 거 아니야?"). 재보니 맞는 말이었다:
 //
-// ⚠️ n=1이다. `DISCOVER_P_EFFORT=high`를 걸면 전 단계가 한 값으로 덮여서 나란히 비교할 수 있다.
-const EFFORT = {
-  expansion: process.env.DISCOVER_P_EFFORT ?? 'low',
-  motive: process.env.DISCOVER_P_EFFORT ?? 'medium',
-  idea: process.env.DISCOVER_P_EFFORT ?? 'low',
-  // 중복 게이트만 medium이다. **각도를 low로 내리면서 깨진 게 정확히 이 축이라서**
-  // (2026-08-04 실측: 8항목 중 5개가 이미 다룬 파편에서 다시 출발) 여기서 되산다.
-  gate: process.env.DISCOVER_P_EFFORT ?? 'medium',
-  search: process.env.DISCOVER_P_EFFORT ?? 'low',
-};
+//      채택판(discover-websearch)   394~671초 · 항목 8개
+//      이 판, 전부 high             348초 · 항목 8개
+//      이 판, 단계별로 낮춤          210초 · **항목 5개**
+//
+//    **속도를 만든 건 effort가 아니라 병렬화다.** 낮춰서 번 138초의 대가가 항목 3개였고,
+//    특히 `search`를 low로 두면 검색이 죽는다 — 결과를 받은 각도가 7/8 → 4/7로 떨어졌다.
+//    얕게 던지고 "쓸 게 없다"고 일찍 포기한다. 항목 수가 깎인 진짜 원인이 이거였다.
+//
+//    각도 단계만 보면 low가 22초/1,174토큰 vs high 164초/9,535토큰으로 극적이지만,
+//    그건 벽시계의 일부일 뿐이고 전체로는 위 표가 답이다. **다시 낮추지 마라.**
+//
+// 실험용 손잡이는 남긴다: `DISCOVER_P_EFFORT=low npm run discover:p`
+const EFFORT = process.env.DISCOVER_P_EFFORT ?? null;
 
 // 중복 게이트가 자르고 남길 최소 각도 수. 과하게 자르면 브리핑이 비는데 그건 중복보다 나쁘다.
 const GATE_FLOOR = 8;
@@ -190,7 +184,7 @@ const str = (v) => (v ?? '').toString().trim();
 
 // ── 2. 각도 — 확장 ‖ (동기 → 아이디어) ───────────────────────────────────────
 // 두 갈래가 서로를 안 기다린다. 아이디어 갈래만 안에서 2단계로 순차다.
-log(`각도 뽑는 중 — 확장 ‖ 아이디어(2단계), effort=${JSON.stringify(EFFORT)}`);
+log(`각도 뽑는 중 — 확장 ‖ 아이디어(2단계)${EFFORT ? `, effort=${EFFORT} (실험)` : ''}`);
 
 const expansionPrompt = readFileSync(new URL('prompt-expansion.md', HERE), 'utf8')
   .replace('{{DISCOVERY}}', discovery)
@@ -202,7 +196,7 @@ const motivePrompt = readFileSync(new URL('prompt-motive.md', HERE), 'utf8')
 
 const [expansionAngles, ideaAngles] = await Promise.all([
   // 확장 갈래 — expansion / lens / resurface
-  runClaude(expansionPrompt, 'expansion', { effort: EFFORT.expansion }).then((raw) =>
+  runClaude(expansionPrompt, 'expansion', { effort: EFFORT }).then((raw) =>
     (parseJson(raw, 'expansion').angles ?? [])
       .filter((a) => a && ['expansion', 'lens', 'resurface'].includes(a.slot))
       .map((a) => ({
@@ -219,7 +213,7 @@ const [expansionAngles, ideaAngles] = await Promise.all([
 
   // 아이디어 갈래 — 여기가 이 판의 구조적 이득이다.
   (async () => {
-    const s1 = parseJson(await runClaude(motivePrompt, 'motive', { effort: EFFORT.motive }), 'motive');
+    const s1 = parseJson(await runClaude(motivePrompt, 'motive', { effort: EFFORT }), 'motive');
     const motives = (s1.items ?? [])
       .map((it) => ({ frag: str(it?.frag), motive: str(it?.motive), from_picked: it?.from_picked === true }))
       .filter((it) => it.motive)
@@ -233,7 +227,7 @@ const [expansionAngles, ideaAngles] = await Promise.all([
     const ideaPrompt = readFileSync(new URL('prompt-idea.md', HERE), 'utf8')
       .replace('{{DISCOVERY}}', discovery)
       .replace('{{MOTIVES}}', motives.map((m, i) => `${i + 1}. ${m.motive}`).join('\n'));
-    const s2 = parseJson(await runClaude(ideaPrompt, 'idea', { effort: EFFORT.idea }), 'idea');
+    const s2 = parseJson(await runClaude(ideaPrompt, 'idea', { effort: EFFORT }), 'idea');
     return (s2.angles ?? [])
       .map((a, i) => ({
         slot: 'idea',
@@ -286,7 +280,7 @@ async function dedupeGate(list) {
         .replace('{{ANGLES}}', numbered)
         .replace('{{PRIOR}}', prior.map((t) => `- ${t}`).join('\n')),
       'gate',
-      { effort: EFFORT.gate },
+      { effort: EFFORT },
     );
     drop = parseJson(raw, 'gate').drop ?? [];
   } catch (e) {
@@ -346,7 +340,7 @@ await Promise.all(
     try {
       const out = await runClaude(prompt, `search-${i + 1}`, {
         tools: 'WebSearch',
-        effort: EFFORT.search,
+        effort: EFFORT,
       });
       const text = out.trim();
       // 한 각도가 죽어도 나머지는 산다 — 결과 없는 각도는 조립이 버린다.
