@@ -50,7 +50,7 @@
   .err { color: #ff6b6b; font-size: 13px; min-height: 16px; }
 
   /* ---------- 레이아웃 ---------- */
-  #app { display: none; max-width: 720px; margin: 0 auto; padding: 20px 18px 80px; }
+  #app { display: none; max-width: 900px; margin: 0 auto; padding: 20px 18px 80px; }
   header.top {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 16px;
@@ -162,6 +162,60 @@
     border-top: 1px solid var(--border);
   }
   .piece { border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+
+  /* ---------- 사이드바 ---------- */
+  .layout { display: flex; gap: 28px; align-items: flex-start; }
+  .sidebar {
+    width: 104px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;
+    position: sticky; top: 20px;
+  }
+  .navBtn {
+    background: none; border: 0; text-align: left; color: var(--muted);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px;
+  }
+  .navBtn:hover { color: var(--text); }
+  .navBtn.on { background: var(--panel); color: var(--text); font-weight: 600; }
+  .main { flex: 1; min-width: 0; }
+  .hidden { display: none !important; }
+
+  /* ---------- 헤매기 ---------- */
+  .filters .chip.off { opacity: .45; text-decoration: line-through; }
+  .filterHint { color: var(--muted); font-size: 12px; margin: -4px 0 14px; }
+  .end { color: var(--muted); font-size: 12px; text-align: center; padding: 20px 0; }
+
+  /* ---------- 발견 ---------- */
+  .histRow {
+    display: flex; align-items: center; gap: 10px; padding: 10px 2px;
+    border-bottom: 1px solid var(--border);
+  }
+  .histMain { flex: 1; min-width: 0; cursor: pointer; }
+  .histMeta { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .pushBadge {
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+    font-size: 11px; color: var(--muted);
+  }
+  .histDate { color: var(--muted); font-size: 12px; }
+  .histTitle { font-size: 14px; }
+  .histDel {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 7px; padding: 4px 10px; font-size: 12px; flex-shrink: 0;
+  }
+  .histDel:hover { color: #ff6b6b; border-color: #5c2f2f; }
+  .dCard {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px;
+  }
+  .slotBadge { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .slotBadge.idea { color: var(--text); font-weight: 600; }
+  .dCardTitle { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .dCardBody { color: var(--text); font-size: 14px; line-height: 1.6; }
+  .dCardBody p { margin: 0 0 10px; }
+  .dCardBody p:last-child { margin-bottom: 0; }
+  .dCardBody ul, .dCardBody ol { margin: 0 0 10px; padding-left: 20px; }
+  .dCardBody a { color: var(--link); }
+  .dCardBody code { background: var(--panel-2); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+  .dCardBody pre { background: var(--panel-2); border-radius: 8px; padding: 10px; overflow-x: auto; }
+  .footnote { color: var(--muted); font-size: 13px; font-style: italic; margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -180,22 +234,51 @@
     <button class="ghost" id="logoutBtn">로그아웃</button>
   </header>
 
-  <div class="composer">
-    <textarea id="newContent" placeholder="파편을 남겨…"></textarea>
-    <div class="tagpick" id="composerTags"></div>
-    <div class="row">
-      <span class="err" id="addErr"></span>
-      <button class="add" id="addBtn">추가</button>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar">
+      <button class="navBtn on" data-view="fragments">파편</button>
+      <button class="navBtn" data-view="wander">헤매기</button>
+      <button class="navBtn" data-view="discovery">발견</button>
+    </nav>
+
+    <div class="main">
+      <div id="fragmentsView">
+        <div class="composer">
+          <textarea id="newContent" placeholder="파편을 남겨…"></textarea>
+          <div class="tagpick" id="composerTags"></div>
+          <div class="row">
+            <span class="err" id="addErr"></span>
+            <button class="add" id="addBtn">추가</button>
+          </div>
+        </div>
+
+        <div class="controls">
+          <input id="search" type="search" placeholder="검색…" />
+          <div class="filters" id="filters"></div>
+        </div>
+
+        <div class="count" id="count"></div>
+        <div id="list"></div>
+      </div>
+
+      <div id="wanderView" class="hidden">
+        <div class="filters" id="wanderFilters"></div>
+        <div class="filterHint">프로젝트를 우클릭하면 전체에서 뺀다</div>
+        <div id="wanderList"></div>
+        <div class="end hidden" id="wanderEnd">여기까지</div>
+      </div>
+
+      <div id="discoveryView" class="hidden">
+        <div id="discoveryHome">
+          <div id="discoveryList"></div>
+        </div>
+        <div id="discoveryResult" class="hidden">
+          <button class="ghost" id="discoveryBack" style="margin-bottom: 14px;">‹ 목록</button>
+          <div id="discoveryCards"></div>
+        </div>
+      </div>
     </div>
   </div>
-
-  <div class="controls">
-    <input id="search" type="search" placeholder="검색…" />
-    <div class="filters" id="filters"></div>
-  </div>
-
-  <div class="count" id="count"></div>
-  <div id="list"></div>
 </div>
 
 <div class="modalBackdrop" id="detailBackdrop">
@@ -342,6 +425,48 @@ function fmtDate(iso) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// 파편 카드 하나 — 리스트와 헤매기가 같이 쓴다.
+function fragmentCardEl(f) {
+  const card = el('div', 'card');
+
+  if (f.type === 'link') {
+    const a = el('a', 'content');
+    a.href = f.content; a.target = '_blank'; a.rel = 'noreferrer';
+    a.textContent = f.link_title || f.content;
+    card.appendChild(a);
+  } else {
+    const c = el('div', 'content');
+    c.textContent = f.content;
+    card.appendChild(c);
+  }
+
+  if (f.note) {
+    const n = el('div', 'note');
+    n.textContent = f.note;
+    card.appendChild(n);
+  }
+
+  const meta = el('div', 'meta');
+  const date = el('span'); date.textContent = fmtDate(f.created_at);
+  meta.appendChild(date);
+  for (const pid of f.project_ids) {
+    const t = el('span', 'ptag'); t.textContent = projName(pid);
+    if (t.textContent) meta.appendChild(t);
+  }
+  const copy = el('button', 'copy'); copy.textContent = '복사';
+  copy.onclick = async (e) => {
+    e.stopPropagation();
+    await navigator.clipboard.writeText(f.content);
+    copy.textContent = '복사됨'; copy.classList.add('done');
+    setTimeout(() => { copy.textContent = '복사'; copy.classList.remove('done'); }, 1200);
+  };
+  meta.appendChild(copy);
+  card.appendChild(meta);
+
+  card.onclick = () => openDetail(f);
+  return card;
+}
+
 function renderList(frs) {
   const list = $('list');
   list.innerHTML = '';
@@ -352,46 +477,7 @@ function renderList(frs) {
     list.appendChild(e);
     return;
   }
-  for (const f of frs) {
-    const card = el('div', 'card');
-
-    if (f.type === 'link') {
-      const a = el('a', 'content');
-      a.href = f.content; a.target = '_blank'; a.rel = 'noreferrer';
-      a.textContent = f.link_title || f.content;
-      card.appendChild(a);
-    } else {
-      const c = el('div', 'content');
-      c.textContent = f.content;
-      card.appendChild(c);
-    }
-
-    if (f.note) {
-      const n = el('div', 'note');
-      n.textContent = f.note;
-      card.appendChild(n);
-    }
-
-    const meta = el('div', 'meta');
-    const date = el('span'); date.textContent = fmtDate(f.created_at);
-    meta.appendChild(date);
-    for (const pid of f.project_ids) {
-      const t = el('span', 'ptag'); t.textContent = projName(pid);
-      if (t.textContent) meta.appendChild(t);
-    }
-    const copy = el('button', 'copy'); copy.textContent = '복사';
-    copy.onclick = async (e) => {
-      e.stopPropagation();
-      await navigator.clipboard.writeText(f.content);
-      copy.textContent = '복사됨'; copy.classList.add('done');
-      setTimeout(() => { copy.textContent = '복사'; copy.classList.remove('done'); }, 1200);
-    };
-    meta.appendChild(copy);
-    card.appendChild(meta);
-
-    card.onclick = () => openDetail(f);
-    list.appendChild(card);
-  }
+  for (const f of frs) list.appendChild(fragmentCardEl(f));
 }
 
 // ---------- 상세 모달 (수정 / 묻기·파내기 / 삭제) ----------
@@ -563,6 +649,358 @@ async function deleteDetailFragment() {
   if (error) { alert('삭제 실패: ' + error.message); return; }
   closeDetail();
   await refresh();
+}
+
+// ---------- 사이드바 ----------
+let currentView = 'fragments';
+
+document.querySelectorAll('.navBtn').forEach((btn) => {
+  btn.onclick = () => switchView(btn.dataset.view);
+});
+
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.navBtn').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
+  $('fragmentsView').classList.toggle('hidden', view !== 'fragments');
+  $('wanderView').classList.toggle('hidden', view !== 'wander');
+  $('discoveryView').classList.toggle('hidden', view !== 'discovery');
+  if (view === 'wander' && !wanderStarted) { wanderStarted = true; startWander(); }
+  if (view === 'discovery' && !discoveryStarted) { discoveryStarted = true; startDiscovery(); }
+}
+
+// ---------- 선명도 (lib/vividness.ts 그대로 포팅) ----------
+const DECAY = { normal: [1, 7], important: [7, 21] };
+const FLOOR_OPACITY = 0.15;
+const MS_PER_DAY = 86_400_000;
+
+function effectiveTier(tier, touchCount) {
+  if (tier !== 'normal') return tier;
+  return touchCount >= 2 ? 'important' : 'normal';
+}
+
+function vividness(fr, now = new Date()) {
+  const tier = effectiveTier(fr.tier, fr.touch_count);
+  if (tier === 'pinned') return 1;
+  const days = Math.max(0, (now.getTime() - new Date(fr.last_touched_at).getTime()) / MS_PER_DAY);
+  const [start, floor] = DECAY[tier];
+  if (days <= start) return 1;
+  if (days >= floor) return FLOOR_OPACITY;
+  return 1 - (1 - FLOOR_OPACITY) * ((days - start) / (floor - start));
+}
+
+// ---------- 헤매기 (앱 wander.tsx 포팅 — 판단 버튼 없음, 한 바퀴로 끝난다) ----------
+const WANDER_CHUNK = 8;
+const WANDER_READABLE_FLOOR = 0.55;
+const WANDER_EXCLUDE_KEY = 'wander.excluded';
+
+let wanderFilter = 'all';
+let wanderExcluded = new Set(JSON.parse(localStorage.getItem(WANDER_EXCLUDE_KEY) || '[]'));
+let wanderPool = [];
+let wanderDeck = [];
+let wanderItems = [];
+let wanderLoading = false;
+let wanderStarted = false;
+
+function shuffle(ids) {
+  const out = [...ids];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+async function loadWanderIndex(filter) {
+  const cols = 'id, created_at, last_touched_at, tier, touch_count';
+  let q;
+  if (filter !== 'all' && filter !== 'inbox') {
+    q = sb.from('fragments')
+      .select(`${cols}, fragment_projects!inner(project_id)`)
+      .eq('fragment_projects.project_id', filter)
+      .eq('archived', false);
+  } else {
+    q = sb.from('fragments').select(`${cols}, fragment_projects(project_id)`).eq('archived', false);
+    if (filter === 'inbox') q = q.is('fragment_projects', null);
+  }
+  const { data, error } = await q.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data.map(({ fragment_projects, ...rest }) => ({
+    ...rest,
+    project_ids: (fragment_projects ?? []).map((m) => m.project_id),
+  }));
+}
+
+// 우클릭 = 앱의 "칩 길게 누르기"에 대응 (데스크톱 웹이라 길게 누르기 대신 컨텍스트메뉴로 대체)
+function toggleWanderExclude(projectId) {
+  if (wanderExcluded.has(projectId)) wanderExcluded.delete(projectId);
+  else wanderExcluded.add(projectId);
+  localStorage.setItem(WANDER_EXCLUDE_KEY, JSON.stringify([...wanderExcluded]));
+  if (wanderFilter === 'all') startWander();
+  else renderWanderFilters();
+}
+
+function renderWanderFilters() {
+  const box = $('wanderFilters');
+  box.innerHTML = '';
+  const mk = (key, label, isProject) => {
+    const c = el('button', 'chip' + (wanderFilter === key ? ' on' : '') + (isProject && wanderExcluded.has(key) ? ' off' : ''));
+    c.textContent = label;
+    c.onclick = () => { if (wanderFilter !== key) { wanderFilter = key; startWander(); } };
+    if (isProject) c.oncontextmenu = (e) => { e.preventDefault(); toggleWanderExclude(key); };
+    box.appendChild(c);
+  };
+  mk('all', '전체', false);
+  mk('inbox', 'Inbox', false);
+  for (const p of projects) mk(p.id, p.name, true);
+}
+
+async function startWander() {
+  wanderPool = []; wanderDeck = []; wanderItems = []; wanderLoading = false;
+  renderWanderFilters();
+  $('wanderList').innerHTML = '<div class="empty">불러오는 중…</div>';
+  $('wanderEnd').classList.add('hidden');
+  try {
+    const index = await loadWanderIndex(wanderFilter);
+    const kept = wanderFilter === 'all' && wanderExcluded.size > 0
+      ? index.filter((m) => !(m.project_ids ?? []).some((id) => wanderExcluded.has(id)))
+      : index;
+    wanderPool = kept.map((m) => m.id);
+    wanderDeck = shuffle(wanderPool);
+    $('wanderList').innerHTML = '';
+    if (wanderPool.length === 0) {
+      $('wanderList').innerHTML = '<div class="empty">헤맬 것이 아직 없다</div>';
+      return;
+    }
+    await moreWander();
+  } catch (e) {
+    $('wanderList').innerHTML = `<div class="empty">불러오기 실패: ${e.message ?? e}</div>`;
+  }
+}
+
+async function moreWander() {
+  if (wanderLoading || currentView !== 'wander') return;
+  if (wanderDeck.length === 0) {
+    if (wanderItems.length > 0) $('wanderEnd').classList.remove('hidden');
+    return;
+  }
+  wanderLoading = true;
+  try {
+    const ids = wanderDeck.splice(0, Math.min(WANDER_CHUNK, wanderDeck.length));
+    const { data, error } = await sb.from('fragments')
+      .select('*, fragment_projects(project_id)')
+      .in('id', ids);
+    if (error) throw error;
+    const byId = new Map(data.map((r) => [r.id, { ...r, project_ids: (r.fragment_projects ?? []).map((m) => m.project_id) }]));
+    wanderItems.push(...ids.map((id) => byId.get(id)).filter(Boolean));
+    renderWanderList();
+    if (wanderDeck.length === 0) $('wanderEnd').classList.remove('hidden');
+  } catch {
+    // 한 번 실패해도 다음 스크롤에서 다시 시도
+  } finally {
+    wanderLoading = false;
+  }
+}
+
+function renderWanderList() {
+  const box = $('wanderList');
+  box.innerHTML = '';
+  for (const f of wanderItems) {
+    const card = fragmentCardEl(f);
+    card.style.opacity = Math.max(vividness(f), WANDER_READABLE_FLOOR);
+    box.appendChild(card);
+  }
+}
+
+window.addEventListener('scroll', () => {
+  if (currentView === 'wander' && window.innerHeight + window.scrollY >= document.body.offsetHeight - 400) {
+    moreWander();
+  }
+});
+
+// ---------- 발견 (앱 discovery.tsx 포팅 — 읽기 전용: 던지기는 안 붙였다) ----------
+let discoveryList = [];
+let discoveryStarted = false;
+
+const SLOT_RE = /^\[([^\]]{1,10})\]\s*(.*)$/;
+const REJECT_RE = /(뺐|뺀\s|제외|리스티클|못 찾|버린\s*것|안 넣)/;
+
+function parseCards(md) {
+  const cards = [];
+  let cur = null;
+  for (const ln of md.split('\n')) {
+    const h = ln.match(/^###\s+(.+)/);
+    if (h) {
+      const m = h[1].trim().match(SLOT_RE);
+      cur = { title: (m ? m[2] : h[1]).trim(), slot: m ? m[1].trim() : '', body: '' };
+      cards.push(cur);
+    } else if (ln.trimStart().startsWith('※')) {
+      cards.push({ title: '', slot: '', body: ln.replace(/^\s*※\s*/, '').trim() });
+      cur = null;
+    } else if (cur) {
+      cur.body += (cur.body ? '\n' : '') + ln;
+    } else if (ln.trim()) {
+      cards.push({ title: '', slot: '', body: ln });
+    }
+  }
+  const last = [...cards].reverse().find((c) => c.title);
+  if (last) {
+    const paras = last.body.split(/\n{2,}/);
+    const tail = paras[paras.length - 1] ?? '';
+    if (paras.length > 1 && REJECT_RE.test(tail) && tail.length < 220) {
+      paras.pop();
+      last.body = paras.join('\n\n');
+      cards.push({ title: '', slot: '', body: tail.trim() });
+    }
+  }
+  return cards.map((c) => ({ ...c, body: c.body.trim() })).filter((c) => c.title || c.body);
+}
+
+const firstTitle = (md) => parseCards(md).find((c) => c.title)?.title ?? '(제목 없음)';
+const formatCost = (usd) => (usd == null ? '' : `$${usd.toFixed(2)}`);
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function mdInlineToHtml(s) {
+  s = escapeHtml(s);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text, href) =>
+    /^https?:\/\//i.test(href) ? `<a href="${href}" target="_blank" rel="noreferrer">${text}</a>` : text);
+  return s;
+}
+
+// 마크다운 부분집합만 지원(굵게·목록·링크·코드) — RN 파서(lib/markdown.tsx)와 같은 문법 범위
+function mdToHtml(src) {
+  let html = '';
+  let para = [];
+  let listType = null;
+  let inCode = false;
+  let codeLines = [];
+  const flushPara = () => { if (para.length) { html += `<p>${mdInlineToHtml(para.join(' '))}</p>`; para = []; } };
+  const closeList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
+
+  for (const line of src.split('\n')) {
+    if (inCode) {
+      if (line.startsWith('```')) { html += `<pre>${escapeHtml(codeLines.join('\n'))}</pre>`; inCode = false; codeLines = []; }
+      else codeLines.push(line);
+      continue;
+    }
+    if (line.startsWith('```')) { flushPara(); closeList(); inCode = true; continue; }
+    const b = line.match(/^\s*[-*•]\s+(.*)/);
+    const o = line.match(/^\s*\d+[.)]\s+(.*)/);
+    if (b) { flushPara(); if (listType !== 'ul') { closeList(); html += '<ul>'; listType = 'ul'; } html += `<li>${mdInlineToHtml(b[1])}</li>`; }
+    else if (o) { flushPara(); if (listType !== 'ol') { closeList(); html += '<ol>'; listType = 'ol'; } html += `<li>${mdInlineToHtml(o[1])}</li>`; }
+    else if (!line.trim()) { flushPara(); closeList(); }
+    else para.push(line);
+  }
+  flushPara(); closeList();
+  if (inCode) html += `<pre>${escapeHtml(codeLines.join('\n'))}</pre>`;
+  return html;
+}
+
+async function loadDiscoveryList() {
+  const { data, error } = await sb.schema('rudy').from('utterances')
+    .select('id, created_at, text, trigger, cost_usd')
+    .eq('kind', 'discovery')
+    .eq('surface', 'briefing')
+    .not('text', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(60);
+  if (error) throw error;
+  discoveryList = (data ?? []).filter((b) => (b.text ?? '').trim());
+}
+
+function renderDiscoveryHome() {
+  const box = $('discoveryList');
+  box.innerHTML = '';
+  if (discoveryList.length === 0) {
+    box.innerHTML = '<div class="empty">아직 기록이 없다</div>';
+    return;
+  }
+  for (const b of discoveryList) {
+    const row = el('div', 'histRow');
+    const main = el('div', 'histMain');
+    main.onclick = () => openDiscovery(b);
+
+    const metaRow = el('div', 'histMeta');
+    if (b.trigger === 'push') {
+      const badge = el('span', 'pushBadge'); badge.textContent = '아침';
+      metaRow.appendChild(badge);
+    }
+    const date = el('span', 'histDate');
+    date.textContent = `${fmtDate(b.created_at)}${b.cost_usd != null ? ' · ' + formatCost(b.cost_usd) : ''}`;
+    metaRow.appendChild(date);
+    main.appendChild(metaRow);
+
+    const title = el('div', 'histTitle');
+    title.textContent = firstTitle(b.text);
+    main.appendChild(title);
+
+    const del = el('button', 'histDel'); del.textContent = '지우기';
+    del.onclick = (e) => { e.stopPropagation(); deleteDiscovery(b); };
+
+    row.append(main, del);
+    box.appendChild(row);
+  }
+}
+
+function openDiscovery(b) {
+  $('discoveryHome').classList.add('hidden');
+  $('discoveryResult').classList.remove('hidden');
+  renderDiscoveryCards(b.text);
+}
+
+function closeDiscoveryResult() {
+  $('discoveryResult').classList.add('hidden');
+  $('discoveryHome').classList.remove('hidden');
+}
+$('discoveryBack').onclick = closeDiscoveryResult;
+
+function renderDiscoveryCards(md) {
+  const box = $('discoveryCards');
+  box.innerHTML = '';
+  for (const c of parseCards(md)) {
+    if (!c.title) {
+      const f = el('div', 'footnote');
+      f.textContent = c.body;
+      box.appendChild(f);
+      continue;
+    }
+    const card = el('div', 'dCard');
+    if (c.slot) {
+      const badge = el('div', 'slotBadge' + (c.slot === '아이디어' ? ' idea' : ''));
+      badge.textContent = c.slot;
+      card.appendChild(badge);
+    }
+    const title = el('div', 'dCardTitle'); title.textContent = c.title;
+    card.appendChild(title);
+    if (c.body) {
+      const body = el('div', 'dCardBody');
+      body.innerHTML = mdToHtml(c.body);
+      card.appendChild(body);
+    }
+    box.appendChild(card);
+  }
+}
+
+async function deleteDiscovery(b) {
+  if (!confirm('발견을 지울까? 되돌릴 수 없다.')) return;
+  discoveryList = discoveryList.filter((x) => x.id !== b.id);
+  renderDiscoveryHome();
+  const { error } = await sb.schema('rudy').from('utterances').delete().eq('id', b.id);
+  if (error) { alert('삭제 실패: ' + error.message); await loadDiscoveryList(); renderDiscoveryHome(); }
+}
+
+async function startDiscovery() {
+  $('discoveryList').innerHTML = '<div class="empty">불러오는 중…</div>';
+  try {
+    await loadDiscoveryList();
+    renderDiscoveryHome();
+  } catch (e) {
+    $('discoveryList').innerHTML = `<div class="empty">불러오기 실패: ${e.message ?? e}</div>`;
+  }
 }
 
 // ---------- 검색 ----------
