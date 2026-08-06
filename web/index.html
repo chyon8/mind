@@ -125,7 +125,43 @@
   }
   .card .copy:hover { color: var(--text); border-color: #444; }
   .card .copy.done { color: #4ade80; border-color: #2f5c3f; }
+  .card { cursor: pointer; }
   .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+
+  /* ---------- 상세 모달 ---------- */
+  .modalBackdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    z-index: 50; overflow-y: auto; padding: 40px 16px;
+  }
+  .modalBackdrop.open { display: block; }
+  .modalPanel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    max-width: 560px; width: 100%; margin: 0 auto; padding: 20px;
+  }
+  .modalHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .modalHeader .meta { color: var(--muted); font-size: 12px; }
+  .detailImg { width: 100%; border-radius: 10px; margin-bottom: 12px; display: block; }
+  .detailLinkTitle { font-weight: 600; margin-bottom: 4px; }
+  .detailOpen { display: inline-block; color: var(--link); text-decoration: none; font-size: 13px; margin-bottom: 10px; }
+  .detailField {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; outline: none; resize: vertical; min-height: 60px; margin-bottom: 6px;
+  }
+  .detailField:focus { border-color: #555; }
+  .detailLabel { color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
+  .detailRow { display: flex; gap: 6px; flex-wrap: wrap; }
+  .detailBtn {
+    background: var(--chip); border: 1px solid var(--border); color: var(--muted);
+    border-radius: 8px; padding: 6px 12px; font-size: 13px;
+  }
+  .detailBtn.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
+  .detailBtn.danger { color: #ff6b6b; }
+  .detailBtn.disabled { opacity: .4; }
+  .detailActions {
+    display: flex; justify-content: space-between; margin-top: 20px; padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .piece { border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -160,6 +196,10 @@
 
   <div class="count" id="count"></div>
   <div id="list"></div>
+</div>
+
+<div class="modalBackdrop" id="detailBackdrop">
+  <div class="modalPanel" id="detailPanel"></div>
 </div>
 
 <script type="module">
@@ -340,7 +380,8 @@ function renderList(frs) {
       if (t.textContent) meta.appendChild(t);
     }
     const copy = el('button', 'copy'); copy.textContent = '복사';
-    copy.onclick = async () => {
+    copy.onclick = async (e) => {
+      e.stopPropagation();
       await navigator.clipboard.writeText(f.content);
       copy.textContent = '복사됨'; copy.classList.add('done');
       setTimeout(() => { copy.textContent = '복사'; copy.classList.remove('done'); }, 1200);
@@ -348,8 +389,180 @@ function renderList(frs) {
     meta.appendChild(copy);
     card.appendChild(meta);
 
+    card.onclick = () => openDetail(f);
     list.appendChild(card);
   }
+}
+
+// ---------- 상세 모달 (수정 / 묻기·파내기 / 삭제) ----------
+let detailFragment = null; // 열려 있는 파편의 로컬 사본
+
+function closeDetail() {
+  $('detailBackdrop').classList.remove('open');
+  detailFragment = null;
+}
+$('detailBackdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'detailBackdrop') closeDetail();
+});
+
+function openDetail(f) {
+  detailFragment = f;
+  $('detailBackdrop').classList.add('open');
+  renderDetail();
+}
+
+function renderDetail() {
+  const f = detailFragment;
+  const panel = $('detailPanel');
+  panel.innerHTML = '';
+
+  const header = el('div', 'modalHeader');
+  const meta = el('span', 'meta');
+  meta.textContent = `${f.type.toUpperCase()} · ${fmtDate(f.created_at)}`;
+  const close = el('button', 'ghost'); close.textContent = '닫기';
+  close.onclick = closeDetail;
+  header.append(meta, close);
+  panel.appendChild(header);
+
+  if (f.image_path) {
+    const img = el('img', 'detailImg');
+    panel.appendChild(img);
+    sb.storage.from('images').createSignedUrl(f.image_path, 60 * 60 * 24 * 7)
+      .then(({ data }) => { if (data) img.src = data.signedUrl; });
+  }
+
+  if (f.type === 'link' && f.link_title) {
+    const t = el('div', 'detailLinkTitle');
+    t.textContent = f.link_title;
+    panel.appendChild(t);
+  }
+
+  const contentField = el('textarea', 'detailField');
+  contentField.value = f.content;
+  contentField.placeholder = f.type === 'image' ? '캡션 (선택)' : '원문…';
+  contentField.addEventListener('blur', () => saveDetailField('content', contentField.value));
+  panel.appendChild(contentField);
+
+  if (f.type === 'link') {
+    const open = el('a', 'detailOpen');
+    open.href = f.content; open.target = '_blank'; open.rel = 'noreferrer';
+    open.textContent = '열기 ↗';
+    panel.appendChild(open);
+  }
+
+  const noteLabel = el('div', 'detailLabel'); noteLabel.textContent = '덧붙임';
+  panel.appendChild(noteLabel);
+  const noteField = el('textarea', 'detailField');
+  noteField.value = f.note || '';
+  noteField.placeholder = '이 파편에 대한 생각을 덧붙여…';
+  noteField.addEventListener('blur', () =>
+    saveDetailField('note', noteField.value.trim() === '' ? null : noteField.value));
+  panel.appendChild(noteField);
+
+  if (f.merged_from && f.merged_from.length) {
+    const mLabel = el('div', 'detailLabel');
+    mLabel.textContent = `합쳐진 조각 (${f.merged_from.length})`;
+    panel.appendChild(mLabel);
+    for (const piece of f.merged_from) {
+      const p = el('div', 'piece');
+      p.textContent = `${fmtDate(piece.created_at)} — ${(piece.content || '').slice(0, 80)}`;
+      panel.appendChild(p);
+    }
+  }
+
+  const tierLabel = el('div', 'detailLabel'); tierLabel.textContent = 'TIER';
+  panel.appendChild(tierLabel);
+  const tierRow = el('div', 'detailRow');
+  for (const [value, label] of [['normal', '보통'], ['important', '중요'], ['pinned', '고정']]) {
+    const b = el('button', 'detailBtn' + (f.tier === value ? ' on' : ''));
+    b.textContent = label;
+    b.onclick = () => setDetailTier(value);
+    tierRow.appendChild(b);
+  }
+  panel.appendChild(tierRow);
+
+  const projLabel = el('div', 'detailLabel'); projLabel.textContent = 'PROJECT';
+  panel.appendChild(projLabel);
+  const projRow = el('div', 'detailRow');
+  for (const p of projects) {
+    const on = f.project_ids.includes(p.id);
+    const b = el('button', 'detailBtn' + (on ? ' on' : ''));
+    b.textContent = p.name;
+    b.onclick = () => toggleDetailProject(p.id);
+    projRow.appendChild(b);
+  }
+  panel.appendChild(projRow);
+
+  // 고정한 걸 실수로 묻지 않게 — 묻으려면 먼저 고정을 풀어야 한다 (앱과 동일 규칙)
+  const pinnedBlocksGrave = f.tier === 'pinned' && !f.archived;
+  const actions = el('div', 'detailActions');
+  const archiveBtn = el('button', 'detailBtn' + (pinnedBlocksGrave ? ' disabled' : ''));
+  archiveBtn.textContent = f.archived
+    ? '파내기 — 타임라인으로 복귀'
+    : pinnedBlocksGrave ? '묻기 — 고정을 먼저 풀어야 한다' : '묻기 — 무덤으로';
+  archiveBtn.onclick = () => { if (!pinnedBlocksGrave) toggleDetailArchive(); };
+  const deleteBtn = el('button', 'detailBtn danger'); deleteBtn.textContent = '삭제';
+  deleteBtn.onclick = deleteDetailFragment;
+  actions.append(archiveBtn, deleteBtn);
+  panel.appendChild(actions);
+}
+
+async function saveDetailField(field, value) {
+  const f = detailFragment;
+  if (!f || value === f[field]) return;
+  const { error } = await sb.from('fragments').update({ [field]: value }).eq('id', f.id);
+  if (error) { alert('저장 실패: ' + error.message); return; }
+  f[field] = value;
+  await refresh();
+}
+
+async function setDetailTier(value) {
+  const f = detailFragment;
+  if (value === f.tier) return;
+  const { error } = await sb.from('fragments').update({ tier: value }).eq('id', f.id);
+  if (error) { alert('저장 실패: ' + error.message); return; }
+  f.tier = value;
+  renderDetail();
+  await refresh();
+}
+
+async function toggleDetailProject(projectId) {
+  const f = detailFragment;
+  const next = f.project_ids.includes(projectId)
+    ? f.project_ids.filter((id) => id !== projectId)
+    : [...f.project_ids, projectId];
+  const { error: delError } = await sb.from('fragment_projects').delete().eq('fragment_id', f.id);
+  if (delError) { alert('저장 실패: ' + delError.message); return; }
+  if (next.length) {
+    const { error } = await sb.from('fragment_projects')
+      .insert(next.map((project_id) => ({ fragment_id: f.id, project_id })));
+    if (error) { alert('저장 실패: ' + error.message); return; }
+  }
+  f.project_ids = next;
+  renderDetail();
+  await refresh();
+}
+
+async function toggleDetailArchive() {
+  const f = detailFragment;
+  const next = !f.archived;
+  const { error } = await sb.from('fragments').update({ archived: next }).eq('id', f.id);
+  if (error) { alert('저장 실패: ' + error.message); return; }
+  f.archived = next;
+  renderDetail();
+  await refresh();
+}
+
+async function deleteDetailFragment() {
+  const f = detailFragment;
+  if (!confirm('삭제할까? 되돌릴 수 없다.')) return;
+  if (f.image_path) {
+    await sb.storage.from('images').remove([f.image_path]);
+  }
+  const { error } = await sb.from('fragments').delete().eq('id', f.id);
+  if (error) { alert('삭제 실패: ' + error.message); return; }
+  closeDetail();
+  await refresh();
 }
 
 // ---------- 검색 ----------
