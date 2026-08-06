@@ -164,23 +164,27 @@
   .piece { border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
 
   /* ---------- 사이드바 ---------- */
-  .layout { display: flex; gap: 28px; align-items: flex-start; }
+  .layout { display: flex; gap: 28px; align-items: flex-start; transition: gap .15s ease; }
   .sidebar {
     width: 104px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;
-    position: sticky; top: 20px;
+    position: sticky; top: 20px; overflow: hidden;
+    transition: width .15s ease, opacity .15s ease;
   }
+  .layout.collapsed { gap: 0; }
+  .layout.collapsed .sidebar { width: 0; opacity: 0; pointer-events: none; }
   .navBtn {
     background: none; border: 0; text-align: left; color: var(--muted);
-    border-radius: 8px; padding: 8px 10px; font-size: 14px;
+    border-radius: 8px; padding: 8px 10px; font-size: 14px; white-space: nowrap;
   }
   .navBtn:hover { color: var(--text); }
   .navBtn.on { background: var(--panel); color: var(--text); font-weight: 600; }
   .main { flex: 1; min-width: 0; }
   .hidden { display: none !important; }
+  .sidebarToggle { font-size: 15px; line-height: 1; padding: 6px 9px; }
 
   /* ---------- 헤매기 ---------- */
   .filters .chip.off { opacity: .45; text-decoration: line-through; }
-  .filterHint { color: var(--muted); font-size: 12px; margin: -4px 0 14px; }
+  .filterHint { color: var(--muted); font-size: 12px; margin: 8px 0 14px; }
   .end { color: var(--muted); font-size: 12px; text-align: center; padding: 20px 0; }
 
   /* ---------- 발견 ---------- */
@@ -230,11 +234,14 @@
 
 <div id="app">
   <header class="top">
-    <h1>Mind</h1>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <button class="ghost sidebarToggle" id="sidebarToggle" title="사이드바 토글">☰</button>
+      <h1>Mind</h1>
+    </div>
     <button class="ghost" id="logoutBtn">로그아웃</button>
   </header>
 
-  <div class="layout">
+  <div class="layout" id="layout">
     <nav class="sidebar" id="sidebar">
       <button class="navBtn on" data-view="fragments">파편</button>
       <button class="navBtn" data-view="wander">헤매기</button>
@@ -657,6 +664,14 @@ let currentView = 'fragments';
 document.querySelectorAll('.navBtn').forEach((btn) => {
   btn.onclick = () => switchView(btn.dataset.view);
 });
+
+const SIDEBAR_KEY = 'sidebar.collapsed';
+function setSidebarCollapsed(collapsed) {
+  $('layout').classList.toggle('collapsed', collapsed);
+  localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+}
+$('sidebarToggle').onclick = () => setSidebarCollapsed(!$('layout').classList.contains('collapsed'));
+setSidebarCollapsed(localStorage.getItem(SIDEBAR_KEY) === '1');
 
 function switchView(view) {
   currentView = view;
