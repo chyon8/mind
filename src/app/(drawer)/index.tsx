@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View, type ViewToken } from 'react-native';
@@ -31,6 +32,21 @@ import { vividness } from '@/lib/vividness';
 type Mode = 'daily' | 'feed' | 'agenda';
 const MODE_LABEL: Record<Mode, string> = { daily: '데일리', feed: '피드', agenda: '어젠다' };
 
+// 피드·어젠다가 같은 필터를 공유하므로 제외도 공유한다 — 헤매기의 제외(wander.tsx)와 같은 문법이지만
+// 저장 키는 따로 둔다. 두 뷰의 "이 프로젝트는 안 보고 싶다"가 같은 의도라도, 헤매기에서 뺀 게
+// 여기까지 조용히 번지면 놀라게 된다.
+const EXCLUDE_KEY = 'feed.excluded';
+
+// '전체'에서만 적용 — 프로젝트 필터는 !inner 조인이라 project_ids가 불완전하다 (wander.tsx와 동일 이유).
+function applyExcluded<T extends { project_ids?: string[] }>(
+  items: T[],
+  filter: FeedFilter,
+  excluded: Set<string>,
+): T[] {
+  if (filter !== 'all' || excluded.size === 0) return items;
+  return items.filter((it) => !(it.project_ids ?? []).some((id) => excluded.has(id)));
+}
+
 export default function Home() {
   // 드로어 화면의 navigation에는 openDrawer 헬퍼가 있다 (expo-router 내장 드로어)
   const navigation = useNavigation<{ openDrawer: () => void }>();
@@ -53,6 +69,26 @@ export default function Home() {
   const [pendingJump, setPendingJump] = useState<string | null>(null);
   const selection = useMergeSelection();
 
+  // '전체'에서 빼둘 프로젝트 id (칩 길게 누르기, wander.tsx와 같은 문법)
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  // AsyncStorage에서 읽어오기 전에 load()가 먼저 돌면 안 뺀 것들이 잠깐 보였다 사라진다 —
+  // 헤매기에서 같은 문제를 겪은 적 있다 (wander.tsx 주석 참고). load()를 여기 걸어 막는다.
+  const [excludedHydrated, setExcludedHydrated] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(EXCLUDE_KEY)
+      .then((raw) => raw && setExcluded(new Set(JSON.parse(raw) as string[])))
+      .catch(() => {})
+      .finally(() => setExcludedHydrated(true));
+  }, []);
+  const toggleExclude = useCallback((projectId: string) => {
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(projectId)) next.add(projectId);
+      AsyncStorage.setItem(EXCLUDE_KEY, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // 지금까지 읽어들인 마지막 페이지. 100개씩 끊어 읽고, 바닥에 닿으면 이어 붙인다.
   const lastPage = useRef(0);
   const [exhausted, setExhausted] = useState(false); // 더 읽을 게 없다
@@ -65,7 +101,7 @@ export default function Home() {
   // 데일리 모드는 DailyView가 자기 범위(주간)만 따로 읽는다 — 여기서 피드/캘린더까지
   // 같이 읽으면 데일리만 보는 동안에도 매번 최근 파편 전체를 불필요하게 가져오게 된다.
   const load = useCallback(async () => {
-    if (mode === 'daily') return;
+    if (mode === 'daily' || !excludedHydrated) return;
     const version = ++loadVersion.current;
     try {
       const pages = await Promise.all(
@@ -74,14 +110,14 @@ export default function Home() {
       const [prs, index] = await Promise.all([fetchProjects(), fetchDayIndex(filter)]);
       if (version !== loadVersion.current) return;
       setFailed(false);
-      setFragments(pages.flat());
+      setFragments(applyExcluded(pages.flat(), filter, excluded));
       setProjects(prs);
-      setDayIndex(index);
+      setDayIndex(applyExcluded(index, filter, excluded));
       setExhausted(pages[pages.length - 1].length < PAGE_SIZE);
     } catch {
       if (version === loadVersion.current) setFailed(true);
     }
-  }, [filter, mode]);
+  }, [filter, mode, excluded, excludedHydrated]);
 
   // 바닥에 닿았다 → 다음 100개
   const loadMore = useCallback(async () => {
@@ -93,14 +129,14 @@ export default function Home() {
       const frs = await fetchFragments(filter, next);
       if (version !== loadVersion.current) return;
       lastPage.current = next;
-      setFragments((prev) => [...prev, ...frs]);
+      setFragments((prev) => [...prev, ...applyExcluded(frs, filter, excluded)]);
       if (frs.length < PAGE_SIZE) setExhausted(true);
     } catch {
       if (version === loadVersion.current) setFailed(true);
     } finally {
       loading.current = false;
     }
-  }, [filter, exhausted]);
+  }, [filter, exhausted, excluded]);
 
   // 필터가 바뀌면 처음부터 다시 읽는다
   useEffect(() => {
@@ -186,7 +222,7 @@ export default function Home() {
       const more = await fetchFragments(filter, next);
       if (more.length === 0) return;
       lastPage.current = next;
-      list = [...list, ...more];
+      list = [...list, ...applyExcluded(more, filter, excluded)];
       setFragments(list);
       if (more.length < PAGE_SIZE) setExhausted(true);
     }
@@ -266,6 +302,8 @@ export default function Home() {
             projects={projects}
             selected={filter}
             onSelect={(f) => router.setParams({ filter: f })}
+            excluded={excluded}
+            onToggleExclude={toggleExclude}
           />
 
           {failed ? (

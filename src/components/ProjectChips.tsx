@@ -5,14 +5,19 @@ import type { Project } from '@/lib/types';
 
 // 칩은 All + 전체 프로젝트(상태 무관). 만들거나 지우면 곧장 반영된다.
 // 사이드바에서 고른 필터(Inbox/무덤 등)가 칩에 없으면 임시 칩으로 붙여 현재 위치를 보여준다.
+// 프로젝트 칩을 길게 누르면 '전체'에서 그 프로젝트를 뺀다 (헤매기의 제외와 같은 방식, [13]).
 export function ProjectChips({
   projects,
   selected,
   onSelect,
+  excluded,
+  onToggleExclude,
 }: {
   projects: Project[];
   selected: FeedFilter;
   onSelect: (f: FeedFilter) => void;
+  excluded?: Set<string>;
+  onToggleExclude?: (projectId: string) => void;
 }) {
   const chips: { key: FeedFilter; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -38,13 +43,18 @@ export function ProjectChips({
     >
       {chips.map((chip) => {
         const active = selected === chip.key;
+        const isProject = projects.some((p) => p.id === chip.key);
+        const off = isProject && excluded?.has(chip.key);
         return (
           <Pressable
             key={chip.key}
             onPress={() => onSelect(chip.key)}
-            style={[styles.chip, active && styles.chipActive]}
+            onLongPress={isProject && onToggleExclude ? () => onToggleExclude(chip.key) : undefined}
+            style={[styles.chip, active && styles.chipActive, off && styles.chipOff]}
           >
-            <Text style={[styles.label, active && styles.labelActive]}>{chip.label}</Text>
+            <Text style={[styles.label, active && styles.labelActive, off && styles.labelOff]}>
+              {chip.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -64,6 +74,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   chipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  // 길게 눌러 제외한 프로젝트 — 취소선으로 "빠져 있다"를 바로 읽히게 (wander.tsx와 같은 문법)
+  chipOff: { borderColor: colors.hairlineSoft, backgroundColor: 'transparent' },
   label: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sansMedium },
   labelActive: { color: colors.onInk },
+  labelOff: { color: colors.faint, textDecorationLine: 'line-through' },
 });
