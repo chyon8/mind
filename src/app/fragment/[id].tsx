@@ -255,15 +255,15 @@ export default function FragmentDetail() {
 
         {fragment.image_path && <DetailImage path={fragment.image_path} />}
 
+        {/* 바깥에서 온 층 — 제목이 헤드라인이다. 목록 카드(FragmentCard)와 같은 위계를 쓴다:
+            거기선 제목이 bodyLg/ink이고 URL이 각주인데 여기만 반대였다(2026-08-09). */}
         {fragment.link_title && <Text style={styles.linkTitle}>{fragment.link_title}</Text>}
-        {fragment.link_description && (
-          <Text style={styles.linkDescription} numberOfLines={3}>
-            {fragment.link_description}
-          </Text>
-        )}
+        {fragment.link_description && <LinkBody text={fragment.link_description} />}
 
         <TextInput
-          style={[styles.content, noFocusRing]}
+          // 링크의 content는 URL이라 읽을 게 없다 — 주인공 자리를 제목에 내주고 각주로 내려간다.
+          // 편집은 그대로 가능하다(원문 수정은 SPEC §6-4).
+          style={[styles.content, isLink && styles.contentUrl, noFocusRing]}
           multiline
           value={content}
           onChangeText={setContent}
@@ -547,6 +547,31 @@ export default function FragmentDetail() {
   );
 }
 
+// 링크 본문(og:description 또는 레딧 selftext). 예전엔 numberOfLines={3} 하드컷이라
+// 긴 본문이 통째로 잘린 채 펼 방법이 없었다 — 접고 펼 수 있게 한다.
+const COLLAPSED_LINES = 6;
+// 이 길이를 넘으면 6줄에 안 들어간다고 보고 토글을 붙인다. 렌더 후 줄 수를 재는 방법
+// (onTextLayout)은 numberOfLines가 걸린 상태에선 잘린 줄 수만 돌려줘서 못 쓴다.
+// 빗나가도 손해가 없는 쪽으로 넉넉히 잡았다 — 안 잘렸는데 "더 보기"가 뜨는 정도.
+const COLLAPSE_THRESHOLD = 220;
+
+function LinkBody({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = text.length > COLLAPSE_THRESHOLD;
+  return (
+    <View style={styles.linkBodyWrap}>
+      <Text style={styles.linkDescription} numberOfLines={expanded ? undefined : COLLAPSED_LINES}>
+        {text}
+      </Text>
+      {collapsible && (
+        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={8}>
+          <Text style={styles.linkMore}>{expanded ? '접기' : '더 보기'}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 // 합쳐진 조각 하나 — 날짜 + 원문. 이미지 조각이면 실제 이미지도 렌더한다.
 function MergedPieceRow({ piece }: { piece: MergedPiece }) {
   const url = useImageUrl(piece.image_path);
@@ -611,19 +636,20 @@ const styles = StyleSheet.create({
     padding: 0,
     textAlignVertical: 'top',
   },
+  // 헤드라인 — 목록 카드의 linkTitle과 같은 토큰(bodyLg/ink/Medium). 상세가 목록보다
+  // 제목을 작게 보여줄 이유가 없다.
   linkTitle: {
-    ...type.bodyMd,
-    color: colors.body,
+    ...type.bodyLg,
+    color: colors.ink,
     fontFamily: fonts.sansMedium,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
-  linkDescription: {
-    ...type.bodySm,
-    color: colors.mute,
-    fontFamily: fonts.sans,
-    marginTop: -spacing.xs,
-    marginBottom: spacing.sm,
-  },
+  linkBodyWrap: { gap: spacing.xxs, marginBottom: spacing.md },
+  // 본문은 읽으라고 있는 것 — 캡션(bodySm/mute)이 아니라 읽히는 크기로 둔다
+  linkDescription: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  linkMore: { ...type.bodySm, color: colors.link, fontFamily: fonts.sansMedium },
+  // 링크의 URL — 목록 카드의 linkUrl과 같은 각주 취급
+  contentUrl: { ...type.bodySm, color: colors.mute },
   openBtn: {
     alignSelf: 'flex-start',
     marginTop: spacing.sm,

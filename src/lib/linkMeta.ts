@@ -22,6 +22,8 @@ function meta(html: string, property: string): string | null {
 
 function decode(s: string): string {
   return s
+    // 레딧 본문은 공백까지 &#32;로 escape해서 내려온다 — 숫자 엔티티를 먼저 푼다
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -47,26 +49,80 @@ function isRedditUrl(u: URL): boolean {
   return u.hostname === 'reddit.com' || u.hostname.endsWith('.reddit.com');
 }
 
-function redditFetchUrl(url: string): string | null {
+// 아이폰 공유 시트가 주는 링크는 /r/xxx/s/짧은코드 형식인데, old.reddit.com은 이 형식을
+// 모르고 로그인 페이지로 보낸다 — 그 페이지 제목("Reddit에 오신 걸 환영합니다")이 그대로
+// 저장되는 사고가 있었다(2026-08-09). www가 리다이렉트로 알려주는 실제 /comments/ 경로를
+// 먼저 알아낸 뒤 호스트를 바꾼다.
+//
+// ⚠️ Location 헤더를 읽으면 안 된다. RN의 fetch는 whatwg-fetch(XHR) 폴리필이라
+// `redirect: 'manual'`을 **조용히 무시하고** 항상 리다이렉트를 따라간다 — 헤더 방식은 앱에서
+// 절대 동작하지 않는다(Node에서만 되는 걸 보고 넣었다가 이 사고가 났다). 따라간 뒤의 최종
+// 주소인 res.url(= xhr.responseURL, RN도 채운다)이 유일하게 믿을 수 있는 값이다.
+async function redditFetchUrl(url: string, signal: AbortSignal): Promise<string | null> {
+  let u: URL;
   try {
-    const u = new URL(url);
-    if (!isRedditUrl(u) || u.hostname === 'old.reddit.com') return null;
-    u.hostname = 'old.reddit.com';
-    return u.toString();
+    u = new URL(url);
   } catch {
     return null;
   }
+  if (!isRedditUrl(u) || u.hostname === 'old.reddit.com') return null;
+
+  if (/\/s\/[^/]+\/?$/.test(u.pathname)) {
+    u.hostname = 'www.reddit.com'; // 단축링크 해석은 www만 안다
+    const res = await fetch(u.toString(), { signal });
+    try {
+      u = new URL(res.url);
+    } catch {
+      return null;
+    }
+    // 해석이 안 됐으면(여전히 /s/) old로 보내봐야 로그인 페이지다 — 포기하고 원본으로 둔다
+    if (!isRedditUrl(u) || /\/s\/[^/]+\/?$/.test(u.pathname)) return null;
+  }
+  u.hostname = 'old.reddit.com';
+  return u.toString();
 }
 
-// 공유 시트에서 던진 링크는 대부분 /r/xxx/s/짧은코드 형식이다 — old.reddit.com은 이 형식을
-// 모르고 로그인 페이지로 보낸다. www.reddit.com은 이 리다이렉트만은 챌린지 없이 301로 실제
-// /comments/... 경로를 알려주므로, 헤더만 받아 실제 경로로 바꾼 다음 old.reddit.com으로 청한다.
-async function resolveRedditShortlink(url: string, signal: AbortSignal): Promise<string> {
-  const u = new URL(url);
-  if (!isRedditUrl(u) || !/\/s\/[^/]+\/?$/.test(u.pathname)) return url;
-  if (u.hostname === 'old.reddit.com') u.hostname = 'www.reddit.com'; // 리다이렉트는 www만 안다
-  const res = await fetch(u.toString(), { redirect: 'manual', signal });
-  return res.headers.get('location') || url;
+// 챌린지/로그인 페이지를 제목이라고 저장하지 않는다. 저장을 건너뛰면 link_title이 null로 남아
+// 다음 포그라운드에 자동으로 다시 시도한다 — 쓰레기 제목이 박히는 것보다 낫다.
+// 문구는 기기 언어를 타므로("Welcome to Reddit" / "Reddit에 오신 걸 환영합니다") 경로로 판정하고,
+// 챌린지 페이지의 <title>만 언어와 무관하게 늘 "Reddit"이라 그것만 문자열로 거른다.
+function isRedditJunk(finalUrl: string, title: string | null): boolean {
+  try {
+    const u = new URL(finalUrl);
+    if (!isRedditUrl(u)) return false;
+    return u.pathname.startsWith('/login') || title === 'Reddit';
+  } catch {
+    return false;
+  }
+}
+
+// 레딧 글 본문(selftext). og:description은 레딧이 150자 안팎에서 "…"로 잘라 보내기 때문에
+// 임베딩 신호로도 약하고 상세 화면에도 잘린 채 뜬다 — old.reddit.com은 본문 전체를 페이지에
+// 그대로 담고 있으므로 그걸 쓴다. 본문이 없는 글(이미지·영상만)이면 null → og로 폴백한다.
+//
+// 경계 두 개가 핵심이고, 둘 다 실제로 틀렸다가 잡은 것들이다(2026-08-09):
+//   (1) 글(/comments/)일 때만 본다 — 서브레딧 목록 페이지에선 첫 .md가 "보관된 글입니다" 공지다.
+//   (2) 댓글 영역 앞에서 끊는다 — 본문 없는 글에서 모더레이터 봇 댓글이 본문으로 잡혔다.
+const SELFTEXT_MAX = 2000; // 임베딩 신호로 충분하고, 긴 글이 행을 부풀리지 않을 정도
+
+function extractRedditSelftext(html: string, finalUrl: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(finalUrl);
+  } catch {
+    return null;
+  }
+  if (!isRedditUrl(u) || !u.pathname.includes('/comments/')) return null;
+
+  const start = html.indexOf('id="siteTable"');
+  if (start < 0) return null;
+  const commentarea = html.indexOf('commentarea', start);
+  const zone = html.slice(start, commentarea > start ? commentarea : undefined);
+
+  const m = zone.match(/<div class="md">([\s\S]*?)<\/div><\/div>/);
+  if (!m) return null;
+  const text = decode(m[1].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, SELFTEXT_MAX) : null;
 }
 
 // 유튜브는 설명 없는 영상의 og:description에 사이트 홍보 문구를 채워 넣는다 — 영상마다 똑같은
@@ -90,8 +146,9 @@ export async function fetchLinkMeta(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const resolved = await resolveRedditShortlink(url, ctrl.signal);
-    const res = await fetch(redditFetchUrl(resolved) ?? resolved, { signal: ctrl.signal });
+    const res = await fetch((await redditFetchUrl(url, ctrl.signal)) ?? url, {
+      signal: ctrl.signal,
+    });
     const html = await res.text();
     // og 태그와 <title>은 <head> 안에만 있다. 유튜브 같은 1~2MB짜리 페이지 **전문**에
     // `<meta[^>]+...` 정규식을 네 번 돌리면 그동안 JS 스레드가 통째로 막혀 첫 화면 렌더가 밀린다.
@@ -100,11 +157,17 @@ export async function fetchLinkMeta(
     const head = headEnd > 0 ? html.slice(0, headEnd) : html.slice(0, 200_000);
     const fallback = decode(head.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '');
     const title = meta(head, 'og:title') ?? (fallback || null);
+    // 레딧이 실제 글 대신 챌린지/로그인 페이지를 준 경우 — 아무것도 못 받은 것으로 취급한다
+    if (isRedditJunk(res.url || url, title)) {
+      return { title: null, description: null, thumbnail: null };
+    }
     // 검색 신호용. 유튜브는 홍보 문구 오염 때문에 실제 재생 데이터에서 따로 뽑는다 —
     // ytInitialPlayerResponse는 body에 있으므로 여기만 전문을 본다(리터럴 앵커라 스캔이 싸다).
     const description = isYoutubeUrl(url)
       ? extractYoutubeDescription(html)
-      : (meta(head, 'og:description') ?? meta(head, 'description'));
+      : (extractRedditSelftext(html, res.url || url) ??
+        meta(head, 'og:description') ??
+        meta(head, 'description'));
     return { title, description, thumbnail: meta(head, 'og:image') };
   } finally {
     clearTimeout(timer);
