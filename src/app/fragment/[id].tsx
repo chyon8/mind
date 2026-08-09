@@ -256,8 +256,25 @@ export default function FragmentDetail() {
         {fragment.image_path && <DetailImage path={fragment.image_path} />}
 
         {/* 바깥에서 온 층 — 제목이 헤드라인이다. 목록 카드(FragmentCard)와 같은 위계를 쓴다:
-            거기선 제목이 bodyLg/ink이고 URL이 각주인데 여기만 반대였다(2026-08-09). */}
-        {fragment.link_title && <Text style={styles.linkTitle}>{fragment.link_title}</Text>}
+            거기선 제목이 bodyLg/ink이고 URL이 각주인데 여기만 반대였다(2026-08-09).
+            썸네일도 카드와 같은 크기로 곁에 둔다 — og:image는 1200×630 배너가 대부분이라
+            크게 펴면 읽을 것과 조작할 것을 화면 밖으로 밀어내고, 썸네일 없는 파편과
+            화면 구조가 달라 보인다. "뭐였지"를 알아보는 데는 이 크기로 충분하다. */}
+        {(fragment.link_title || fragment.link_thumbnail_url?.startsWith('http')) && (
+          <View style={styles.linkHead}>
+            {fragment.link_title && (
+              <Text style={[styles.linkTitle, styles.linkHeadText]}>{fragment.link_title}</Text>
+            )}
+            {fragment.link_thumbnail_url?.startsWith('http') && (
+              <Image
+                source={fragment.link_thumbnail_url}
+                style={styles.linkThumb}
+                contentFit="cover"
+                transition={200}
+              />
+            )}
+          </View>
+        )}
         {fragment.link_description && <LinkBody text={fragment.link_description} />}
 
         <TextInput
@@ -629,24 +646,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.hairlineSoft,
     marginBottom: spacing.md,
   },
+  // 원문·덧붙임은 이 화면에서 실제로 **읽는** 자리다 — 읽기 행간을 쓴다(type.readingLg/Md).
   content: {
-    ...type.bodyLg,
+    ...type.readingLg,
     color: colors.ink,
     fontFamily: fonts.sans,
     padding: 0,
     textAlignVertical: 'top',
   },
+  linkHead: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  linkHeadText: { flex: 1 },
+  linkThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: rounded.sm,
+    backgroundColor: colors.hairlineSoft,
+  },
   // 헤드라인 — 목록 카드의 linkTitle과 같은 토큰(bodyLg/ink/Medium). 상세가 목록보다
   // 제목을 작게 보여줄 이유가 없다.
-  linkTitle: {
-    ...type.bodyLg,
-    color: colors.ink,
-    fontFamily: fonts.sansMedium,
-    marginBottom: spacing.xs,
-  },
+  linkTitle: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansMedium },
   linkBodyWrap: { gap: spacing.xxs, marginBottom: spacing.md },
-  // 본문은 읽으라고 있는 것 — 캡션(bodySm/mute)이 아니라 읽히는 크기로 둔다
-  linkDescription: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
+  // 본문은 읽으라고 있는 것 — 캡션(bodySm/mute)이 아니라 읽는 행간으로 둔다
+  linkDescription: { ...type.readingMd, color: colors.body, fontFamily: fonts.sans },
   linkMore: { ...type.bodySm, color: colors.link, fontFamily: fonts.sansMedium },
   // 링크의 URL — 목록 카드의 linkUrl과 같은 각주 취급
   contentUrl: { ...type.bodySm, color: colors.mute },
@@ -661,11 +682,11 @@ const styles = StyleSheet.create({
   },
   openLabel: { ...type.bodyMd, color: colors.link, fontFamily: fonts.sansMedium },
   note: {
-    ...type.bodyMd,
+    ...type.readingMd,
     color: colors.body,
     fontFamily: fonts.sans,
     padding: 0,
-    minHeight: 44,
+    minHeight: 88, // 한 줄(44)은 쓰기 시작할 자리로도 답답했다 — 두 줄치를 비워둔다
     textAlignVertical: 'top',
   },
   divider: {

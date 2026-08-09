@@ -146,14 +146,16 @@ export function Markdown({ text, onLink }: { text: string; onLink?: (href: strin
 }
 
 const styles = StyleSheet.create({
-  root: { gap: spacing.sm },
-  body: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
+  // 쓰이는 곳(덧붙임·채팅·발견)이 전부 **읽는** 화면이라 읽기 행간을 쓰고 문단 간격도
+  // 한 칸 넓혔다 — 행간만 넓히면 문단 경계가 오히려 묻힌다 (2026-08-09).
+  root: { gap: spacing.md },
+  body: { ...type.readingLg, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
   heading: { ...type.headingMd, color: colors.ink, fontFamily: fonts.sansSemiBold },
   bold: { fontFamily: fonts.sansSemiBold },
   link: { color: colors.link, textDecorationLine: 'underline' },
   inlineCode: { fontFamily: fonts.mono, ...type.bodyMd, color: colors.body },
   liRow: { flexDirection: 'row', gap: spacing.xs, paddingLeft: spacing.xxs },
-  liMarker: { ...type.bodyLg, color: colors.mute, fontFamily: fonts.sans },
+  liMarker: { ...type.readingLg, color: colors.mute, fontFamily: fonts.sans },
   codeBlock: {
     backgroundColor: colors.canvasElevated,
     borderColor: colors.hairline,

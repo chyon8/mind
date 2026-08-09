@@ -20,15 +20,40 @@ function meta(html: string, property: string): string | null {
   return null;
 }
 
+// 코드포인트 하나를 문자로. 범위를 벗어난 쓰레기 입력은 원문 그대로 남긴다(fromCodePoint가 throw).
+function fromCode(n: number, raw: string): string {
+  return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : raw;
+}
+
+// 숫자 엔티티는 **16진수까지** 푼다. Threads는 한글을 전부 &#xc724; 형태로 escape해서 내려주는데
+// 10진수만 풀던 시절엔 제목·본문이 통째로 "&#xc724;&#xc790;..."로 저장돼 읽을 수가 없었다
+// (2026-08-09). 이건 Threads 전용 대응이 아니라 모든 사이트에 걸리는 디코더 버그였다.
+// fromCodePoint를 쓰는 이유: 이모지(&#x1F600; 같은 astral)를 fromCharCode는 못 만든다.
 function decode(s: string): string {
   return s
-    // 레딧 본문은 공백까지 &#32;로 escape해서 내려온다 — 숫자 엔티티를 먼저 푼다
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (raw, h) => fromCode(parseInt(h, 16), raw))
+    .replace(/&#(\d+);/g, (raw, n) => fromCode(Number(n), raw)) // 레딧은 공백까지 &#32;로 준다
+    .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+// HTML 조각 → 읽을 수 있는 평문. 블록 태그를 줄바꿈으로 바꾼 뒤 나머지 태그를 지운다.
+// 예전엔 태그를 전부 공백으로 바꾸고 \s+를 공백 하나로 뭉갰는데, 그러면 원문의 문단·목록이
+// 통째로 사라져 글이 벽처럼 이어졌다("주르륵", 2026-08-09 유저 지적).
+function htmlToText(html: string): string {
+  const withBreaks = html
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*li[^>]*>/gi, '\n• ')
+    .replace(/<\/\s*(?:p|div|li|ul|ol|h[1-6]|blockquote|tr)\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+  return decode(withBreaks)
+    .replace(/[^\S\n]+/g, ' ') // 가로 공백만 정리한다 — 줄바꿈은 살려야 한다
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n') // 빈 줄은 최대 하나까지
     .trim();
 }
 
@@ -121,7 +146,7 @@ function extractRedditSelftext(html: string, finalUrl: string): string | null {
 
   const m = zone.match(/<div class="md">([\s\S]*?)<\/div><\/div>/);
   if (!m) return null;
-  const text = decode(m[1].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const text = htmlToText(m[1]);
   return text ? text.slice(0, SELFTEXT_MAX) : null;
 }
 

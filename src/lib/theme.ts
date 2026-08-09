@@ -55,6 +55,11 @@ export const type = {
   bodyLg: { fontSize: 17, lineHeight: 26 }, // 파편 본문 — 주인공
   bodyMd: { fontSize: 15, lineHeight: 21 },
   bodySm: { fontSize: 12, lineHeight: 16 },
+  // 읽는 영역 전용 (2026-08-09). 위 스케일은 행간이 1.4~1.5라 카드·칩엔 맞지만 문단을
+  // 이어 읽기엔 좁다 — 상세의 원문·덧붙임·링크 본문처럼 **글을 읽는 자리**에만 쓴다.
+  // 전역 스케일을 넓히면 목록 카드 밀도가 통째로 무너지므로 토큰을 따로 둔다.
+  readingLg: { fontSize: 17, lineHeight: 29 },
+  readingMd: { fontSize: 15, lineHeight: 25 },
 } as const;
 
 export const FLOOR_OPACITY = 0.25; // 무덤 뷰 고정 opacity (SPEC §5의 바닥값과 동일)
