@@ -17,6 +17,7 @@ let projects: Project[] = [
     started_at: '2026-03-02',
     description: '앱/도구 만들기 실험실. Mind도 여기서 나왔다.',
     discover_skip: false,
+    position: null,
   },
   {
     id: 'p-write',
@@ -26,6 +27,7 @@ let projects: Project[] = [
     started_at: '2026-01-10',
     description: null,
     discover_skip: false,
+    position: null,
   },
   {
     id: 'p-move',
@@ -35,6 +37,7 @@ let projects: Project[] = [
     started_at: null,
     description: null,
     discover_skip: false,
+    position: null,
   },
   {
     id: 'p-port',
@@ -44,6 +47,7 @@ let projects: Project[] = [
     started_at: '2025-11-01',
     description: '끝난 프로젝트. 기록용.',
     discover_skip: false,
+    position: null,
   },
 ];
 
@@ -254,6 +258,7 @@ export function fixtureCreateProject(
     started_at: fields?.started_at ?? null,
     description: null,
     discover_skip: false,
+    position: null,
   };
   projects = [...projects, project];
   return { ...project, fragment_count: 0 };

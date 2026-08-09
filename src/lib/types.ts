@@ -60,6 +60,8 @@ export interface Project {
   // 발견 재료에서 이 프로젝트를 통째로 뺀다 (파편까지 — 미소속으로도 안 새어나간다).
   // "여행리스트 긁으면 안 됨"(2026-07-29). 채팅·검색에는 안 건다.
   discover_skip: boolean;
+  // 같은 상태 그룹 안 수동 정렬 순서. null이면 created_at 순으로 대체
+  position: number | null;
   // 목록 화면용 파생값
   fragment_count?: number;
 }

@@ -1,7 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,10 +8,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DraggableFlatList, { type RenderItemParams } from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DatePickerModal } from '@/components/DatePickerModal';
 import { parseDateKey, toDateKey } from '@/lib/dates';
-import { createProject, fetchProjects } from '@/lib/supabase';
+import { createProject, fetchProjects, updateProject } from '@/lib/supabase';
 import { colors, FLOOR_OPACITY, fonts, rounded, spacing, type } from '@/lib/theme';
 import type { Project, ProjectStatus } from '@/lib/types';
 
@@ -28,6 +28,7 @@ const STATUS_DOT: Record<ProjectStatus, { color: string; filled: boolean }> = {
   paused: { color: colors.faint, filled: false },
   done: { color: colors.faint, filled: true },
 };
+const STATUS_ORDER: Record<ProjectStatus, number> = { active: 0, before: 1, paused: 2, done: 3 };
 type StatusFilter = 'all' | ProjectStatus;
 const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: '전체' },
@@ -38,6 +39,14 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
 ];
 const CREATE_STATUSES: ProjectStatus[] = ['before', 'active', 'paused', 'done'];
 
+// position 있으면 그걸로, 없으면 created_at(원래 순서)로 — 드래그 안 해본 그룹은 그대로
+function compareByPosition(a: Project, b: Project): number {
+  if (a.position != null && b.position != null) return a.position - b.position;
+  if (a.position != null) return -1;
+  if (b.position != null) return 1;
+  return a.created_at.localeCompare(b.created_at);
+}
+
 // 프로젝트 목록 — 상태 칩으로 거른다. 상태 분류는 사이드바가 아니라 여기서 (PLAN.md §6.2)
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -47,11 +56,21 @@ export default function Projects() {
   const [newStatus, setNewStatus] = useState<ProjectStatus>('before');
   const [newStartedAt, setNewStartedAt] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   const load = useCallback(() => {
     fetchProjects().then(setProjects).catch(() => {});
   }, []);
   useFocusEffect(load);
+
+  // 드래그로 순서 바꾸면 해당 상태 그룹만 position(0,1,2..)으로 다시 채운다
+  async function persistOrder(status: ProjectStatus, items: Project[]) {
+    const withPosition = new Map(items.map((p, i) => [p.id, i]));
+    setProjects((prev) =>
+      prev.map((p) => (withPosition.has(p.id) ? { ...p, position: withPosition.get(p.id)! } : p)),
+    );
+    await Promise.all(items.map((p, i) => updateProject(p.id, { position: i })));
+  }
 
   function resetCreateForm() {
     setNewName('');
@@ -70,11 +89,14 @@ export default function Projects() {
   }
 
   const visible = projects.filter((p) => filter === 'all' || p.status === filter);
-  // 완료된 프로젝트는 구분선 밑, 흐리게 — 진행 중인 것부터 보게
-  const activeVisible = visible.filter((p) => p.status !== 'done');
-  const doneVisible = visible.filter((p) => p.status === 'done');
-  const ordered = [...activeVisible, ...doneVisible];
-  const doneStart = activeVisible.length;
+  // 진행중 → 시작전 → 중단 → 완료 순으로 섹션을 나누고, 섹션 안에서만 드래그 정렬
+  const sections = (Object.keys(STATUS_ORDER) as ProjectStatus[])
+    .sort((a, b) => STATUS_ORDER[a] - STATUS_ORDER[b])
+    .map((status) => ({
+      status,
+      items: visible.filter((p) => p.status === status).sort(compareByPosition),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -186,47 +208,59 @@ export default function Projects() {
           <Text style={styles.emptyText}>프로젝트가 없다</Text>
         </View>
       ) : (
-        <FlatList
-          data={ordered}
-          keyExtractor={(p) => p.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item, index }) => {
-            const dot = STATUS_DOT[item.status];
-            const row = (
-              <Pressable
-                style={[styles.row, item.status === 'done' && styles.rowDone]}
-                onPress={() => router.push(`/projects/${item.id}`)}
-              >
-                <View
-                  style={[
-                    styles.dot,
-                    { borderColor: dot.color },
-                    dot.filled && { backgroundColor: dot.color },
-                  ]}
-                />
-                <View style={styles.rowBody}>
-                  <Text style={styles.rowName}>{item.name}</Text>
-                  <Text style={styles.rowMeta}>
-                    {STATUS_LABEL[item.status]}
-                    {item.started_at ? ` · ${item.started_at.replaceAll('-', '.')} 시작` : ''}
-                    {` · 파편 ${item.fragment_count ?? 0}`}
-                  </Text>
-                </View>
-                <Text style={styles.chevron}>›</Text>
-              </Pressable>
-            );
-            // 진행 중/완료가 섞여 있을 때만 그 경계에 구분선을 넣는다
-            if (index === doneStart && doneStart > 0) {
-              return (
-                <View>
-                  <View style={styles.doneDivider} />
-                  {row}
-                </View>
-              );
-            }
-            return row;
-          }}
-        />
+        <ScrollView contentContainerStyle={styles.list}>
+          {sections.map((section, sectionIndex) => (
+            <View key={section.status}>
+              {section.status === 'done' && sectionIndex > 0 && (
+                <View style={styles.doneDivider} />
+              )}
+              <DraggableFlatList
+                data={section.items}
+                scrollEnabled={false}
+                keyExtractor={(p) => p.id}
+                onDragBegin={() => setDragging(true)}
+                onDragEnd={({ data }) => {
+                  persistOrder(section.status, data);
+                  setTimeout(() => setDragging(false), 150);
+                }}
+                renderItem={({ item, drag, isActive }: RenderItemParams<Project>) => {
+                  const dot = STATUS_DOT[item.status];
+                  return (
+                    <Pressable
+                      style={[
+                        styles.row,
+                        item.status === 'done' && styles.rowDone,
+                        isActive && styles.rowActive,
+                      ]}
+                      onPress={() => {
+                        if (dragging) return;
+                        router.push(`/projects/${item.id}`);
+                      }}
+                      onLongPress={drag}
+                    >
+                      <View
+                        style={[
+                          styles.dot,
+                          { borderColor: dot.color },
+                          dot.filled && { backgroundColor: dot.color },
+                        ]}
+                      />
+                      <View style={styles.rowBody}>
+                        <Text style={styles.rowName}>{item.name}</Text>
+                        <Text style={styles.rowMeta}>
+                          {STATUS_LABEL[item.status]}
+                          {item.started_at ? ` · ${item.started_at.replaceAll('-', '.')} 시작` : ''}
+                          {` · 파편 ${item.fragment_count ?? 0}`}
+                        </Text>
+                      </View>
+                      <Text style={styles.chevron}>›</Text>
+                    </Pressable>
+                  );
+                }}
+              />
+            </View>
+          ))}
+        </ScrollView>
       )}
     </SafeAreaView>
   );
@@ -314,6 +348,7 @@ const styles = StyleSheet.create({
   },
   dot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
   rowDone: { opacity: FLOOR_OPACITY },
+  rowActive: { backgroundColor: colors.canvasElevated },
   rowBody: { flex: 1, gap: 2 },
   rowName: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sansMedium },
   rowMeta: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
