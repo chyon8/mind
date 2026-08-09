@@ -10,7 +10,7 @@ import { ShareIntentProvider } from 'expo-share-intent';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, InteractionManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Login } from '@/components/Login';
@@ -40,21 +40,31 @@ export default function RootLayout() {
     if (fontsLoaded && signedIn !== null) SplashScreen.hideAsync();
   }, [fontsLoaded, signedIn]);
 
-  // 포그라운드 진입 시 링크 제목 백필 (PLAN §3.6) — 로그인 후에만 의미가 있다
+  // 포그라운드 진입 시 링크 제목 백필 (PLAN §3.6) — 로그인 후에만 의미가 있다.
+  // 첫 화면이 그려진 뒤로 미룬다: 웹페이지 최대 10장을 받아 파싱하는 작업이라
+  // 마운트와 동시에 시작하면 오늘 파편이 그 뒤에 줄을 선다.
   useEffect(() => {
     if (!signedIn) return;
-    backfillLinkMeta();
+    const task = InteractionManager.runAfterInteractions(backfillLinkMeta);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') backfillLinkMeta();
     });
-    return () => sub.remove();
+    return () => {
+      task.cancel();
+      sub.remove();
+    };
   }, [signedIn]);
 
   // 아침 푸시 등록 + 탭 라우팅 (§7-3). 로그인 후에만 — 세션 있어야 토큰을 저장할 수 있다.
   useEffect(() => {
     if (!signedIn) return;
-    registerForPush();
-    return subscribePushTaps();
+    // 탭 구독은 즉시 — 푸시로 앱이 켜졌을 수 있다. 토큰 발급(Expo 서버 왕복)은 첫 화면 뒤로.
+    const unsubscribe = subscribePushTaps();
+    const task = InteractionManager.runAfterInteractions(registerForPush);
+    return () => {
+      task.cancel();
+      unsubscribe();
+    };
   }, [signedIn]);
 
   if (!fontsLoaded || signedIn === null) return null;

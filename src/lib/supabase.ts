@@ -108,8 +108,12 @@ export async function fetchArchivedProjectFragments(projectId: string): Promise<
   return data.map(toFragment);
 }
 
-// 월 캘린더용 — 날짜별 밀도만 알면 되므로 원문 없이 가볍게 전부 가져온다.
-// 피드는 100개씩 끊어 읽지만 캘린더는 아직 안 읽은 날에도 점을 찍어야 한다.
+// 월 캘린더용 — 날짜별 밀도만 알면 되므로 원문 없이 가볍게 가져온다.
+// 피드는 PAGE_SIZE씩 끊어 읽지만 캘린더는 아직 안 읽은 날에도 점을 찍어야 한다.
+// 상한을 둔다: 점 찍기용 인덱스가 코퍼스와 함께 무한정 자라면 화면 진입마다 그걸 다 받는다.
+// 스트립이 보여주는 최대 과거는 26주(CalendarStrip WEEKS_BACK)라 그 너머는 어차피 안 그린다.
+const DAY_INDEX_LIMIT = 1000;
+
 export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
   if (!isConfigured) {
     const { fixtureListFragments } = await import('./fixtures');
@@ -132,7 +136,7 @@ export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
       if (filter === 'pinned') q = q.eq('tier', 'pinned');
     }
   }
-  const { data, error } = await q.order('created_at', { ascending: false });
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(DAY_INDEX_LIMIT);
   if (error) throw error;
   // 조인으로 이미 딸려온 소속을 project_ids로 펴준다 — 헤매기의 프로젝트 제외가 이걸 쓴다.
   // 별도 쿼리를 새로 만들 필요가 없다.

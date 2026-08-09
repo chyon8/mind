@@ -37,9 +37,15 @@ export function DailyView() {
   const [byDay, setByDay] = useState<Record<string, Fragment[]>>({});
   const range = useRef<[Date, Date]>([startOfWeek(today), addDays(startOfWeek(today), 7)]);
   const loadVersion = useRef(0);
+  // 마운트 때 스트립(onRangeNeeded)과 포커스가 같은 주를 동시에 청한다 — 나가는 요청은 둘,
+  // 쓰는 응답은 하나였다. 같은 범위가 이미 날아가 있으면 두 번 보내지 않는다.
+  const inflight = useRef<string | null>(null);
   const selection = useMergeSelection();
 
   const loadRange = useCallback(async (from: Date, to: Date) => {
+    const sig = `${from.toISOString()}|${to.toISOString()}`;
+    if (inflight.current === sig) return;
+    inflight.current = sig;
     range.current = [from, to];
     const version = ++loadVersion.current;
     try {
@@ -56,7 +62,10 @@ export function DailyView() {
       }
       setByDay((prev) => ({ ...prev, ...fresh }));
     } catch {
-      // 조회 실패 시 해당 범위는 빈 채로 — 재진입 시 재시도
+      // 조회 실패 시 해당 범위는 안 읽은 채로 — 재진입 시 재시도.
+      // 빈 배열을 넣지 않는다: 그러면 "못 읽었다"가 "던진 게 없다"로 둔갑한다.
+    } finally {
+      if (inflight.current === sig) inflight.current = null;
     }
   }, []);
 
@@ -95,7 +104,11 @@ export function DailyView() {
   useEffect(() => onFragmentUpdated(() => loadRange(...range.current)), [loadRange]);
 
   const now = new Date();
-  const dayFragments = byDay[dayKey(selected.toISOString())] ?? [];
+  const selectedKey = dayKey(selected.toISOString());
+  const dayFragments = byDay[selectedKey] ?? [];
+  // loadRange가 범위 안의 모든 날에 키를 만들어 두므로, 키의 존재 자체가 "이 날은 읽었다"다.
+  // 이걸 안 보면 첫 렌더에서 아직 안 읽은 오늘이 "아무것도 던지지 않았다"로 보인다.
+  const dayLoaded = byDay[selectedKey] !== undefined;
 
   async function removeFragment(fr: Fragment) {
     if (!(await confirmDelete())) return;
@@ -129,7 +142,7 @@ export function DailyView() {
         {/* 아침 브리핑 입구. 보고 있는 그 날짜의 브리핑이 있으면 선다. */}
         <MorningCard date={selected} />
 
-        {dayFragments.length === 0 ? (
+        {!dayLoaded ? null : dayFragments.length === 0 ? ( // 읽기 전엔 아무 말도 안 한다
           <Text style={styles.emptyText}>이 날은 아무것도 던지지 않았다</Text>
         ) : (
           dayFragments.map((fr, index) => {

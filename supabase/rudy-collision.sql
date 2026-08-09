@@ -7,6 +7,12 @@
 --   (2) "왜 지금"(B-3)은 어느 파편과 부딪혔는지를 요구한다. 평균은 그 정보를 지운다.
 -- → seed마다 개별 비교하고 후보별 최댓값 + 그때의 seed를 함께 반환한다.
 
+-- min_age_days를 붙이기 전의 2인자 판이 DB에 남아 있었다. create or replace는 인자 목록이
+-- 다르면 교체가 아니라 **오버로드 추가**라, 앱이 seed_ids 하나만 넘기는 순간 PostgREST가
+-- "Could not choose the best candidate function"으로 거절했다 — 충돌 회상이 조용히 죽고
+-- 매번 랜덤으로 폴백하고 있었다(2026-08-09 실측). 옛 판을 먼저 지운다.
+drop function if exists rudy.collision_candidates(uuid[], int);
+
 create or replace function rudy.collision_candidates(
   seed_ids      uuid[],               -- 최근 던진 파편들 (각각이 씨앗)
   match_count   int default 40,

@@ -58,6 +58,9 @@ export default function Home() {
   const [fragments, setFragments] = useState<Fragment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [failed, setFailed] = useState(false);
+  // 한 번이라도 읽어봤나. 이게 없으면 첫 렌더의 빈 배열이 "아직 파편이 없다"로 보인다 —
+  // 로딩 상태를 빈 상태가 대신 쓰고 있었다.
+  const [loaded, setLoaded] = useState(false);
   // 월 캘린더는 아직 스크롤로 안 읽은 날에도 점을 찍어야 한다 — 원문 없이 날짜만 따로 받는다
   const [dayIndex, setDayIndex] = useState<DayMark[]>([]);
   // 피드/어젠다는 최신이 맨 위 — 과거로 깊이 내려간 상태가 곧 "오늘에서 벗어남"이다
@@ -89,7 +92,7 @@ export default function Home() {
     });
   }, []);
 
-  // 지금까지 읽어들인 마지막 페이지. 100개씩 끊어 읽고, 바닥에 닿으면 이어 붙인다.
+  // 지금까지 읽어들인 마지막 페이지. PAGE_SIZE(30)씩 끊어 읽고, 바닥에 닿으면 이어 붙인다.
   const lastPage = useRef(0);
   const [exhausted, setExhausted] = useState(false); // 더 읽을 게 없다
   const loading = useRef(false);
@@ -114,12 +117,16 @@ export default function Home() {
       setProjects(prs);
       setDayIndex(applyExcluded(index, filter, excluded));
       setExhausted(pages[pages.length - 1].length < PAGE_SIZE);
+      setLoaded(true);
     } catch {
-      if (version === loadVersion.current) setFailed(true);
+      if (version === loadVersion.current) {
+        setFailed(true);
+        setLoaded(true); // 실패는 실패로 말한다 — "파편이 없다"로 감추지 않는다
+      }
     }
   }, [filter, mode, excluded, excludedHydrated]);
 
-  // 바닥에 닿았다 → 다음 100개
+  // 바닥에 닿았다 → 다음 PAGE_SIZE개
   const loadMore = useCallback(async () => {
     if (exhausted || loading.current) return;
     loading.current = true;
@@ -142,6 +149,7 @@ export default function Home() {
   useEffect(() => {
     lastPage.current = 0;
     setExhausted(false);
+    setLoaded(false); // 새 렌즈의 결과가 오기 전까진 이전 렌즈 기준으로 "없다"고 말하지 않는다
   }, [filter]);
 
   // 사이드바에서 렌즈를 고르면 그 렌즈가 실제로 보이는 화면으로 넘어간다.
@@ -314,14 +322,17 @@ export default function Home() {
               </Pressable>
             </View>
           ) : sections.length === 0 ? (
+            // 읽기 전엔 아무 말도 안 한다 — 빈 화면이 거짓말보다 낫다
             <View style={styles.center}>
-              <Text style={styles.emptyText}>
-                {filter === 'grave'
-                  ? '무덤이 비어 있다'
-                  : filter === 'pinned'
-                    ? '고정한 파편이 없다'
-                    : '아직 파편이 없다'}
-              </Text>
+              {loaded && (
+                <Text style={styles.emptyText}>
+                  {filter === 'grave'
+                    ? '무덤이 비어 있다'
+                    : filter === 'pinned'
+                      ? '고정한 파편이 없다'
+                      : '아직 파편이 없다'}
+                </Text>
+              )}
             </View>
           ) : (
             <View style={styles.listArea}>
