@@ -3,7 +3,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { confirmBuryDiscoverNext, confirmDelete } from '@/lib/confirm';
+import { type BuryChoice, BuryDiscoverModal } from '@/components/BuryDiscoverModal';
+import { confirmDelete } from '@/lib/confirm';
 import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import {
@@ -61,6 +62,8 @@ export default function FragmentDetail() {
   const [similarLoading, setSimilarLoading] = useState(false);
   // 표시가 5개 꽉 찼을 때 잠깐 뜨는 안내 (토스트를 새로 들이지 않는다 — 그 자리 글자로만 말한다)
   const [discoverFull, setDiscoverFull] = useState(false);
+  // 발견 포함 지정된 파편을 묻으려 할 때만 뜬다 (BuryDiscoverModal)
+  const [buryModalOpen, setBuryModalOpen] = useState(false);
 
   // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
   // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
@@ -192,23 +195,27 @@ export default function FragmentDetail() {
 
   // 묻기/파내기. 발견에 포함 지정된 걸 묻을 때만 한 번 물어본다 — 지정은 상한 5개라
   // 까먹고 묻어두면 다음 브리핑 한 자리가 조용히 묻힌 파편에 먹힌다.
-  async function toggleArchive() {
+  function toggleArchive() {
     if (pinnedBlocksGrave) return;
     if (fragment!.archived) {
-      await patch({ archived: false });
+      patch({ archived: false }).catch(() => {});
       return;
     }
     if (!fragment!.discover_next) {
-      await patch({ archived: true });
+      patch({ archived: true }).catch(() => {});
       return;
     }
-    const choice = await confirmBuryDiscoverNext();
+    setBuryModalOpen(true);
+  }
+
+  function resolveBury(choice: BuryChoice) {
+    setBuryModalOpen(false);
     if (choice === null) return;
-    await patch(
+    patch(
       choice === 'release'
         ? { archived: true, discover_next: false, discover_next_slot: null }
         : { archived: true },
-    );
+    ).catch(() => {});
   }
 
   // 프로젝트는 태그 — 여러 개 동시에 붙는다 (PLAN.md §3.3)
@@ -529,7 +536,7 @@ export default function FragmentDetail() {
         <View style={styles.divider} />
 
         <Pressable
-          onPress={() => toggleArchive().catch(() => {})}
+          onPress={toggleArchive}
           style={[styles.graveBtn, pinnedBlocksGrave && styles.graveBtnDisabled]}
         >
           <Text style={styles.graveLabel}>
@@ -578,6 +585,8 @@ export default function FragmentDetail() {
           </SafeAreaView>
         </Modal>
       )}
+
+      {buryModalOpen && <BuryDiscoverModal onChoice={resolveBury} />}
     </SafeAreaView>
   );
 }

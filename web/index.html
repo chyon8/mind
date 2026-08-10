@@ -260,6 +260,7 @@
   <div class="layout" id="layout">
     <nav class="sidebar" id="sidebar">
       <button class="navBtn on" data-view="fragments">파편</button>
+      <button class="navBtn" id="discoverIncludeBtn">발견 포함</button>
       <button class="navBtn" data-view="projects">프로젝트</button>
       <button class="navBtn" data-view="wander">헤매기</button>
       <button class="navBtn" data-view="discovery">발견</button>
@@ -489,6 +490,7 @@ function renderFilters() {
   mk('inbox', 'Inbox');
   mk('discover', '발견 포함');
   for (const p of projects) mk(p.id, p.name);
+  $('discoverIncludeBtn').classList.toggle('on', currentView === 'fragments' && filter === 'discover');
 }
 
 const projName = (id) => projects.find((p) => p.id === id)?.name ?? '';
@@ -850,9 +852,19 @@ async function deleteDetailFragment() {
 // ---------- 사이드바 ----------
 let currentView = 'fragments';
 
-document.querySelectorAll('.navBtn').forEach((btn) => {
+document.querySelectorAll('.navBtn[data-view]').forEach((btn) => {
   btn.onclick = () => switchView(btn.dataset.view);
 });
+
+// "발견 포함" — 사이드바에서 바로 한 자리로 (앱 Sidebar.tsx의 go('discover')와 같은 문법).
+// 파편 탭 필터 칩에도 같은 렌즈가 있지만, 거기 묻혀 있으면 "볼 곳이 없다"가 되니 전용 자리를 둔다.
+$('discoverIncludeBtn').onclick = () => {
+  switchView('fragments');
+  filter = 'discover';
+  searchTerm = '';
+  $('search').value = '';
+  refresh();
+};
 
 const SIDEBAR_KEY = 'sidebar.collapsed';
 function setSidebarCollapsed(collapsed) {
