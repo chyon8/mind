@@ -46,12 +46,19 @@ export async function signIn(email: string, password: string): Promise<void> {
 
 export const PAGE_SIZE = 30;
 
-// 'all' | 'inbox' | 'pinned' | 'grave' | 프로젝트 id
+// 'all' | 'inbox' | 'pinned' | 'grave' | 'discover' | 프로젝트 id
 // pinned = 즐겨찾기. 새 개념이 아니라 tier의 pinned를 모아 보는 렌즈일 뿐이다.
-export type FeedFilter = 'all' | 'inbox' | 'pinned' | 'grave' | (string & {});
+// discover = "다음 발견에 포함" 지정을 모아 보는 렌즈. 이것도 새 개념이 아니다.
+export type FeedFilter = 'all' | 'inbox' | 'pinned' | 'grave' | 'discover' | (string & {});
 
 function isLens(filter: FeedFilter): boolean {
-  return filter === 'all' || filter === 'inbox' || filter === 'pinned' || filter === 'grave';
+  return (
+    filter === 'all' ||
+    filter === 'inbox' ||
+    filter === 'pinned' ||
+    filter === 'grave' ||
+    filter === 'discover'
+  );
 }
 
 const EMBED = '*, fragment_projects(project_id)';
@@ -82,6 +89,10 @@ export async function fetchFragments(filter: FeedFilter, page = 0): Promise<Frag
   } else {
     q = supabase().from('fragments').select(EMBED);
     if (filter === 'grave') q = q.eq('archived', true);
+    // 발견 렌즈는 archived를 안 건다 — 재료 로더가 지정된 파편을 창·archived 무시하고 싣기
+    // 때문이다(scripts/discover-claude/material.mjs). 묻힌 채 지정이 살아 있는 것까지 보여야
+    // "묻었는데 왜 또 나오지"가 여기서 풀린다.
+    else if (filter === 'discover') q = q.eq('discover_next', true);
     else {
       q = q.eq('archived', false);
       if (filter === 'inbox') q = q.is('fragment_projects', null); // 매핑 0개 = Inbox
@@ -130,6 +141,7 @@ export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
   } else {
     q = supabase().from('fragments').select(`${cols}, fragment_projects(project_id)`);
     if (filter === 'grave') q = q.eq('archived', true);
+    else if (filter === 'discover') q = q.eq('discover_next', true); // fetchFragments와 같은 이유로 archived를 안 건다
     else {
       q = q.eq('archived', false);
       if (filter === 'inbox') q = q.is('fragment_projects', null);

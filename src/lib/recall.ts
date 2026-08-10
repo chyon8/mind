@@ -47,9 +47,14 @@ const NEAR_FLOOR = 0.7;
 
 const STORE_KEY = 'recall';
 
-// 아직 떠올릴 만한가 — 구해냈으면 선명해졌고, 흘려보냈으면 흔적이 남는다
+// supabase.ts LET_GO_COOLDOWN_DAYS와 같은 값 (fixtures.ts에도 복제돼 있다. 같이 바꾼다)
+const LET_GO_COOLDOWN_MS = 7 * 86_400_000;
+
+// 아직 떠올릴 만한가 — 구해냈으면 선명해졌고, 흘려보냈으면 흔적이 남는다.
+// 흘려보낸 지 얼마 안 됐으면 아직 제외, 쿨다운 지나면 다시 후보 — "당분간"이지 "영원히"가 아니다.
 function stillFading(fr: Fragment, now: Date): boolean {
-  return !fr.archived && fr.let_go_at == null && vividness(fr, now) <= NEAR_FLOOR;
+  const cooledDown = fr.let_go_at == null || now.getTime() - new Date(fr.let_go_at).getTime() > LET_GO_COOLDOWN_MS;
+  return !fr.archived && cooledDown && vividness(fr, now) <= NEAR_FLOOR;
 }
 
 // 중요할수록, 여러 번 구해냈을수록 더 자주 떠오른다.

@@ -162,6 +162,11 @@
     border-top: 1px solid var(--border);
   }
   .piece { border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+  /* 확인 모달 — 상세 모달 위에 겹쳐 뜬다 */
+  #confirmBackdrop { z-index: 60; padding-top: 16vh; }
+  #confirmPanel { max-width: 420px; }
+  .confirmTitle { font-weight: 600; margin-bottom: 8px; }
+  .confirmMsg { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
 
   /* ---------- 사이드바 ---------- */
   .layout { display: flex; gap: 28px; align-items: flex-start; transition: gap .15s ease; }
@@ -330,6 +335,10 @@
   <div class="modalPanel" id="detailPanel"></div>
 </div>
 
+<div class="modalBackdrop" id="confirmBackdrop">
+  <div class="modalPanel" id="confirmPanel"></div>
+</div>
+
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -344,10 +353,11 @@ const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.cla
 // ---------- 상태 ----------
 let projects = [];              // {id, name}
 let selectedTags = new Set();   // 추가 폼에서 고른 프로젝트 id
-let filter = 'all';             // 'all' | 'inbox' | 프로젝트 id
+let filter = 'all';             // 'all' | 'inbox' | 'discover' | 프로젝트 id
 let searchTerm = '';
 const DISCOVER_MAX = 5;         // "다음 발견에 포함" 상한 (RUDY-STATUS.md ①)
 let discoverFull = false;       // 방금 상한에 걸려 안내를 보여주는 중인가
+const GRAVE_OPACITY = 0.25;     // 묻힌 것 고정 opacity (앱 theme.ts의 FLOOR_OPACITY와 같은 값)
 
 // ---------- 인증 ----------
 $('loginBtn').onclick = async () => {
@@ -386,6 +396,16 @@ async function loadFragments() {
       .or(`content.ilike.%${q}%,link_title.ilike.%${q}%,note.ilike.%${q}%`)
       .order('created_at', { ascending: false })
       .limit(200);
+    if (error) throw error;
+    rows = data;
+  } else if (filter === 'discover') {
+    // 발견 렌즈는 archived를 안 건다 — 재료 로더가 지정된 파편을 창·archived 무시하고 싣는다
+    // (scripts/discover-claude/material.mjs). 묻힌 채 지정이 살아 있는 것까지 여기서 보여야 한다.
+    const { data, error } = await sb.from('fragments')
+      .select('*, fragment_projects(project_id)')
+      .eq('discover_next', true)
+      .order('created_at', { ascending: false })
+      .limit(300);
     if (error) throw error;
     rows = data;
   } else if (filter === 'all' || filter === 'inbox') {
@@ -467,6 +487,7 @@ function renderFilters() {
   };
   mk('all', '전체');
   mk('inbox', 'Inbox');
+  mk('discover', '발견 포함');
   for (const p of projects) mk(p.id, p.name);
 }
 
@@ -525,11 +546,18 @@ function renderList(frs) {
   $('count').textContent = frs.length ? `${frs.length}개` : '';
   if (!frs.length) {
     const e = el('div', 'empty');
-    e.textContent = searchTerm ? '검색 결과 없음' : '아직 파편이 없어';
+    e.textContent = searchTerm
+      ? '검색 결과 없음'
+      : filter === 'discover' ? '발견에 포함하도록 지정한 파편이 없다' : '아직 파편이 없어';
     list.appendChild(e);
     return;
   }
-  for (const f of frs) list.appendChild(fragmentCardEl(f));
+  for (const f of frs) {
+    const card = fragmentCardEl(f);
+    // 묻힌 것 — 발견 렌즈에만 섞여 나온다(다른 렌즈는 archived를 안 싣는다). 앱 무덤 뷰와 같은 25%
+    if (f.archived) card.style.opacity = GRAVE_OPACITY;
+    list.appendChild(card);
+  }
 }
 
 // ---------- 상세 모달 (수정 / 묻기·파내기 / 삭제) ----------
@@ -760,12 +788,47 @@ async function toggleDiscoverSkip() {
   );
 }
 
+// "다음 발견에 포함" 지정된 파편을 묻을 때 — 지정을 풀지 유지할지 고른다 (앱 lib/confirm.ts와 같은 규칙).
+// **자동으로 풀지 않는다.** 재료 로더가 지정된 파편을 창·archived 무시하고 싣기 때문에
+// (scripts/discover-claude/material.mjs) "묻어두고도 이건 파달라"가 성립하는 조합이다.
+// 세 갈래라 window.confirm으로는 안 돼서 상세 모달 위에 겹쳐 뜨는 확인 모달을 쓴다.
+function askBuryChoice() {
+  return new Promise((resolve) => {
+    const panel = $('confirmPanel');
+    panel.innerHTML = '';
+    const title = el('div', 'confirmTitle'); title.textContent = '발견에 포함된 파편';
+    const msg = el('div', 'confirmMsg');
+    msg.textContent = '이 파편은 다음 발견에 포함하도록 지정돼 있다. 지정을 유지하면 묻힌 뒤에도 브리핑에 나온다.';
+    const row = el('div', 'detailRow');
+    const done = (value) => {
+      $('confirmBackdrop').classList.remove('open');
+      $('confirmBackdrop').onclick = null;
+      resolve(value);
+    };
+    for (const [label, value] of [['취소', null], ['지정 풀고 묻기', 'release'], ['유지하고 묻기', 'keep']]) {
+      const b = el('button', 'detailBtn');
+      b.textContent = label;
+      b.onclick = () => done(value);
+      row.appendChild(b);
+    }
+    panel.append(title, msg, row);
+    $('confirmBackdrop').classList.add('open');
+    $('confirmBackdrop').onclick = (e) => { if (e.target.id === 'confirmBackdrop') done(null); };
+  });
+}
+
 async function toggleDetailArchive() {
   const f = detailFragment;
   const next = !f.archived;
-  const { error } = await sb.from('fragments').update({ archived: next }).eq('id', f.id);
+  const fields = { archived: next };
+  if (next && f.discover_next) {
+    const choice = await askBuryChoice();
+    if (choice === null) return;
+    if (choice === 'release') { fields.discover_next = false; fields.discover_next_slot = null; }
+  }
+  const { error } = await sb.from('fragments').update(fields).eq('id', f.id);
   if (error) { alert('저장 실패: ' + error.message); return; }
-  f.archived = next;
+  Object.assign(f, fields);
   renderDetail();
   await refresh();
   await refreshWanderItems();

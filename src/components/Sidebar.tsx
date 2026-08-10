@@ -32,6 +32,11 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
         <Pressable style={styles.row} onPress={() => go('pinned')}>
           <Text style={styles.rowLabel}>고정</Text>
         </Pressable>
+        {/* "다음 발견에 포함" 지정을 모아 본다 — 지정은 상한 5개라 지금 뭘 걸어놨는지 알아야 한다.
+            묻힌 채 지정이 살아 있는 것도 여기 섞여 나온다(흐리게). */}
+        <Pressable style={styles.row} onPress={() => go('discover')}>
+          <Text style={styles.rowLabel}>발견 포함</Text>
+        </Pressable>
         <Pressable style={styles.row} onPress={goProjects}>
           <Text style={styles.rowLabel}>프로젝트</Text>
           <Text style={styles.chevron}>›</Text>

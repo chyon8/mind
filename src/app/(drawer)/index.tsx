@@ -246,10 +246,10 @@ export default function Home() {
     setPendingJump(null);
   }, [pendingJump, sections]);
 
+  // 묻힌 것은 25% 고정 (PLAN §3.2). 무덤 뷰가 통째로 그렇고, 발견 렌즈는 묻힌 것과 산 것이
+  // 섞여 나오므로 같은 문법으로 구분된다 — 다른 렌즈엔 archived가 애초에 안 실린다.
   const fragmentOpacity = (fr: Fragment) =>
-    filter === 'grave'
-      ? FLOOR_OPACITY // 무덤 뷰는 25% 고정 (PLAN §3.2)
-      : vividness(fr, now);
+    filter === 'grave' || fr.archived ? FLOOR_OPACITY : vividness(fr, now);
 
   async function removeFragment(fr: Fragment) {
     if (!(await confirmDelete())) return;
@@ -330,7 +330,9 @@ export default function Home() {
                     ? '무덤이 비어 있다'
                     : filter === 'pinned'
                       ? '고정한 파편이 없다'
-                      : '아직 파편이 없다'}
+                      : filter === 'discover'
+                        ? '발견에 포함하도록 지정한 파편이 없다'
+                        : '아직 파편이 없다'}
                 </Text>
               )}
             </View>

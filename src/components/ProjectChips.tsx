@@ -30,7 +30,9 @@ export function ProjectChips({
         ? 'Inbox'
         : selected === 'grave'
           ? '무덤'
-          : (projects.find((p) => p.id === selected)?.name ?? '');
+          : selected === 'discover'
+            ? '발견 포함'
+            : (projects.find((p) => p.id === selected)?.name ?? '');
     if (label) chips.push({ key: selected, label });
   }
 

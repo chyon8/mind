@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { confirmDelete } from '@/lib/confirm';
+import { confirmBuryDiscoverNext, confirmDelete } from '@/lib/confirm';
 import { feedDateLabel, formatTime } from '@/lib/dates';
 import { Markdown } from '@/lib/markdown';
 import {
@@ -187,6 +187,27 @@ export default function FragmentDetail() {
       fragment!.discover_skip
         ? { discover_skip: false }
         : { discover_skip: true, discover_next: false, discover_next_slot: null },
+    );
+  }
+
+  // 묻기/파내기. 발견에 포함 지정된 걸 묻을 때만 한 번 물어본다 — 지정은 상한 5개라
+  // 까먹고 묻어두면 다음 브리핑 한 자리가 조용히 묻힌 파편에 먹힌다.
+  async function toggleArchive() {
+    if (pinnedBlocksGrave) return;
+    if (fragment!.archived) {
+      await patch({ archived: false });
+      return;
+    }
+    if (!fragment!.discover_next) {
+      await patch({ archived: true });
+      return;
+    }
+    const choice = await confirmBuryDiscoverNext();
+    if (choice === null) return;
+    await patch(
+      choice === 'release'
+        ? { archived: true, discover_next: false, discover_next_slot: null }
+        : { archived: true },
     );
   }
 
@@ -508,10 +529,7 @@ export default function FragmentDetail() {
         <View style={styles.divider} />
 
         <Pressable
-          onPress={() => {
-            if (pinnedBlocksGrave) return;
-            patch({ archived: !fragment.archived });
-          }}
+          onPress={() => toggleArchive().catch(() => {})}
           style={[styles.graveBtn, pinnedBlocksGrave && styles.graveBtnDisabled]}
         >
           <Text style={styles.graveLabel}>
