@@ -187,6 +187,17 @@
   .filterHint { color: var(--muted); font-size: 12px; margin: 8px 0 14px; }
   .end { color: var(--muted); font-size: 12px; text-align: center; padding: 20px 0; }
 
+  /* ---------- 프로젝트 ---------- */
+  .lineInput {
+    background: var(--panel-2); border: 1px solid var(--border); color: inherit;
+    border-radius: 8px; padding: 8px 11px; outline: none;
+  }
+  .lineInput:focus { border-color: #555; }
+  .projDot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); flex-shrink: 0; }
+  .projDot.filled { background: var(--muted); }
+  .projSection { color: var(--muted); font-size: 12px; margin: 16px 2px 4px; }
+  .projSection:first-child { margin-top: 0; }
+
   /* ---------- 발견 ---------- */
   .histRow {
     display: flex; align-items: center; gap: 10px; padding: 10px 2px;
@@ -244,6 +255,7 @@
   <div class="layout" id="layout">
     <nav class="sidebar" id="sidebar">
       <button class="navBtn on" data-view="fragments">파편</button>
+      <button class="navBtn" data-view="projects">프로젝트</button>
       <button class="navBtn" data-view="wander">헤매기</button>
       <button class="navBtn" data-view="discovery">발견</button>
     </nav>
@@ -266,6 +278,32 @@
 
         <div class="count" id="count"></div>
         <div id="list"></div>
+      </div>
+
+      <div id="projectsView" class="hidden">
+        <div id="projectsHome">
+          <div style="display: flex; justify-content: flex-end; margin-bottom: 14px;">
+            <button class="ghost" id="projectNewToggle">＋ 새 프로젝트</button>
+          </div>
+          <div class="composer hidden" id="projectComposer">
+            <input class="lineInput" id="projectName" placeholder="프로젝트 이름" />
+            <div class="tagpick" id="projectStatusPick" style="margin-top: 10px;"></div>
+            <div class="row">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input class="lineInput" id="projectStarted" type="date" style="width: auto;" />
+                <button class="ghost" id="projectStartedToday">오늘</button>
+              </div>
+              <span class="err" id="projectAddErr"></span>
+              <button class="add" id="projectAddBtn">만들기</button>
+            </div>
+          </div>
+          <div class="filters" id="projectFilters"></div>
+          <div id="projectsList"></div>
+        </div>
+        <div id="projectsDetail" class="hidden">
+          <button class="ghost" id="projectBack" style="margin-bottom: 14px;">‹ 목록</button>
+          <div id="projectDetailBody"></div>
+        </div>
       </div>
 
       <div id="wanderView" class="hidden">
@@ -326,9 +364,14 @@ $('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.reload(
 const isUrl = (s) => /^https?:\/\/\S+$/i.test(s.trim());
 
 async function loadProjects() {
-  const { data, error } = await sb.from('projects').select('id, name').order('created_at');
+  const { data, error } = await sb.from('projects')
+    .select('*, fragment_projects(count)')
+    .order('created_at');
   if (error) throw error;
-  projects = data;
+  projects = data.map(({ fragment_projects, ...rest }) => ({
+    ...rest,
+    fragment_count: fragment_projects?.[0]?.count ?? 0,
+  }));
 }
 
 async function loadFragments() {
@@ -607,6 +650,7 @@ async function saveDetailField(field, value) {
   if (error) { alert('저장 실패: ' + error.message); return; }
   f[field] = value;
   await refresh();
+  await refreshWanderItems();
 }
 
 async function setDetailTier(value) {
@@ -617,6 +661,7 @@ async function setDetailTier(value) {
   f.tier = value;
   renderDetail();
   await refresh();
+  await refreshWanderItems();
 }
 
 async function toggleDetailProject(projectId) {
@@ -634,6 +679,7 @@ async function toggleDetailProject(projectId) {
   f.project_ids = next;
   renderDetail();
   await refresh();
+  await refreshWanderItems();
 }
 
 async function toggleDetailArchive() {
@@ -644,6 +690,7 @@ async function toggleDetailArchive() {
   f.archived = next;
   renderDetail();
   await refresh();
+  await refreshWanderItems();
 }
 
 async function deleteDetailFragment() {
@@ -656,6 +703,7 @@ async function deleteDetailFragment() {
   if (error) { alert('삭제 실패: ' + error.message); return; }
   closeDetail();
   await refresh();
+  await refreshWanderItems();
 }
 
 // ---------- 사이드바 ----------
@@ -677,11 +725,305 @@ function switchView(view) {
   currentView = view;
   document.querySelectorAll('.navBtn').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
   $('fragmentsView').classList.toggle('hidden', view !== 'fragments');
+  $('projectsView').classList.toggle('hidden', view !== 'projects');
   $('wanderView').classList.toggle('hidden', view !== 'wander');
   $('discoveryView').classList.toggle('hidden', view !== 'discovery');
   if (view === 'wander' && !wanderStarted) { wanderStarted = true; startWander(); }
   if (view === 'discovery' && !discoveryStarted) { discoveryStarted = true; startDiscovery(); }
+  if (view === 'projects') {
+    closeProjectDetail();
+    loadProjects().then(() => {
+      renderComposerTags();
+      renderFilters();
+      renderProjectFilters();
+      renderProjectsList();
+    });
+  }
 }
+
+// ---------- 프로젝트 (앱 projects/index.tsx·[id].tsx 포팅 — 드래그 순서 변경은 안 붙였다) ----------
+const PROJECT_STATUS_LABEL = { before: '시작전', active: '진행중', paused: '중단', done: '완료' };
+const PROJECT_STATUS_ORDER = { active: 0, before: 1, paused: 2, done: 3 };
+const PROJECT_FILTERS = [
+  { key: 'all', label: '전체' },
+  { key: 'active', label: '진행중' },
+  { key: 'before', label: '시작전' },
+  { key: 'paused', label: '중단' },
+  { key: 'done', label: '완료' },
+];
+const PROJECT_CREATE_STATUSES = ['before', 'active', 'paused', 'done'];
+
+let projectFilter = 'all';
+let projectNewStatus = 'before';
+let projectNewStarted = null;
+let currentProjectId = null;
+let projectDetailFragments = [];
+let projectDetailArchivedFragments = [];
+
+// position 있으면 그걸로, 없으면 created_at(원래 순서)로 — 드래그 안 해본 그룹은 그대로
+function compareProjectPosition(a, b) {
+  if (a.position != null && b.position != null) return a.position - b.position;
+  if (a.position != null) return -1;
+  if (b.position != null) return 1;
+  return a.created_at.localeCompare(b.created_at);
+}
+
+async function fetchProjectFragments(projectId, archived) {
+  const { data, error } = await sb.from('fragments')
+    .select('*, fragment_projects!inner(project_id)')
+    .eq('fragment_projects.project_id', projectId)
+    .eq('archived', archived)
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw error;
+  return data.map((r) => ({ ...r, project_ids: (r.fragment_projects ?? []).map((m) => m.project_id) }));
+}
+
+// 상태가 바뀐 시각을 남긴다 (supabase/rudy-project-status.sql) — 아침 브리핑이 완료 전환을 보려면 필요
+async function patchProject(id, patch) {
+  const stamped = 'status' in patch ? { ...patch, status_changed_at: new Date().toISOString() } : patch;
+  const { error } = await sb.from('projects').update(stamped).eq('id', id);
+  if (error) { alert('저장 실패: ' + error.message); throw error; }
+  await loadProjects();
+  renderComposerTags();
+  renderFilters();
+}
+
+async function createProjectWeb() {
+  const name = $('projectName').value.trim();
+  if (!name) return;
+  $('projectAddErr').textContent = '';
+  $('projectAddBtn').disabled = true;
+  try {
+    const { error } = await sb.from('projects')
+      .insert({ name, status: projectNewStatus, started_at: projectNewStarted });
+    if (error) throw error;
+    $('projectName').value = '';
+    $('projectStarted').value = '';
+    projectNewStatus = 'before';
+    projectNewStarted = null;
+    $('projectComposer').classList.add('hidden');
+    renderProjectStatusPick();
+    await loadProjects();
+    renderComposerTags();
+    renderFilters();
+    renderProjectsList();
+  } catch (e) {
+    $('projectAddErr').textContent = '만들기 실패: ' + (e.message ?? e);
+  } finally {
+    $('projectAddBtn').disabled = false;
+  }
+}
+
+// 프로젝트를 지워도 파편은 살아남는다 — 매핑만 cascade로 사라진다
+async function deleteProjectWeb(id) {
+  if (!confirm('프로젝트를 삭제할까? 파편은 남고 매핑만 사라진다.')) return;
+  const { error } = await sb.from('projects').delete().eq('id', id);
+  if (error) { alert('삭제 실패: ' + error.message); return; }
+  if (filter === id) filter = 'all';
+  if (wanderFilter === id) wanderFilter = 'all';
+  closeProjectDetail();
+  await loadProjects();
+  renderComposerTags();
+  renderFilters();
+  renderProjectsList();
+  await refresh();
+}
+
+function renderProjectStatusPick() {
+  const box = $('projectStatusPick');
+  box.innerHTML = '';
+  for (const s of PROJECT_CREATE_STATUSES) {
+    const c = el('button', 'chip' + (projectNewStatus === s ? ' on' : ''));
+    c.textContent = PROJECT_STATUS_LABEL[s];
+    c.onclick = () => { projectNewStatus = s; renderProjectStatusPick(); };
+    box.appendChild(c);
+  }
+}
+
+function renderProjectFilters() {
+  const box = $('projectFilters');
+  box.innerHTML = '';
+  for (const f of PROJECT_FILTERS) {
+    const c = el('button', 'chip' + (projectFilter === f.key ? ' on' : ''));
+    c.textContent = f.label;
+    c.onclick = () => { projectFilter = f.key; renderProjectFilters(); renderProjectsList(); };
+    box.appendChild(c);
+  }
+}
+
+function projectRowEl(p) {
+  const row = el('div', 'histRow');
+  const main = el('div', 'histMain');
+  main.onclick = () => openProjectDetail(p.id);
+
+  const metaRow = el('div', 'histMeta');
+  const dot = el('span', 'projDot' + ((p.status === 'active' || p.status === 'done') ? ' filled' : ''));
+  metaRow.appendChild(dot);
+  const meta = el('span', 'histDate');
+  meta.textContent = `${PROJECT_STATUS_LABEL[p.status]}`
+    + (p.started_at ? ` · ${p.started_at.replaceAll('-', '.')} 시작` : '')
+    + ` · 파편 ${p.fragment_count ?? 0}`;
+  metaRow.appendChild(meta);
+  main.appendChild(metaRow);
+
+  const title = el('div', 'histTitle'); title.textContent = p.name;
+  main.appendChild(title);
+
+  const del = el('button', 'histDel'); del.textContent = '삭제';
+  del.onclick = (e) => { e.stopPropagation(); deleteProjectWeb(p.id); };
+
+  row.append(main, del);
+  return row;
+}
+
+function renderProjectsList() {
+  const box = $('projectsList');
+  box.innerHTML = '';
+  const visible = projects.filter((p) => projectFilter === 'all' || p.status === projectFilter);
+  if (visible.length === 0) {
+    box.innerHTML = '<div class="empty">프로젝트가 없다</div>';
+    return;
+  }
+  const statuses = Object.keys(PROJECT_STATUS_ORDER).sort((a, b) => PROJECT_STATUS_ORDER[a] - PROJECT_STATUS_ORDER[b]);
+  for (const status of statuses) {
+    const items = visible.filter((p) => p.status === status).sort(compareProjectPosition);
+    if (!items.length) continue;
+    const label = el('div', 'projSection'); label.textContent = PROJECT_STATUS_LABEL[status];
+    box.appendChild(label);
+    for (const p of items) box.appendChild(projectRowEl(p));
+  }
+}
+
+function closeProjectDetail() {
+  currentProjectId = null;
+  $('projectsDetail').classList.add('hidden');
+  $('projectsHome').classList.remove('hidden');
+}
+$('projectBack').onclick = closeProjectDetail;
+
+async function openProjectDetail(id) {
+  currentProjectId = id;
+  $('projectsHome').classList.add('hidden');
+  $('projectsDetail').classList.remove('hidden');
+  $('projectDetailBody').innerHTML = '<div class="empty">불러오는 중…</div>';
+  try {
+    const [frs, archivedFrs] = await Promise.all([
+      fetchProjectFragments(id, false),
+      fetchProjectFragments(id, true),
+    ]);
+    projectDetailFragments = frs;
+    projectDetailArchivedFragments = archivedFrs;
+    renderProjectDetail();
+  } catch (e) {
+    $('projectDetailBody').innerHTML = `<div class="empty">불러오기 실패: ${e.message ?? e}</div>`;
+  }
+}
+
+// 프로젝트 상세 — 메타(상태/시작일/설명) + 매핑된 파편들. 마감일·진척률·태스크 없음 (PLAN.md §6.2)
+function renderProjectDetail() {
+  const p = projects.find((x) => x.id === currentProjectId);
+  const box = $('projectDetailBody');
+  box.innerHTML = '';
+  if (!p) { box.innerHTML = '<div class="empty">프로젝트를 찾을 수 없다</div>'; return; }
+
+  const nameField = el('input', 'lineInput');
+  nameField.value = p.name;
+  nameField.style.cssText = 'font-size:18px; font-weight:600; width:100%; margin-bottom:14px;';
+  nameField.addEventListener('blur', async () => {
+    const n = nameField.value.trim();
+    if (n && n !== p.name) { await patchProject(p.id, { name: n }); renderProjectsList(); }
+    else nameField.value = p.name;
+  });
+  box.appendChild(nameField);
+
+  const statusLabel = el('div', 'detailLabel'); statusLabel.textContent = 'STATUS';
+  box.appendChild(statusLabel);
+  const statusRow = el('div', 'detailRow');
+  for (const [value, label] of [['active', '진행중'], ['before', '시작전'], ['paused', '중단'], ['done', '완료']]) {
+    const b = el('button', 'detailBtn' + (p.status === value ? ' on' : ''));
+    b.textContent = label;
+    b.onclick = async () => { await patchProject(p.id, { status: value }); renderProjectDetail(); renderProjectsList(); };
+    statusRow.appendChild(b);
+  }
+  box.appendChild(statusRow);
+
+  const startLabel = el('div', 'detailLabel'); startLabel.textContent = '시작일';
+  box.appendChild(startLabel);
+  const startRow = el('div', 'detailRow');
+  const startInput = el('input', 'lineInput');
+  startInput.type = 'date';
+  startInput.value = p.started_at || '';
+  startInput.addEventListener('change', async () => {
+    await patchProject(p.id, { started_at: startInput.value || null });
+    renderProjectsList();
+  });
+  startRow.appendChild(startInput);
+  const todayBtn = el('button', 'detailBtn'); todayBtn.textContent = '오늘';
+  todayBtn.onclick = async () => {
+    const key = new Date().toISOString().slice(0, 10);
+    startInput.value = key;
+    await patchProject(p.id, { started_at: key });
+    renderProjectsList();
+  };
+  startRow.appendChild(todayBtn);
+  box.appendChild(startRow);
+
+  const descLabel = el('div', 'detailLabel'); descLabel.textContent = '설명';
+  box.appendChild(descLabel);
+  const descField = el('textarea', 'detailField');
+  descField.value = p.description || '';
+  descField.placeholder = '이게 뭔지, 왜 시작했는지…';
+  descField.addEventListener('blur', async () => {
+    const d = descField.value.trim();
+    await patchProject(p.id, { description: d === '' ? null : d });
+  });
+  box.appendChild(descField);
+
+  // 발견에서 제외 — 켜면 이 프로젝트와 여기 묶인 파편까지 브리핑 재료에서 빠진다. 검색·채팅엔 그대로 나온다.
+  const skipLabel = el('div', 'detailLabel'); skipLabel.textContent = '발견';
+  box.appendChild(skipLabel);
+  const skipRow = el('div', 'detailRow');
+  const skipBtn = el('button', 'detailBtn' + (p.discover_skip ? ' on' : ''));
+  skipBtn.textContent = '발견에서 제외';
+  skipBtn.onclick = async () => { await patchProject(p.id, { discover_skip: !p.discover_skip }); renderProjectDetail(); };
+  skipRow.appendChild(skipBtn);
+  box.appendChild(skipRow);
+
+  const actions = el('div', 'detailActions');
+  const deleteBtn = el('button', 'detailBtn danger'); deleteBtn.textContent = '삭제';
+  deleteBtn.onclick = () => deleteProjectWeb(p.id);
+  actions.appendChild(deleteBtn);
+  box.appendChild(actions);
+
+  const divider = el('div'); divider.style.cssText = 'border-top:1px solid var(--border); margin:18px 0;';
+  box.appendChild(divider);
+
+  const frLabel = el('div', 'detailLabel'); frLabel.textContent = `FRAGMENTS · ${projectDetailFragments.length}`;
+  box.appendChild(frLabel);
+  if (projectDetailFragments.length === 0) {
+    const e = el('div', 'empty'); e.textContent = '아직 붙은 파편이 없다';
+    box.appendChild(e);
+  } else {
+    for (const fr of projectDetailFragments) box.appendChild(fragmentCardEl(fr));
+  }
+
+  if (projectDetailArchivedFragments.length > 0) {
+    const aLabel = el('div', 'detailLabel'); aLabel.textContent = `묻힌 것 · ${projectDetailArchivedFragments.length}`;
+    box.appendChild(aLabel);
+    for (const fr of projectDetailArchivedFragments) box.appendChild(fragmentCardEl(fr));
+  }
+}
+
+$('projectNewToggle').onclick = () => { $('projectComposer').classList.toggle('hidden'); };
+$('projectStartedToday').onclick = () => {
+  projectNewStarted = new Date().toISOString().slice(0, 10);
+  $('projectStarted').value = projectNewStarted;
+};
+$('projectStarted').addEventListener('change', (e) => { projectNewStarted = e.target.value || null; });
+$('projectAddBtn').onclick = createProjectWeb;
+$('projectName').addEventListener('keydown', (e) => { if (e.key === 'Enter') createProjectWeb(); });
+renderProjectStatusPick();
 
 // ---------- 선명도 (lib/vividness.ts 그대로 포팅) ----------
 const DECAY = { normal: [1, 7], important: [7, 21] };
@@ -824,6 +1166,43 @@ function renderWanderList() {
     card.style.opacity = Math.max(vividness(f), WANDER_READABLE_FLOOR);
     box.appendChild(card);
   }
+}
+
+// 현재 조건(필터/제외)에서 이 파편이 여전히 헤맴에 속하는지 — loadWanderIndex와 같은 조건
+function matchesWanderFilter(fr) {
+  if (fr.archived) return false;
+  if (wanderFilter === 'all') return !(fr.project_ids ?? []).some((id) => wanderExcluded.has(id));
+  if (wanderFilter === 'inbox') return (fr.project_ids ?? []).length === 0;
+  return (fr.project_ids ?? []).includes(wanderFilter);
+}
+
+// 상세에서 수정(묻기 등)이 끝난 뒤 이미 뽑아둔 카드를 최신 상태로 맞춘다 (앱 wander.tsx의
+// refreshItems 포팅) — 순서·스크롤 위치는 안 흔들고, 더는 조건에 안 맞는 것만 뺀다.
+async function refreshWanderItems() {
+  if (wanderItems.length === 0) return;
+  const ids = wanderItems.map((f) => f.id);
+  let fresh;
+  try {
+    const { data, error } = await sb.from('fragments')
+      .select('*, fragment_projects(project_id)')
+      .in('id', ids);
+    if (error) throw error;
+    fresh = data.map((r) => ({ ...r, project_ids: (r.fragment_projects ?? []).map((m) => m.project_id) }));
+  } catch {
+    return;
+  }
+  const byId = new Map(fresh.map((f) => [f.id, f]));
+  const stale = new Set(ids.filter((id) => {
+    const f = byId.get(id);
+    return !f || !matchesWanderFilter(f);
+  }));
+  if (stale.size > 0) {
+    wanderPool = wanderPool.filter((id) => !stale.has(id));
+    wanderDeck = wanderDeck.filter((id) => !stale.has(id));
+  }
+  wanderItems = wanderItems.filter((f) => !stale.has(f.id)).map((f) => byId.get(f.id) ?? f);
+  renderWanderList();
+  if (wanderDeck.length === 0 && wanderItems.length > 0) $('wanderEnd').classList.remove('hidden');
 }
 
 window.addEventListener('scroll', () => {
