@@ -346,6 +346,8 @@ let projects = [];              // {id, name}
 let selectedTags = new Set();   // 추가 폼에서 고른 프로젝트 id
 let filter = 'all';             // 'all' | 'inbox' | 프로젝트 id
 let searchTerm = '';
+const DISCOVER_MAX = 5;         // "다음 발견에 포함" 상한 (RUDY-STATUS.md ①)
+let discoverFull = false;       // 방금 상한에 걸려 안내를 보여주는 중인가
 
 // ---------- 인증 ----------
 $('loginBtn').onclick = async () => {
@@ -543,6 +545,7 @@ $('detailBackdrop').addEventListener('click', (e) => {
 
 function openDetail(f) {
   detailFragment = f;
+  discoverFull = false;
   $('detailBackdrop').classList.add('open');
   renderDetail();
 }
@@ -629,6 +632,36 @@ function renderDetail() {
   }
   panel.appendChild(projRow);
 
+  // 발견 (RUDY-STATUS.md ①) — 포함/제외는 서로 배타적이라 한 줄에 나란히 둔다.
+  // 포함이 둘로 갈린 건 슬롯 때문 — 더 파줘=[확장], 비슷한 딴 거=[아이디어]
+  const pickedSlot = f.discover_next ? (f.discover_next_slot ?? 'expansion') : null;
+  const discoverLabel = el('div', 'detailLabel'); discoverLabel.textContent = '발견';
+  panel.appendChild(discoverLabel);
+  const discoverRow = el('div', 'detailRow');
+  const moreBtn = el('button', 'detailBtn' + (pickedSlot === 'expansion' ? ' on' : ''));
+  moreBtn.textContent = '더 파줘';
+  moreBtn.onclick = () => toggleDiscoverNext('expansion');
+  const ideaBtn = el('button', 'detailBtn' + (pickedSlot === 'idea' ? ' on' : ''));
+  ideaBtn.textContent = '비슷한 딴 거';
+  ideaBtn.onclick = () => toggleDiscoverNext('idea');
+  const skipBtn = el('button', 'detailBtn' + (f.discover_skip ? ' on' : ''));
+  skipBtn.textContent = '발견에서 제외';
+  skipBtn.onclick = () => toggleDiscoverSkip();
+  discoverRow.append(moreBtn, ideaBtn, skipBtn);
+  panel.appendChild(discoverRow);
+
+  const discoverHint = el('div', 'filterHint');
+  discoverHint.textContent = discoverFull
+    ? `최대 ${DISCOVER_MAX}개까지 지정할 수 있다`
+    : f.discover_skip
+      ? '브리핑 재료에서 빠진다 — 검색·채팅에는 그대로 나온다'
+      : pickedSlot === 'expansion'
+        ? '이 소재가 가리키는 방향을 더 판다 — 한 번 나오고 자동으로 꺼진다'
+        : pickedSlot === 'idea'
+          ? '소재는 끊고 같은 동기를 채우는 딴 물건을 찾는다 — 한 번 나오고 자동으로 꺼진다'
+          : '더 파줘 = 이 소재를 더 / 비슷한 딴 거 = 소재는 끊고 같은 동기의 다른 물건';
+  panel.appendChild(discoverHint);
+
   // 고정한 걸 실수로 묻지 않게 — 묻으려면 먼저 고정을 풀어야 한다 (앱과 동일 규칙)
   const pinnedBlocksGrave = f.tier === 'pinned' && !f.archived;
   const actions = el('div', 'detailActions');
@@ -680,6 +713,51 @@ async function toggleDetailProject(projectId) {
   renderDetail();
   await refresh();
   await refreshWanderItems();
+}
+
+// 앱과 같은 규칙: touch 안 한다 — "이걸 봐줘/보지 마"는 지시지 중요도 판단이 아니다 (fragment/[id].tsx)
+async function patchDiscover(fields) {
+  const f = detailFragment;
+  const { error } = await sb.from('fragments').update(fields).eq('id', f.id);
+  if (error) { alert('저장 실패: ' + error.message); return; }
+  Object.assign(f, fields);
+  renderDetail();
+  await refresh();
+  await refreshWanderItems();
+}
+
+// 같은 슬롯을 또 누르면 끈다. 다른 슬롯을 누르면 갈아끼운다. 포함/제외는 서로를 끈다.
+async function toggleDiscoverNext(slot) {
+  const f = detailFragment;
+  const picked = f.discover_next ? (f.discover_next_slot ?? 'expansion') : null;
+  if (picked === slot) {
+    discoverFull = false;
+    await patchDiscover({ discover_next: false, discover_next_slot: null });
+    return;
+  }
+  if (!f.discover_next) {
+    // 상한 5개 — 다 지정하면 브리핑이 통째로 지시 이행이 되고 발견이 죽는다
+    const { count, error } = await sb.from('fragments')
+      .select('id', { count: 'exact', head: true })
+      .eq('discover_next', true);
+    if (!error && (count ?? 0) >= DISCOVER_MAX) {
+      discoverFull = true;
+      renderDetail();
+      return;
+    }
+  }
+  discoverFull = false;
+  await patchDiscover({ discover_next: true, discover_next_slot: slot, discover_skip: false });
+}
+
+async function toggleDiscoverSkip() {
+  const f = detailFragment;
+  discoverFull = false;
+  await patchDiscover(
+    f.discover_skip
+      ? { discover_skip: false }
+      : { discover_skip: true, discover_next: false, discover_next_slot: null },
+  );
 }
 
 async function toggleDetailArchive() {
