@@ -506,6 +506,18 @@ export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
   return data.map(toFragment);
 }
 
+// "무리" — 살아있는 파편을 유사도로 묶는다. LLM 없음, 저장 없음(§2-1).
+// Edge Function groups/index.ts가 평균연결로 묶고 id만 돌려준다 — 여기선 그 id로 실제 파편을
+// 채워 넣기만 한다. repId는 접힌 머리글에 쓸 medoid고 분류에는 영향을 안 준다.
+export type FragmentGroup = { repId: string; memberIds: string[] };
+
+export async function fetchGroups(): Promise<{ groups: FragmentGroup[]; noiseIds: string[] }> {
+  if (!isConfigured) return { groups: [], noiseIds: [] };
+  const { data, error } = await supabase().functions.invoke('groups');
+  if (error) throw error;
+  return { groups: data.groups ?? [], noiseIds: data.noiseIds ?? [] };
+}
+
 // 이미 파편으로 던져진 내용들 — 발견 카드의 "던졌다" 상태를 화면 재진입 후에도 복원하는 데 쓴다.
 // content가 정확히 일치하는 것만 찾는다(던지기는 content=제목을 그대로 넣으므로 충분).
 export async function existingFragmentContents(

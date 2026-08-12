@@ -84,6 +84,17 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
         >
           <Text style={styles.rowLabel}>헤매기</Text>
         </Pressable>
+        {/* 무리 — 살아있는 파편이 유사도로 뭉친 걸 본다. 헤매기와 같은 결(판단 없음)이지만
+            헤매기 안에 넣으면 두 번 눌러야 닿는다. 아침·발견처럼 여기가 문이다. */}
+        <Pressable
+          style={styles.row}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/groups');
+          }}
+        >
+          <Text style={styles.rowLabel}>무리</Text>
+        </Pressable>
         <Pressable style={styles.row} onPress={() => go('grave')}>
           <Text style={styles.graveLabel}>무덤</Text>
         </Pressable>

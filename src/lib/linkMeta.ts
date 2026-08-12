@@ -25,6 +25,14 @@ function fromCode(n: number, raw: string): string {
   return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : raw;
 }
 
+const NAMED: Record<string, string> = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’',
+  mdash: '—', ndash: '–', hellip: '…', middot: '·', bull: '•',
+  laquo: '«', raquo: '»', deg: '°', times: '×',
+  copy: '©', reg: '®', trade: '™',
+};
+
 // 숫자 엔티티는 **16진수까지** 푼다. Threads는 한글을 전부 &#xc724; 형태로 escape해서 내려주는데
 // 10진수만 풀던 시절엔 제목·본문이 통째로 "&#xc724;&#xc790;..."로 저장돼 읽을 수가 없었다
 // (2026-08-09). 이건 Threads 전용 대응이 아니라 모든 사이트에 걸리는 디코더 버그였다.
@@ -33,11 +41,10 @@ function decode(s: string): string {
   return s
     .replace(/&#x([0-9a-f]+);/gi, (raw, h) => fromCode(parseInt(h, 16), raw))
     .replace(/&#(\d+);/g, (raw, n) => fromCode(Number(n), raw)) // 레딧은 공백까지 &#32;로 준다
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
+    // 이름 엔티티는 한 번에 훑는다 — 순차 replace는 &amp;lt;를 두 번 풀어 <로 만든다.
+    // 활자 기호(&ldquo; 등)가 빠져 있어서 musicradar 제목이 "&ldquo;We strongly..."로 저장됐다.
+    .replace(/&(nbsp|amp|lt|gt|quot|apos|ldquo|rdquo|lsquo|rsquo|mdash|ndash|hellip|middot|bull|laquo|raquo|deg|times|copy|reg|trade);/g,
+      (raw, name) => NAMED[name] ?? raw)
     // 보이지 않는 C0 제어문자를 턴다(줄바꿈·탭은 살린다 — htmlToText가 문단 보존에 쓴다).
     // 네이버 플레이스는 og:title 끝에 U+001C를 붙여 보내는데, 화면엔 안 보이면서 제목 끝
     // 비교(" : 네이버" 제거)와 검색어 매칭을 조용히 깨뜨린다(2026-08-09).
@@ -221,6 +228,11 @@ export async function fetchLinkMeta(
       signal: ctrl.signal,
       ...(naverUrl ? { headers: { 'User-Agent': NAVER_UA } } : {}),
     });
+    // 에러 응답의 <title>을 제목이라고 저장하지 않는다. Cloudflare는 봇 차단 페이지를 **403과 함께**
+    // 주는데 status를 안 보던 시절엔 그 페이지 제목("Just a moment...")이 그대로 박혔다 —
+    // producthunt·kvraudio·dreamtonics 12건이 전부 이것이었다(2026-08-12 실측, 브라우저 UA로도 403).
+    // 레딧 전용 규칙(isRedditJunk)이 200으로 오는 챌린지를 따로 막는 것과 짝이다.
+    if (!res.ok) return { title: null, description: null, thumbnail: null };
     const html = await res.text();
     // og 태그와 <title>은 <head> 안에만 있다. 유튜브 같은 1~2MB짜리 페이지 **전문**에
     // `<meta[^>]+...` 정규식을 네 번 돌리면 그동안 JS 스레드가 통째로 막혀 첫 화면 렌더가 밀린다.
