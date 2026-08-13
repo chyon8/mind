@@ -19,7 +19,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
-import { fetchProjects, insertFragment } from '@/lib/supabase';
+import { confirmDuplicateLink } from '@/lib/confirm';
+import { existingFragmentContents, fetchProjects, insertFragment } from '@/lib/supabase';
 import { colors, fonts, noFocusRing, rounded, spacing, type } from '@/lib/theme';
 import { markThrown } from '@/lib/thrown';
 import { detectType } from '@/lib/typeDetector';
@@ -112,6 +113,10 @@ export default function Input() {
 
   async function submit() {
     if (!trimmed || busy) return; // 빈 입력·중복 탭 방지
+    if (activeType === 'link') {
+      const dupes = await existingFragmentContents([trimmed]).catch(() => []);
+      if (dupes.length > 0 && !(await confirmDuplicateLink())) return;
+    }
     setBusy(true);
     try {
       await insertFragment({ content: trimmed, type: activeType, project_ids: projectIds });

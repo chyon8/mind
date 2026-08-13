@@ -122,11 +122,19 @@ async function redditFetchUrl(url: string, signal: AbortSignal): Promise<string 
 // 다음 포그라운드에 자동으로 다시 시도한다 — 쓰레기 제목이 박히는 것보다 낫다.
 // 문구는 기기 언어를 타므로("Welcome to Reddit" / "Reddit에 오신 걸 환영합니다") 경로로 판정하고,
 // 챌린지 페이지의 <title>만 언어와 무관하게 늘 "Reddit"이라 그것만 문자열로 거른다.
+// NSFW 글의 old.reddit 연령확인 페이지는 /comments/ 경로에서 200으로 오고 제목도 "Reddit"이
+// 아니라 "reddit.com: 만 19세 이상의 성인이십니까?" 같은 시스템 페이지 템플릿이다(2026-08-14).
+// 도메인 부분("reddit.com: ")은 번역되지 않으므로 이걸로 언어 무관하게 거른다 — 실제 글 제목은
+// old.reddit에서 "<제목> : <서브레딧>" 형태라 이 접두사가 절대 안 붙는다.
 function isRedditJunk(finalUrl: string, title: string | null): boolean {
   try {
     const u = new URL(finalUrl);
     if (!isRedditUrl(u)) return false;
-    return u.pathname.startsWith('/login') || title === 'Reddit';
+    return (
+      u.pathname.startsWith('/login') ||
+      title === 'Reddit' ||
+      !!title?.toLowerCase().startsWith('reddit.com:')
+    );
   } catch {
     return false;
   }
