@@ -192,6 +192,21 @@
   .filterHint { color: var(--muted); font-size: 12px; margin: 8px 0 14px; }
   .end { color: var(--muted); font-size: 12px; text-align: center; padding: 20px 0; }
 
+  /* ---------- 무리 ---------- */
+  .groupBlock { margin-bottom: 22px; }
+  .groupHead {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; border: none; border-bottom: 1px solid var(--border);
+    color: var(--text); font: inherit; text-align: left;
+    padding: 0 2px 7px; margin-bottom: 10px; cursor: pointer;
+  }
+  .groupHead .lbl {
+    flex: 1; min-width: 0; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .groupHead .cnt, .groupHead .chev { color: var(--muted); font-size: 12px; flex-shrink: 0; }
+  .groupHead.noise .lbl { color: var(--muted); font-weight: 400; }
+
   /* ---------- 프로젝트 ---------- */
   .lineInput {
     background: var(--panel-2); border: 1px solid var(--border); color: inherit;
@@ -263,6 +278,7 @@
       <button class="navBtn" id="discoverIncludeBtn">발견 포함</button>
       <button class="navBtn" data-view="projects">프로젝트</button>
       <button class="navBtn" data-view="wander">헤매기</button>
+      <button class="navBtn" data-view="groups">무리</button>
       <button class="navBtn" data-view="discovery">발견</button>
     </nav>
 
@@ -317,6 +333,13 @@
         <div class="filterHint">프로젝트를 우클릭하면 전체에서 뺀다</div>
         <div id="wanderList"></div>
         <div class="end hidden" id="wanderEnd">여기까지</div>
+      </div>
+
+      <div id="groupsView" class="hidden">
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 14px;">
+          <button class="ghost" id="groupsRefresh">다시</button>
+        </div>
+        <div id="groupsList"></div>
       </div>
 
       <div id="discoveryView" class="hidden">
@@ -880,8 +903,10 @@ function switchView(view) {
   $('fragmentsView').classList.toggle('hidden', view !== 'fragments');
   $('projectsView').classList.toggle('hidden', view !== 'projects');
   $('wanderView').classList.toggle('hidden', view !== 'wander');
+  $('groupsView').classList.toggle('hidden', view !== 'groups');
   $('discoveryView').classList.toggle('hidden', view !== 'discovery');
   if (view === 'wander' && !wanderStarted) { wanderStarted = true; startWander(); }
+  if (view === 'groups' && !groupsStarted) { groupsStarted = true; startGroups(); }
   if (view === 'discovery' && !discoveryStarted) { discoveryStarted = true; startDiscovery(); }
   if (view === 'projects') {
     closeProjectDetail();
@@ -1363,6 +1388,93 @@ window.addEventListener('scroll', () => {
     moreWander();
   }
 });
+
+// ---------- 무리 (앱 groups.tsx 포팅 — 판단 버튼 없음, 접었다 폈다만) ----------
+// 묶기는 groups Edge Function이 전부 한다 — 앱과 **같은 함수, 같은 결과**다. 여기에 임계값이나
+// 평균연결을 다시 적지 않는다 (cluster.ts 주석: 로직이 갈라지면 실측한 숫자가 무의미해진다).
+// 무리 소속은 저장하지 않는다 — 열 때마다 새로 계산된다 (§2-1).
+let groupsStarted = false;
+let groupsData = { groups: [], noiseIds: [] };
+let groupsById = new Map();
+let groupsOpen = new Set(); // 펼쳐진 머리글 키 = 대표 파편 id, '안 묶인 것'은 GROUPS_NOISE
+
+const GROUPS_NOISE = 'noise';
+
+// 머리글 한 줄 — fragmentCardEl이 뽑는 줄과 같은 규칙(링크는 제목).
+function groupHeadLine(f) {
+  return f.type === 'link' ? (f.link_title || f.content) : (f.content ?? '').replace(/\n/g, ' ');
+}
+
+async function startGroups() {
+  groupsOpen = new Set();
+  $('groupsList').innerHTML = '<div class="empty">불러오는 중…</div>';
+  try {
+    const { data, error } = await sb.functions.invoke('groups');
+    if (error) throw error;
+    groupsData = { groups: data.groups ?? [], noiseIds: data.noiseIds ?? [] };
+    // 함수는 id만 돌려준다 — 실제 파편은 여기서 한 번에 받아온다 (앱 fetchFragmentsByIds와 같은 몫)
+    const ids = [...new Set([...groupsData.groups.flatMap((g) => g.memberIds), ...groupsData.noiseIds])];
+    groupsById = new Map();
+    if (ids.length) {
+      const { data: frs, error: fErr } = await sb.from('fragments')
+        .select('*, fragment_projects(project_id)')
+        .in('id', ids);
+      if (fErr) throw fErr;
+      groupsById = new Map(frs.map((r) => [
+        r.id, { ...r, project_ids: (r.fragment_projects ?? []).map((m) => m.project_id) },
+      ]));
+    }
+    renderGroups();
+  } catch (e) {
+    $('groupsList').innerHTML = `<div class="empty">안 됐다. '다시'를 눌러봐. (${e.message ?? e})</div>`;
+  }
+}
+
+function renderGroups() {
+  const box = $('groupsList');
+  box.innerHTML = '';
+  if (groupsData.groups.length === 0 && groupsData.noiseIds.length === 0) {
+    box.innerHTML = '<div class="empty">아직 묶을 게 없다</div>';
+    return;
+  }
+
+  // 머리글은 **펼치기만 한다** — 앱에서 대표를 여는 버튼을 머리글에 겹쳐 넣었다가 탭이 어디로
+  // 갈지 모르게 됐었다(2026-08-12). 대표도 펼친 목록 안에 그대로 들어 있으니 거기서 연다.
+  const block = (key, label, memberIds, isNoise) => {
+    const wrap = el('div', 'groupBlock');
+    const head = el('button', 'groupHead' + (isNoise ? ' noise' : ''));
+    const lbl = el('span', 'lbl'); lbl.textContent = label;
+    const cnt = el('span', 'cnt'); cnt.textContent = `${memberIds.length}개`;
+    const chev = el('span', 'chev'); chev.textContent = groupsOpen.has(key) ? '▴' : '▾';
+    head.append(lbl, cnt, chev);
+    head.onclick = () => {
+      if (!groupsOpen.delete(key)) groupsOpen.add(key);
+      renderGroups();
+    };
+    wrap.appendChild(head);
+    if (groupsOpen.has(key)) {
+      for (const id of memberIds) {
+        const f = groupsById.get(id);
+        if (!f) continue;
+        const card = fragmentCardEl(f);
+        // 앱은 vividness를 그대로 쓰지만(FragmentBullet은 한 줄이라 옅어도 읽힌다) 웹은 카드라
+        // 0.15까지 내려가면 못 읽는다 — 헤매기와 같은 바닥을 깐다.
+        card.style.opacity = Math.max(vividness(f), WANDER_READABLE_FLOOR);
+        wrap.appendChild(card);
+      }
+    }
+    box.appendChild(wrap);
+  };
+
+  for (const g of groupsData.groups) {
+    const rep = groupsById.get(g.repId);
+    if (!rep) continue;
+    block(g.repId, groupHeadLine(rep), g.memberIds, false);
+  }
+  if (groupsData.noiseIds.length) block(GROUPS_NOISE, '안 묶인 것', groupsData.noiseIds, true);
+}
+
+$('groupsRefresh').onclick = () => startGroups();
 
 // ---------- 발견 (앱 discovery.tsx 포팅 — 읽기 전용: 던지기는 안 붙였다) ----------
 let discoveryList = [];
