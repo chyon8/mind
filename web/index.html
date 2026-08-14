@@ -336,7 +336,9 @@
       </div>
 
       <div id="groupsView" class="hidden">
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <!-- 헤매기에서 뺀 프로젝트가 없으면 숨긴다 (renderGroupsOption) -->
+          <button class="chip hidden" id="groupsExcludeBtn" style="cursor: pointer;">헤매기에서 뺀 것 빼고</button>
           <button class="ghost" id="groupsRefresh">다시</button>
         </div>
         <div id="groupsList"></div>
@@ -907,6 +909,8 @@ function switchView(view) {
   $('discoveryView').classList.toggle('hidden', view !== 'discovery');
   if (view === 'wander' && !wanderStarted) { wanderStarted = true; startWander(); }
   if (view === 'groups' && !groupsStarted) { groupsStarted = true; startGroups(); }
+  // 헤매기에서 제외를 바꿔놓고 돌아올 수 있다 — startGroups는 처음 한 번만 도니 버튼은 매번 갱신한다
+  else if (view === 'groups') renderGroupsOption();
   if (view === 'discovery' && !discoveryStarted) { discoveryStarted = true; startDiscovery(); }
   if (view === 'projects') {
     closeProjectDetail();
@@ -1400,16 +1404,31 @@ let groupsOpen = new Set(); // 펼쳐진 머리글 키 = 대표 파편 id, '안 
 
 const GROUPS_NOISE = 'noise';
 
+// 헤매기에서 뺀 프로젝트를 무리에서도 뺄지 — 함수가 **묶기 전에** 뺀다(멤버만 지우면 무리가 깨진다).
+// 헤매기와 보는 자리가 달라 켜고 끄는 건 따로 기억한다.
+const GROUPS_APPLY_KEY = 'groups.applyExclude';
+let groupsApplyExclude = localStorage.getItem(GROUPS_APPLY_KEY) === '1';
+
 // 머리글 한 줄 — fragmentCardEl이 뽑는 줄과 같은 규칙(링크는 제목).
 function groupHeadLine(f) {
   return f.type === 'link' ? (f.link_title || f.content) : (f.content ?? '').replace(/\n/g, ' ');
 }
 
+// 뺀 프로젝트가 하나도 없으면 이 버튼은 아무 일도 안 한다 — 안 보여준다.
+function renderGroupsOption() {
+  const btn = $('groupsExcludeBtn');
+  btn.classList.toggle('hidden', wanderExcluded.size === 0);
+  btn.classList.toggle('on', groupsApplyExclude);
+}
+
 async function startGroups() {
   groupsOpen = new Set();
+  renderGroupsOption();
   $('groupsList').innerHTML = '<div class="empty">불러오는 중…</div>';
   try {
-    const { data, error } = await sb.functions.invoke('groups');
+    const { data, error } = await sb.functions.invoke('groups', {
+      body: { excludeProjects: groupsApplyExclude ? [...wanderExcluded] : [] },
+    });
     if (error) throw error;
     groupsData = { groups: data.groups ?? [], noiseIds: data.noiseIds ?? [] };
     // 함수는 id만 돌려준다 — 실제 파편은 여기서 한 번에 받아온다 (앱 fetchFragmentsByIds와 같은 몫)
@@ -1475,6 +1494,11 @@ function renderGroups() {
 }
 
 $('groupsRefresh').onclick = () => startGroups();
+$('groupsExcludeBtn').onclick = () => {
+  groupsApplyExclude = !groupsApplyExclude;
+  localStorage.setItem(GROUPS_APPLY_KEY, groupsApplyExclude ? '1' : '0');
+  startGroups(); // 무리는 저장을 안 하므로 다시 묶는 게 유일한 경로다
+};
 
 // ---------- 발견 (앱 discovery.tsx 포팅 — 읽기 전용: 던지기는 안 붙였다) ----------
 let discoveryList = [];

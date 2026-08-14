@@ -45,6 +45,17 @@ const MIN_SIZE = 2;
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
+  // 헤매기에서 길게 눌러 빼둔 프로젝트를 무리에서도 뺀다 (앱에서 옵션을 켰을 때만 온다).
+  // **묶기 전에 뺀다** — 묶고 나서 멤버만 지우면 남은 것들이 실제로 서로 묶이는지 알 수 없고
+  // 대표(medoid)도 사라질 수 있다.
+  let excludeProjects: string[] = [];
+  try {
+    const body = await req.json();
+    if (Array.isArray(body?.excludeProjects)) excludeProjects = body.excludeProjects;
+  } catch {
+    // 본문 없음 = 전부 묶는다 (예전 동작)
+  }
+
   // 살아있는 파편 전체 — 무리에 못 든 것도 "안 묶인 것"으로 보여줘야 하므로 목록이 필요하다.
   const { data: alive, error: fErr } = await supabase
     .from('fragments')
@@ -52,7 +63,18 @@ Deno.serve(async (req) => {
     .eq('archived', false)
     .is('let_go_at', null);
   if (fErr) return json({ error: fErr.message }, 500);
-  const aliveIds = (alive ?? []).map((f) => f.id as string);
+  let aliveIds = (alive ?? []).map((f) => f.id as string);
+
+  let dropped = new Set<string>();
+  if (excludeProjects.length > 0) {
+    const { data: rows, error: pErr } = await supabase
+      .from('fragment_projects')
+      .select('fragment_id')
+      .in('project_id', excludeProjects);
+    if (pErr) return json({ error: pErr.message }, 500);
+    dropped = new Set((rows ?? []).map((r) => r.fragment_id as string));
+    aliveIds = aliveIds.filter((id) => !dropped.has(id));
+  }
 
   // 쌍 비교는 SQL에 맡긴다 — 벡터가 3072차원이라 Deno로 끌어오면 전송량이 수십 MB가 된다.
   const { data: edgeRows, error: eErr } = await supabase
@@ -60,7 +82,9 @@ Deno.serve(async (req) => {
     .rpc('group_edges', { min_sim: MIN_SIM });
   if (eErr) return json({ error: eErr.message }, 500);
 
-  const edges = (edgeRows ?? []) as Edge[];
+  const edges = ((edgeRows ?? []) as Edge[]).filter(
+    (e) => !dropped.has(e.a) && !dropped.has(e.b),
+  );
   const raw = cluster(edges, MIN_SIM, MIN_SIZE).sort((x, y) => y.length - x.length);
 
   // 대표 = 무리 안에서 나머지와의 유사도 합이 가장 큰 파편(medoid). **분류에는 아무 영향이 없다** —

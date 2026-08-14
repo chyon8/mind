@@ -511,9 +511,14 @@ export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
 // 채워 넣기만 한다. repId는 접힌 머리글에 쓸 medoid고 분류에는 영향을 안 준다.
 export type FragmentGroup = { repId: string; memberIds: string[] };
 
-export async function fetchGroups(): Promise<{ groups: FragmentGroup[]; noiseIds: string[] }> {
+// excludeProjects를 주면 그 프로젝트의 파편은 묶기 전에 빠진다 (헤매기의 제외 목록을 그대로 쓴다).
+export async function fetchGroups(
+  excludeProjects: string[] = [],
+): Promise<{ groups: FragmentGroup[]; noiseIds: string[] }> {
   if (!isConfigured) return { groups: [], noiseIds: [] };
-  const { data, error } = await supabase().functions.invoke('groups');
+  const { data, error } = await supabase().functions.invoke('groups', {
+    body: { excludeProjects },
+  });
   if (error) throw error;
   return { groups: data.groups ?? [], noiseIds: data.noiseIds ?? [] };
 }
