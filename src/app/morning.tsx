@@ -255,6 +255,101 @@ export default function MorningScreen() {
               </Animated.View>
             )}
 
+            {/* ══ 앞을 보는 카드들 (2026-08-14) ══
+                위까지가 "어제까지 뭐가 있었나"고 여기부터가 "지금 뭘 하나"다. 그래서 관찰 뒤,
+                지형·리듬 같은 숫자 앞에 둔다 — 숫자를 먼저 보여주면 대시보드가 된다. */}
+            {brief.ahead?.nextMove && (
+              <Animated.View entering={FadeInDown.duration(420).delay(130)} style={styles.aheadCard}>
+                <Eyebrow right={brief.ahead.hot[0] ?? undefined}>다음 한 수</Eyebrow>
+                <Text style={styles.reading}>{brief.ahead.nextMove.text}</Text>
+                {brief.ahead.nextMove.items.map((it) => (
+                  <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                    <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                  </Pressable>
+                ))}
+              </Animated.View>
+            )}
+
+            {brief.ahead?.offWork && (
+              <Animated.View entering={FadeInDown.duration(420).delay(140)} style={styles.aheadCard}>
+                <Eyebrow>일 말고</Eyebrow>
+                <Text style={styles.reading}>{brief.ahead.offWork.text}</Text>
+                {brief.ahead.offWork.items.map((it) => (
+                  <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                    <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                  </Pressable>
+                ))}
+              </Animated.View>
+            )}
+
+            {/* 되살아난 것 — 근거 두 개가 "지금"과 "그때"라 순서가 뜻을 갖는다 (run.mjs가 그 순서로 넣는다) */}
+            {!!brief.ahead?.revisits.length && (
+              <View style={styles.card}>
+                <Eyebrow right={`${brief.ahead.revisits.length}개`}>돌아온 것</Eyebrow>
+                {brief.ahead.revisits.map((r, i) => (
+                  <View key={i} style={styles.aheadBlock}>
+                    <Text style={styles.reading}>{r.text}</Text>
+                    {r.items.map((it) => (
+                      <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                        <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                      </Pressable>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {!!brief.ahead?.crossLinks.length && (
+              <View style={styles.card}>
+                <Eyebrow>안 이어본 연결</Eyebrow>
+                {brief.ahead.crossLinks.map((c, i) => (
+                  <View key={i} style={styles.aheadBlock}>
+                    <Text style={styles.reading}>{c.text}</Text>
+                    {c.items.map((it) => (
+                      <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                        <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                      </Pressable>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* ── 긴 읽기. 매일 새로 쓰는 글이 아니라 **갱신되는 문서**라 `changed`를 맨 위에 둔다 —
+                 어제 읽은 사람에게 오늘 새로 읽을 것이 그 한 줄이다. ── */}
+            {brief.narrative && (
+              <View style={styles.narrativeCard}>
+                <Eyebrow right={`${brief.narrative.paras.length}문단`}>긴 읽기</Eyebrow>
+                {brief.narrative.changed && (
+                  <Text style={styles.changed}>{brief.narrative.changed}</Text>
+                )}
+                {brief.narrative.paras.map((p, i) => (
+                  <View key={i} style={styles.aheadBlock}>
+                    <View style={styles.confRow}>
+                      <View style={styles.kindTag}>
+                        <Text style={styles.kindText}>{p.confidence}</Text>
+                      </View>
+                      <Text style={styles.axisMeta}>근거 {p.items.length}개</Text>
+                    </View>
+                    <Text style={styles.reading}>{p.text}</Text>
+                    {p.items.map((it) => (
+                      <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                        <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                      </Pressable>
+                    ))}
+                  </View>
+                ))}
+                {/* 반증·고친 판단은 본문과 같은 무게로 두지 않는다 — 읽고 나서 보는 각주다.
+                    지우지도 않는다: 틀린 걸 남기는 게 이 문서를 믿을 수 있게 하는 유일한 장치다. */}
+                {brief.narrative.revised && (
+                  <Text style={styles.footnote}>고친 판단 — {brief.narrative.revised}</Text>
+                )}
+                {brief.narrative.counter && (
+                  <Text style={styles.footnote}>반증 — {brief.narrative.counter}</Text>
+                )}
+              </View>
+            )}
+
             {/* ── 관심의 결이 어디로 옮겨갔나. 위 문단의 그림판이다 ── */}
             {s.axes.length > 0 && (
               <Animated.View entering={FadeInDown.duration(420).delay(140)} style={styles.card}>
@@ -359,6 +454,19 @@ export default function MorningScreen() {
                 {s.fading.map((it) => (
                   <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
                     <ItemLine title={it.title} vividness={it.vividness} projects={it.projects} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {/* ── 떠 있는 것 — 하지도 묻지도 않은 채 남은 것. 모델을 안 탄다(코드가 끝냈다).
+                 흐려지는 중과 다르다: 저건 시간이 지워가는 것이고 이건 **결정을 미룬 것**이다. ── */}
+            {!!brief.ahead?.floating.length && (
+              <View style={styles.card}>
+                <Eyebrow right={`${brief.ahead.floating.length}개`}>떠 있는 것</Eyebrow>
+                {brief.ahead.floating.map((it) => (
+                  <Pressable key={it.id} onPress={() => router.push(`/fragment/${it.id}`)}>
+                    <ItemLine title={`${it.days}일째 · ${it.title}`} vividness={it.vividness} projects={it.projects} />
                   </Pressable>
                 ))}
               </View>
@@ -502,6 +610,32 @@ const styles = StyleSheet.create({
     padding: spacing.card,
     gap: spacing.sm,
   },
+
+  // 앞을 보는 카드 — 관찰이 아니라 제안이라 패턴과 같은 무게로 둔다(테두리 한 단계 위).
+  aheadCard: {
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.mute,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderRadius: rounded.md,
+    padding: spacing.card,
+    gap: spacing.sm,
+  },
+  // 한 카드 안에 여러 덩어리가 들어가는 자리(돌아온 것·연결·서사 문단)의 간격
+  aheadBlock: { gap: spacing.xs, paddingTop: spacing.xs },
+
+  // 긴 읽기는 이 화면에서 제일 긴 글이라 안쪽 여백을 한 단계 넉넉하게 준다
+  narrativeCard: {
+    backgroundColor: colors.canvasElevated,
+    borderColor: colors.mute,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderRadius: rounded.md,
+    padding: spacing.card,
+    gap: spacing.md,
+  },
+  // 지난 서사 이후 바뀐 것 — 어제 읽은 사람에게 오늘 새로 읽을 유일한 줄이라 도드라지게
+  changed: { ...type.bodyMd, color: colors.ink, fontFamily: fonts.sansMedium },
+  confRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  footnote: { ...type.bodySm, color: colors.mute, fontFamily: fonts.sans },
 
   // 넛지·질문은 판단을 요구하는 카드라 테두리를 한 단계 올려 구분한다
   nudgeCard: {

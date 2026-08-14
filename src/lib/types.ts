@@ -26,8 +26,14 @@ export interface Fragment {
   last_touched_at: string;
   tier: Tier;
   archived: boolean;
+  // 묻은 시각. 파내면 null로 돌아간다 — "지금 묻혀 있나"는 archived가, "언제 묻었나"는 여기가 답한다.
+  // 아침 브리핑의 소화 속도(던지고 며칠 만에 정리했나)가 이 값 하나로 만들어진다.
+  archived_at: string | null;
   touch_count: number; // 회상에서 구해낸 횟수 = 자라나는 중요도
   let_go_at: string | null; // 회상에서 흘려보낸 시각. 보여준 것만으론 기록되지 않는다
+  // 덧붙임을 쓴 시각. created_at과의 차이가 "며칠 뒤에 다시 왔나"다 —
+  // 이게 없으면 덧붙임이 던지자마자 이어 쓴 건지 3주 뒤에 돌아온 건지 구분이 안 된다.
+  note_at: string | null;
   // "다음 발견에 포함" 표시. 브리핑이 한 번 돌면 서버가 전부 내린다 — 선명도와 무관하다
   discover_next: boolean;
   // 지정할 때 유저가 고른 슬롯 — 발견이 이걸 [확장]으로 낼지 [아이디어]로 낼지.

@@ -558,15 +558,32 @@ export async function touchFragment(id: string): Promise<void> {
   if (error) throw error;
 }
 
+// `archived`·`note`를 바꿀 때 시각을 같이 찍는다. **여기 한 곳에서만 한다** —
+// 묻기는 파편 상세·묻기 모달·발견에서 각각 들어오고, 덧붙임은 상세와 발견 메모 두 곳에서
+// 들어온다. 호출부마다 찍게 하면 다음에 경로가 하나 늘 때 조용히 빠진다.
+//
+// 파내면 archived_at은 null로 되돌린다 — "언제 묻었나"는 지금 묻혀 있을 때만 뜻이 있고,
+// 다시 묻으면 그때가 새 답이다. 덧붙임을 지워도 같은 이유로 note_at을 비운다.
+function withTimestamps(
+  patch: Partial<Omit<Fragment, 'project_ids'>>,
+): Partial<Omit<Fragment, 'project_ids'>> {
+  const stamped = { ...patch };
+  const now = new Date().toISOString();
+  if ('archived' in patch) stamped.archived_at = patch.archived ? now : null;
+  if ('note' in patch) stamped.note_at = patch.note ? now : null;
+  return stamped;
+}
+
 export async function updateFragment(
   id: string,
   patch: Partial<Omit<Fragment, 'project_ids'>>,
 ): Promise<void> {
+  const stamped = withTimestamps(patch);
   if (!isConfigured) {
     const { fixtureUpdateFragment } = await import('./fixtures');
-    return fixtureUpdateFragment(id, patch);
+    return fixtureUpdateFragment(id, stamped);
   }
-  const { error } = await supabase().from('fragments').update(patch).eq('id', id);
+  const { error } = await supabase().from('fragments').update(stamped).eq('id', id);
   if (error) throw error;
 }
 

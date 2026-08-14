@@ -154,13 +154,74 @@ const pattern = out.pattern?.text
   : null;
 const questionText = typeof out.question === 'string' ? plain(out.question) : '';
 
+// ── 앞을 보는 카드들. 모델은 말만 쓰고 **짝·숫자는 재료가 이미 정한 것**이라
+//    여기서 stats.ahead(코드 계산분)와 합친다. 모델이 근거를 못 대면 카드를 안 그린다.
+const said = (v) => (v && typeof v.text === 'string' && v.text.trim()
+  ? { text: plain(String(v.text)), items: itemsOf(idsOf(v.refs)) }
+  : null);
+const saidList = (v, cap) =>
+  (Array.isArray(v) ? v : []).map(said).filter((x) => x && x.items.length).slice(0, cap);
+
+const ahead = {
+  nextMove: said(out.ahead?.nextMove),
+  offWork: said(out.ahead?.offWork),
+  crossLinks: saidList(out.ahead?.crossLinks, 2),
+  revisits: saidList(out.ahead?.revisits, 3),
+  // 코드가 끝낸 것 — 모델을 안 탄다. 화면이 그대로 그린다.
+  floating: stats.ahead.floating,
+  hot: stats.ahead.hot,
+};
+
+// 서사. `paras`가 비면 통째로 null — 문단 없는 확신도·반증은 뜻이 없다.
+const CONF = ['거의 확실', '그럴듯함', '추측'];
+const paras = (Array.isArray(out.narrative?.paras) ? out.narrative.paras : [])
+  .filter((p) => p && typeof p.text === 'string' && p.text.trim())
+  .map((p) => ({
+    text: plain(String(p.text)),
+    // 모델이 다른 말을 지어내도 화면이 안 깨지게 — 모르는 값은 제일 약한 쪽으로 접는다
+    confidence: CONF.includes(p.confidence) ? p.confidence : '추측',
+    items: itemsOf(idsOf(p.refs)),
+  }));
+const oneLine = (v) => (typeof v === 'string' && v.trim() ? plain(v) : null);
+const narrative = paras.length
+  ? {
+      paras,
+      changed: oneLine(out.narrative?.changed),
+      revised: oneLine(out.narrative?.revised),
+      counter: oneLine(out.narrative?.counter),
+    }
+  : null;
+
 log(`헤드라인: ${written.headline}`);
 log(`문단 ${written.reading.length} · 결 ${axes.length} · 패턴 ${pattern ? `${pattern.kind}(근거 ${pattern.items.length})` : '없음'} · 질문 ${questionText ? '있음' : '없음'}`);
-writeFileSync(new URL(`brief-${stamp}.json`, WORK), JSON.stringify({ ...written, pattern, axes, question: questionText }, null, 2));
+log(
+  `앞: 다음수 ${ahead.nextMove ? '있음' : '없음'} · 일말고 ${ahead.offWork ? '있음' : '없음'}` +
+    ` · 연결 ${ahead.crossLinks.length} · 돌아온것 ${ahead.revisits.length} · 떠있는것 ${ahead.floating.length}`,
+);
+log(
+  narrative
+    ? `서사 ${narrative.paras.length}문단 (${narrative.paras.map((p) => p.confidence).join('/')})` +
+        ` · 바뀜 ${narrative.changed ? '있음' : '없음'} · 고침 ${narrative.revised ? '있음' : '없음'}` +
+        ` · 반증 ${narrative.counter ? '있음' : '없음'}`
+    : '서사 없음',
+);
+writeFileSync(
+  new URL(`brief-${stamp}.json`, WORK),
+  JSON.stringify({ ...written, pattern, axes, question: questionText, ahead, narrative }, null, 2),
+);
 
 if (!save) {
   log('저장 안 함 (--no-save)');
-  console.log(`\n${written.headline}\n\n${written.reading.join('\n\n')}\n\n[패턴] ${pattern?.text ?? '없음'}\n[질문] ${questionText || '없음'}\n`);
+  console.log(
+    `\n${written.headline}\n\n${written.reading.join('\n\n')}\n\n[패턴] ${pattern?.text ?? '없음'}\n[질문] ${questionText || '없음'}\n` +
+      `\n[다음 한 수] ${ahead.nextMove?.text ?? '없음'}\n[일 말고] ${ahead.offWork?.text ?? '없음'}\n` +
+      `${ahead.crossLinks.map((c) => `[연결] ${c.text}`).join('\n')}\n` +
+      `${ahead.revisits.map((r) => `[돌아옴] ${r.text}`).join('\n')}\n` +
+      `\n── 서사 ──\n${narrative ? narrative.paras.map((p) => `(${p.confidence}) ${p.text}`).join('\n\n') : '없음'}\n` +
+      `${narrative?.changed ? `\n[바뀐 것] ${narrative.changed}` : ''}` +
+      `${narrative?.revised ? `\n[고친 판단] ${narrative.revised}` : ''}` +
+      `${narrative?.counter ? `\n[반증] ${narrative.counter}` : ''}\n`,
+  );
   process.exit(0);
 }
 
@@ -202,7 +263,16 @@ if (picked) {
 await insertUtterance({
   surface: 'briefing', kind: 'pattern', trigger: 'push',
   item_ids: [], // 집계 발화라 "이 브리핑이 인용한 파편"이 따로 없다. 근거는 pattern.items에 있다
-  text: JSON.stringify({ ...written, pattern, axes: axes, question, nudge, stats: { ...stats, axes } }),
+  text: JSON.stringify({
+    ...written,
+    pattern,
+    axes,
+    question,
+    nudge,
+    ahead,
+    narrative, // 다음 실행이 재료로 받아서 **고쳐 쓴다** (material.mjs lastNarrative)
+    stats: { ...stats, axes },
+  }),
   cost_usd: 0,
 });
 log('저장 완료 — 앱 데일리 상단 아침 카드에서 보면 된다');

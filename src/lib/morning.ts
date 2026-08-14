@@ -39,6 +39,42 @@ export type MorningTrends = {
   projectShare: { name: string; recent: number; prior: number }[];
 };
 
+/** 앞을 보는 카드 하나 — 모델이 쓴 한두 문장 + 그 근거 파편. 근거가 없으면 run.mjs가 버린다. */
+export type MorningSaid = { text: string; items: MorningItem[] };
+
+/**
+ * 앞을 보는 카드들 (2026-08-14). 위 구획이 "어제까지 뭐가 있었나"라면 여기는 "지금 뭘 하나"다.
+ * `floating`·`hot`은 코드가 끝까지 계산한 값이라 모델을 안 탄다.
+ */
+export type MorningAhead = {
+  /** 제일 뜨거운 프로젝트에서 **본인이 직접 적어둔** 다음 단계 */
+  nextMove: MorningSaid | null;
+  /** 만드는 것 말고 사는 것 쪽 — 파편 수가 적어 위 구획에선 늘 개발에 밀리는 자리 */
+  offWork: MorningSaid | null;
+  /** 다른 프로젝트에 넣어뒀는데 사실 같은 얘기인 쌍 */
+  crossLinks: MorningSaid[];
+  /** 묻었는데 몇 주 뒤에 또 던진 것 */
+  revisits: MorningSaid[];
+  /** 하지도 묻지도 않은 채 남은 것 — 코드 계산분 */
+  floating: (MorningItem & { days: number })[];
+  /** 최근 14일 밀도 상위 프로젝트 이름 */
+  hot: string[];
+};
+
+/**
+ * 긴 읽기. **매일 새로 쓰지 않고 매일 고쳐 쓴다** — 직전 서사를 재료로 받아 갱신한다
+ * (material.mjs `lastNarrative`). 그래서 데이터가 쌓일수록 깊어진다.
+ */
+export type MorningNarrative = {
+  paras: { text: string; confidence: '거의 확실' | '그럴듯함' | '추측'; items: MorningItem[] }[];
+  /** 지난 서사 이후 바뀐 것. 화면이 이것만 따로 띄운다 — 매일 새로 읽을 유일한 줄 */
+  changed: string | null;
+  /** 지난 판단 중 이번 데이터로 틀린 게 드러난 것. 쌓이는 게 이 문서의 값이다 */
+  revised: string | null;
+  /** 지금 해석을 뒤집는 증거 */
+  counter: string | null;
+};
+
 export type MorningStats = {
   trends: MorningTrends;
   today: MorningItem[];
@@ -75,6 +111,9 @@ export type MorningBrief = {
   rejected: string[];
   stats: MorningStats;
   nudge: MorningNudge | null;
+  /** 옛 브리핑엔 없다 — 2026-08-14 이전 기록을 열면 null이고 화면은 그 구획을 안 그린다 */
+  ahead: MorningAhead | null;
+  narrative: MorningNarrative | null;
   costUsd: number | null;
 };
 
@@ -106,6 +145,8 @@ async function parseBriefRow(row: BriefRow): Promise<MorningBrief | null> {
     rejected: (p.rejected as string[]) ?? [],
     stats: p.stats as MorningStats,
     nudge: nudgeDone ? null : nudge,
+    ahead: (p.ahead ?? null) as MorningAhead | null,
+    narrative: (p.narrative ?? null) as MorningNarrative | null,
   };
 }
 

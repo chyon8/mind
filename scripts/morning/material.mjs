@@ -50,8 +50,16 @@ const PRIOR_DAYS = 28;
 const RHYTHM_DAYS = 14;
 const TIMELINE_DAYS = 30;
 
+// ── 앞을 보는 카드들 (2026-08-14). 위쪽은 전부 "어제까지 뭐가 있었나"인데 이건 "지금 뭘 하나"다.
+// 창이 다르다: 오늘·어제로는 프로젝트별로 쪼갰을 때 남는 게 없어서 판단이 안 선다.
+const AHEAD_DAYS = 14;
+// 묻지도 흘려보내지도 않고 이만큼 남았으면 "결정을 미룬 것"으로 본다. 이 사람은 훑으면서
+// 정리하는 습관이 있어서(각주 2) 이 목록이 저절로 짧게 유지된다 — 실측 2026-08-14에 3개였다.
+const FLOAT_DAYS = 7;
+
 const FRAG_COLS =
-  'id, created_at, content, type, link_title, link_description, note, last_touched_at, tier, touch_count, archived, let_go_at';
+  'id, created_at, content, type, link_title, link_description, note, note_at, ' +
+  'last_touched_at, tier, touch_count, archived, archived_at, let_go_at';
 
 export function client() {
   for (const line of readFileSync(new URL('.env', ROOT), 'utf8').split('\n')) {
@@ -99,7 +107,7 @@ const titleOf = (f) =>
 const daysAgo = (iso, now) => Math.floor((now.getTime() - new Date(iso).getTime()) / MS_PER_DAY);
 
 export async function buildMorning(sb, now = new Date()) {
-  const [fragRes, projRes, mapRes, lastBriefRes] = await Promise.all([
+  const [fragRes, projRes, mapRes, lastBriefRes, revisitRes, crossRes] = await Promise.all([
     // ⚠️ archived·let_go를 **안 거른다.** 위 각주 2번. 대신 아래에서 표시한다.
     sb.from('fragments').select(FRAG_COLS).order('created_at', { ascending: false }),
     // ⚠️ done도 가져온다. 위 각주 4번.
@@ -111,11 +119,20 @@ export async function buildMorning(sb, now = new Date()) {
     sb.schema('rudy').from('utterances').select('created_at, text')
       .eq('surface', 'briefing').eq('kind', 'pattern')
       .order('created_at', { ascending: false }).limit(3),
+    // ①⑥의 임베딩 하부 (rudy-morning.sql). 3072차원 쌍 비교라 벡터가 있는 자리에서 돈다.
+    sb.schema('rudy').rpc('revisits', { recent_days: RECENT_DAYS, gap_days: 21, min_sim: 0.42, max_rows: 12 }),
+    sb.schema('rudy').rpc('cross_project_pairs', { min_sim: 0.45, min_gap_days: 14, max_rows: 12 }),
   ]);
   if (fragRes.error) throw fragRes.error;
   if (projRes.error) throw projRes.error;
+  // RPC는 없어도 브리핑이 돌아야 한다 — rudy-morning.sql을 아직 안 붙여넣었을 수 있다.
+  // 나머지 카드는 멀쩡한데 전체가 죽으면 그날 아침이 통째로 없어진다.
+  for (const [what, res] of [['revisits', revisitRes], ['cross_project_pairs', crossRes]]) {
+    if (res.error) console.warn(`[morning] rudy.${what} 없음 — 해당 카드 생략 (${res.error.message})`);
+  }
 
   const rows = fragRes.data ?? [];
+  const rowById = new Map(rows.map((f) => [f.id, f]));
   const projects = projRes.data ?? [];
   const nameById = new Map(projects.map((p) => [p.id, p.name]));
   const projectsOf = new Map();
@@ -237,9 +254,122 @@ export async function buildMorning(sb, now = new Date()) {
     .map((name) => ({ name, recent: sRecent.get(name) ?? 0, prior: sPrior.get(name) ?? 0 }))
     .sort((a, b) => b.recent - a.recent || b.prior - a.prior);
 
+  // ═══ 앞을 보는 카드들 ═══
+  const aheadCut = now.getTime() - AHEAD_DAYS * MS_PER_DAY;
+  const isAhead = (f) => at(f) >= aheadCut;
+
+  // ① 돌아온 것 — 묻었는데 몇 주 뒤에 또 던진 것. 짝으로 낸다.
+  const revisits = (revisitRes.data ?? [])
+    .map((r) => {
+      const cur = rows.find((f) => f.id === r.recent_id);
+      const past = rows.find((f) => f.id === r.past_id);
+      return cur && past
+        ? { now: toItem(cur), then: toItem(past), similarity: r.similarity, gap: r.gap, thenBuried: r.past_archived }
+        : null;
+    })
+    .filter(Boolean);
+
+  // ③ 다음 한 수 — 지금 제일 뜨거운 프로젝트. 다음 단계는 **모델이 지어내지 않고 파편에서 찾는다.**
+  // done은 후보에서 뺀다 (끝난 걸 두고 "다음"을 물으면 그게 잔소리다).
+  const heat = projects
+    .filter((p) => p.status !== 'done')
+    .map((p) => ({ p, n: rows.filter((f) => isAhead(f) && (projectsOf.get(f.id) ?? []).includes(p.name)).length }))
+    .sort((a, b) => b.n - a.n);
+  // 3개 미만이면 "뜨겁다"고 부를 게 없다. 억지로 1등을 뽑느니 카드를 안 낸다.
+  const hot = heat.filter((h) => h.n >= 3).slice(0, 2).map((h) => h.p.name);
+
+  // ④ 일 말고 — 밀도 상위 프로젝트 **밖에** 있는 최근 파편. 이름을 코드에 박지 않는다:
+  // 유저가 프로젝트를 새로 만들면 뭐가 "일"인지도 같이 움직여야 한다.
+  //
+  // ⚠️ **무소속 링크는 뺀다.** 안 빼면 120개가 오는데 그중 40개가 레딧·ProductHunt 인박스
+  //    유입이라 목록이 개발 링크로 도배된다(실측 2026-08-14). 반대로 프로젝트로 좁히면
+  //    34개로 줄지만 "독서모임", "음악 루틴", "조용한 곳에 가서 쉬고 싶다" 같은
+  //    **직접 쓴 생각이 통째로 날아간다** — 이 사람은 삶 쪽을 대개 무소속 텍스트로 던진다.
+  //    그래서 자른 선이 "링크냐 아니냐"다: 유입은 빼고 직접 쓴 건 남긴다.
+  const offWork = rows
+    .filter(
+      (f) =>
+        isAhead(f) &&
+        !(projectsOf.get(f.id) ?? []).some((n) => hot.includes(n)) &&
+        ((projectsOf.get(f.id) ?? []).length > 0 || f.type !== 'link'),
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  // ⑥ 안 이어본 연결 — 손으로 나눈 칸을 넘어 붙는 쌍.
+  const crossLinks = (crossRes.data ?? [])
+    .map((r) => {
+      const x = rows.find((f) => f.id === r.a);
+      const y = rows.find((f) => f.id === r.b);
+      return x && y ? { a: toItem(x), b: toItem(y), similarity: r.similarity, gap: r.gap } : null;
+    })
+    .filter(Boolean);
+
+  // ② 떠 있는 것 — 하지도 묻지도 않은 채 남은 것. 코드가 끝까지 계산한다(모델 없이 완결).
+  const floating = alive
+    .filter((f) => daysAgo(f.created_at, now) >= FLOAT_DAYS)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((f) => ({ ...toItem(f), days: daysAgo(f.created_at, now) }));
+
+  // ⑧ 처분 패턴 — 흘려보내기는 명시적 거부다. 프로젝트별 비율이 "뭘 포기했나"를 말한다.
+  // 실측 2026-08-14: No phone이 status=active인데 21개 중 17개(81%)가 흘려보냄이었다.
+  const disposal = projects
+    .map((p) => {
+      const mine = rows.filter((f) => (projectsOf.get(f.id) ?? []).includes(p.name));
+      const letGo = mine.filter((f) => f.let_go_at).length;
+      return {
+        name: p.name,
+        status: p.status,
+        total: mine.length,
+        alive: mine.filter((f) => !f.archived && !f.let_go_at).length,
+        letGo,
+        letGoPct: mine.length ? Math.round((letGo / mine.length) * 100) : 0,
+      };
+    })
+    .filter((d) => d.total >= 5) // 표본이 작으면 비율이 거짓말을 한다
+    .sort((a, b) => b.letGoPct - a.letGoPct);
+
+  // 소화 속도 — 던지고 며칠 만에 묻었나. archived_at을 2026-08-14에 붙였으므로
+  // 그 전 데이터는 영영 없다. 표본이 찰 때까지 조용히 비워둔다(지어내지 않는다).
+  const digestGaps = rows
+    .filter((f) => f.archived_at)
+    .map((f) => (new Date(f.archived_at).getTime() - at(f)) / MS_PER_DAY)
+    .sort((a, b) => a - b);
+  const digestion = digestGaps.length >= 5
+    ? { n: digestGaps.length, medianDays: Math.round(digestGaps[Math.floor(digestGaps.length / 2)] * 10) / 10 }
+    : null;
+
+  // 덧붙임이 "며칠 뒤에 돌아와서 쓴 것"인가 — note_at도 같은 날 붙였다. 같은 이유로 조용히 비운다.
+  const returnGaps = rows
+    .filter((f) => f.note_at)
+    .map((f) => (new Date(f.note_at).getTime() - at(f)) / MS_PER_DAY);
+  const returns = returnGaps.length >= 5
+    ? { n: returnGaps.length, laterThanADay: returnGaps.filter((d) => d >= 1).length }
+    : null;
+
+  // 서사 재료 — 화면엔 안 그린다. 긴 글이 시간 축을 말할 때만 쓴다.
+  const WD = ['일', '월', '화', '수', '목', '금', '토'];
+  const weekday = WD.map((label) => ({ label, count: 0 }));
+  const hourBand = [
+    { label: '새벽 5-9', from: 5, to: 9, count: 0 },
+    { label: '오전 9-12', from: 9, to: 12, count: 0 },
+    { label: '낮 12-18', from: 12, to: 18, count: 0 },
+    { label: '저녁 18-23', from: 18, to: 23, count: 0 },
+    { label: '심야 23-5', from: 23, to: 29, count: 0 },
+  ];
+  for (const f of rows) {
+    const kst = new Date(new Date(f.created_at).toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+    weekday[kst.getDay()].count++;
+    const h = kst.getHours();
+    const b = hourBand.find((x) => (h >= x.from && h < x.to) || (x.to > 24 && (h >= x.from || h < x.to - 24)));
+    if (b) b.count++;
+  }
+
+  const ahead = { revisits, hot, floating, crossLinks, disposal, digestion, returns, weekday, hourBand };
+
   const stats = {
     today,
     yesterday,
+    ahead,
     axes: [], // run.mjs가 모델 출력(refs)으로 채운다
     bands: [
       { label: '또렷함', count: vivid },
@@ -266,9 +396,16 @@ export async function buildMorning(sb, now = new Date()) {
   // ── 모델용 재료. 번호(#N)로 참조한다 — UUID를 다 실으면 재료의 상당량을 UUID가 먹는다
   //    (discover-claude/material.mjs가 실측으로 겪은 문제). run.mjs가 번호를 id로 되돌린다.
   const refs = []; // index 0 = #1
+  // 같은 파편이 여러 구획에 나와도 번호는 하나다 — 아래 "앞을 보는 카드들"이 위 목록의 파편을
+  // 다시 가리키는데, 거기서 새 번호를 주면 모델이 같은 것을 둘로 세게 된다.
+  const numOf = new Map();
   const line = (f, { full = false } = {}) => {
-    refs.push(f.id);
-    const n = refs.length;
+    let n = numOf.get(f.id);
+    if (!n) {
+      refs.push(f.id);
+      n = refs.length;
+      numOf.set(f.id, n);
+    }
     const pr = (projectsOf.get(f.id) ?? []).join(',');
     const mark = f.archived ? '(묻음)' : f.let_go_at ? '(흘려보냄)' : '';
     const head = `#${n} ${kstDate(f.created_at)}${full ? ` ${kstTime(f.created_at)}` : ''} [${f.type}]${pr ? `{${pr}}` : ''}${mark}`;
@@ -277,6 +414,21 @@ export async function buildMorning(sb, now = new Date()) {
     const desc = full && f.link_description ? ` — ${f.link_description.replace(/\s+/g, ' ').slice(0, 200)}` : '';
     const note = f.note ? ` (덧: ${f.note.replace(/\s+/g, ' ').slice(0, full ? 400 : 100)})` : '';
     return `${head} ${title}${body}${desc}${note}`;
+  };
+
+  // 아래 카드 구획에서 위 목록의 파편을 가리킬 때 쓰는 짧은 꼴. 본문을 또 싣지 않는다 —
+  // 재료가 두 배가 되고, 같은 걸 두 번 읽은 모델은 그걸 두 번 일어난 일로 읽는다.
+  // 위 목록에 없는 것도 있다 — ①의 과거 짝은 28일 창 밖일 수 있다. 그땐 여기서 번호를 준다.
+  const ref = (f) => {
+    let n = numOf.get(f.id);
+    if (!n) {
+      refs.push(f.id);
+      n = refs.length;
+      numOf.set(f.id, n);
+    }
+    const pr = (projectsOf.get(f.id) ?? []).join(',');
+    const mark = f.archived ? '(묻음)' : f.let_go_at ? '(흘려보냄)' : '';
+    return `#${n} ${kstDate(f.created_at)}${pr ? `{${pr}}` : ''}${mark} ${titleOf(f)}`;
   };
 
   const isThisWeek = (iso) => new Date(iso).getTime() >= recentCut;
@@ -299,6 +451,27 @@ export async function buildMorning(sb, now = new Date()) {
       }
     })
     .filter(Boolean);
+
+  // 서사는 갱신되는 문서라 **직전 것 하나만** 준다 (패턴은 반복 방지용이라 3개를 주는 것과 다르다).
+  // 세 개를 주면 모델이 셋을 합치려 들고, 그러면 갱신이 아니라 요약이 된다.
+  const lastNarrative = (() => {
+    for (const r of lastBriefRes.data ?? []) {
+      try {
+        const n = JSON.parse(r.text)?.narrative;
+        if (!n?.paras?.length) continue;
+        return [
+          `(${kstDate(r.created_at)}에 쓴 것)`,
+          ...n.paras.map((p) => `[${p.confidence ?? '추측'}] ${p.text}`),
+          n.counter ? `반증으로 적어둔 것: ${n.counter}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+      } catch {
+        // 옛 형식이면 서사가 없다 — 다음 것을 본다
+      }
+    }
+    return null;
+  })();
 
   const todayRows = rows.filter((f) => kstDate(f.created_at) === todayKey);
   const ydayRows = rows.filter((f) => kstDate(f.created_at) === ydayKey);
@@ -342,6 +515,64 @@ export async function buildMorning(sb, now = new Date()) {
     '',
     '## 흐려지는 중 — 아직 바닥은 아니라 지금이 마지막 기회인 것들',
     fading.map((it) => `- ${it.title}`).join('\n') || '(없음)',
+    '',
+    '# ═══ 앞을 보는 재료 ═══',
+    '※ 여기부터는 "어제까지 뭐가 있었나"가 아니라 "지금 뭘 하나"다. 위 구획과 섞지 마라.',
+    '※ 아래 숫자·짝은 **전부 코드가 계산했다.** 다시 세지도, 다른 짝을 지어내지도 마라.',
+    '',
+    '## ① 돌아온 것 — 몇 주 전에 던지고 정리한 걸 최근에 또 던졌다',
+    '※ 한 번 던진 건 충동이고 몇 주 뒤에 또 던진 건 의지다. 그 차이가 이 카드의 전부다.',
+    '   과거 짝이 (묻음)인 게 정상이다 — 정리했는데도 돌아왔다는 뜻이라 오히려 신호가 세다.',
+    revisits.length
+      ? revisits
+          .map((r) => {
+            const cur = rowById.get(r.now.id);
+            const past = rowById.get(r.then.id);
+            return `- 유사도 ${r.similarity.toFixed(2)} · ${r.gap}일 만에\n  지금: ${ref(cur)}\n  그때: ${ref(past)}`;
+          })
+          .join('\n')
+      : '(없음)',
+    '',
+    `## ③ 다음 한 수 — 지금 제일 뜨거운 것: ${hot.length ? hot.map((n) => `${n}(최근 ${AHEAD_DAYS}일 ${heat.find((h) => h.p.name === n).n}개)`).join(', ') : '(없음 — 어디도 3개를 못 넘겼다)'}`,
+    '※ 이 프로젝트 파편은 위 목록에 이미 있다. **다음 단계를 네 말로 지어내지 마라.**',
+    '   이 사람이 직접 적어둔 문장을 찾아서 꺼내라 — "다음엔 ~", "일단 ~", "~부터", "mvp",',
+    '   "~해볼까" 같은 게 붙은 파편이 있으면 그게 답이다. 없으면 `nextMove`를 null로 둬라.',
+    '',
+    `## ④ 일 말고 — 위 프로젝트 밖의 최근 ${AHEAD_DAYS}일 파편`,
+    '※ 만드는 것 말고 사는 것 쪽이 여기 있다(가고 싶은 곳·음악·글·몸·사람). 이쪽은 파편 수가',
+    '   적어서 위 구획에선 항상 개발에 밀린다. 자리를 따로 준 이유가 그거다.',
+    '   개발·앱 얘기가 섞여 있으면 그건 빼라. 남는 게 없으면 없는 거다.',
+    offWork.length ? offWork.map((f) => `- ${ref(f)}`).join('\n') : '(없음)',
+    '',
+    '## ⑥ 안 이어본 연결 — 다른 프로젝트에 넣어뒀는데 사실 같은 얘기',
+    '※ 프로젝트는 이 사람이 손으로 나눈 칸이다. 그 칸을 넘어 붙는 쌍만 골라뒀다.',
+    '   "둘이 비슷하다"고만 쓰면 값이 없다. **붙였을 때 뭐가 되는지**를 한 줄로 써라.',
+    crossLinks.length
+      ? crossLinks
+          .map((c) => `- 유사도 ${c.similarity.toFixed(2)} · ${c.gap}일 차\n  ${ref(rowById.get(c.a.id))}\n  ${ref(rowById.get(c.b.id))}`)
+          .join('\n')
+      : '(없음)',
+    '',
+    '## ② 떠 있는 것 — 하지도 묻지도 않은 채 남은 것 (코드가 끝냈다. 화면이 그대로 그린다)',
+    '※ 여기에 쓰지 마라. 서사에서 근거로만 써라.',
+    floating.length ? floating.map((it) => `- ${it.days}일째 ${it.title}`).join('\n') : '(없음)',
+    '',
+    '## 서사 전용 재료 — 위 카드엔 쓰지 마라',
+    `- 요일별 저장: ${weekday.map((w) => `${w.label} ${w.count}`).join(' · ')}`,
+    `- 시간대별 저장: ${hourBand.map((h) => `${h.label} ${h.count}`).join(' · ')}`,
+    `- 처분(흘려보내기 = 명시적 거부): ${disposal.map((d) => `${d.name}(${d.status}) ${d.letGoPct}% 흘려보냄·살아있는 것 ${d.alive}/${d.total}`).join(' · ') || '(표본 부족)'}`,
+    digestion
+      ? `- 소화 속도: 던지고 묻기까지 중앙값 ${digestion.medianDays}일 (표본 ${digestion.n}개)`
+      : '- 소화 속도: 아직 표본이 없다 (기록을 2026-08-14에 시작했다). 이 축은 말하지 마라.',
+    returns
+      ? `- 덧붙임: ${returns.n}개 중 ${returns.laterThanADay}개가 하루 이상 지나서 붙었다 (= 되돌아왔다)`
+      : '- 덧붙임 시각: 아직 표본이 없다 (2026-08-14 시작). 이 축은 말하지 마라.',
+    '',
+    '## 지난 서사 — 이걸 고쳐 쓴다. 처음부터 새로 쓰지 마라',
+    '※ 서사는 매일 새로 쓰는 글이 아니라 **하나의 문서를 계속 갱신하는 것**이다.',
+    '   새 파편이 들어오면 그 판단을 수정한다. 지난 판단이 틀렸으면 틀렸다고 적고 고쳐라.',
+    '   아무것도 안 바뀌었으면 그대로 두고 `changed`를 null로 둬라 — 억지로 고치지 마라.',
+    lastNarrative ?? '(없음 — 이번이 첫 서사다. 처음부터 쓴다.)',
   ]
     .filter((l) => l !== '')
     .join('\n');
@@ -351,7 +582,7 @@ export async function buildMorning(sb, now = new Date()) {
     stats,
     refs,
     // run.mjs가 모델이 낸 refs로 축을 조립할 때 쓴다 (선명도·시간모양 계산에 원본 행이 필요하다).
-    rowById: new Map(rows.map((f) => [f.id, f])),
+    rowById,
     toItem,
     meta: {
       total: rows.length,
