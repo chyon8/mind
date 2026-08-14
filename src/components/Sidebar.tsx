@@ -41,6 +41,18 @@ export function Sidebar(props: { navigation: { closeDrawer: () => void } }) {
           <Text style={styles.rowLabel}>프로젝트</Text>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+        {/* 맥락 — 파편과 독립된 공간(supabase/context.sql). 내가 직접 써 넣는 나에 대한 사실을
+            모아두고, 다른 AI에 붙여넣을 요약을 요청에 맞게 꺼낸다. 선명도·발견과 무관하다. */}
+        <Pressable
+          style={styles.row}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/context');
+          }}
+        >
+          <Text style={styles.rowLabel}>맥락</Text>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
 
         <View style={styles.divider} />
         {/* 당기는 표면 (RUDY.md §7-2) — 내가 열 때만 말한다 */}
