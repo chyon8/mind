@@ -132,12 +132,79 @@ function isRedditJunk(finalUrl: string, title: string | null): boolean {
     if (!isRedditUrl(u)) return false;
     return (
       u.pathname.startsWith('/login') ||
+      u.pathname === '/over18' || // 연령 게이트 — 제목 문구보다 이 경로가 확실한 신호다
       title === 'Reddit' ||
       !!title?.toLowerCase().startsWith('reddit.com:')
     );
   } catch {
     return false;
   }
+}
+
+// 연령확인(NSFW) 인터스티셜이 걸린 글은 HTML 경로로는 제목을 **원리상** 못 얻는다.
+// 쿠키 한 줄(over18=1)이면 넘어가지만 **RN에서는 그 방법을 못 쓴다**: iOS의 NSURLSession이
+// 자기 쿠키 저장소 값으로 Cookie 헤더를 통째로 덮어쓰는데, 바로 위 redditFetchUrl의 단축링크
+// 해석 요청이 이미 reddit 쿠키를 저장소에 심어놓기 때문에 수동 헤더는 확실히 지워진다.
+// (2026-08-14: Node에서 쿠키가 먹는 걸 보고 넣었다가 앱에서 안 먹어 되돌렸다 — RN fetch의
+// redirect:'manual'과 같은 부류의 함정이다.)
+//
+// 대신 .rss를 쓴다. 피드리더용이라 연령 게이트가 없고, 쿠키도 UA도 필요 없는 평범한 GET이며,
+// 제목과 본문이 구조화돼 나온다(.json API는 2026-08-14 기준 403이라 못 쓴다).
+// 게이트에 걸렸을 때만 타는 폴백이다 — 멀쩡한 글은 기존 HTML 경로를 그대로 쓴다.
+async function fetchRedditRss(
+  finalUrl: string,
+  signal: AbortSignal,
+): Promise<{ title: string; description: string | null } | null> {
+  let u: URL;
+  try {
+    u = new URL(finalUrl);
+  } catch {
+    return null;
+  }
+  if (!isRedditUrl(u)) return null;
+  // 연령 게이트는 리다이렉트다 — 최종 주소가 /over18?dest=<원래 글 주소>로 바뀌어 있어서
+  // 글 경로가 통째로 사라진다(2026-08-14 실측). 글 주소는 dest 안에 있으므로 거기서 되찾는다.
+  if (u.pathname === '/over18') {
+    const dest = u.searchParams.get('dest');
+    if (!dest) return null;
+    try {
+      u = new URL(dest);
+    } catch {
+      return null;
+    }
+    if (!isRedditUrl(u)) return null;
+  }
+  if (!u.pathname.includes('/comments/')) return null;
+
+  const rss = `https://old.reddit.com${u.pathname.replace(/\/?$/, '/')}.rss`;
+  const res = await fetch(rss, { signal });
+  if (!res.ok) return null;
+  const xml = await res.text();
+
+  // 피드 머리글에도 <title>이 있으므로 반드시 <entry> 이후만 본다
+  const entry = xml.slice(xml.indexOf('<entry>'));
+  const title = decode(entry.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '');
+  if (!title) return null;
+
+  // 본문은 이스케이프가 두 겹이다 — XML로 한 번(&lt;p&gt;), 그 안의 HTML 엔티티가 또 한 번
+  // (&amp;#39;). 그래서 **decode를 먼저** 걸어 진짜 HTML로 되돌린 뒤에야 주석 경계를 찾을 수
+  // 있고, 남은 엔티티는 htmlToText가 두 번째 decode로 푼다. 순서를 바꾸면 본문이 통째로 빈다.
+  // SC_OFF/SC_ON은 레딧이 본문 양끝에 늘 박는 주석이라 "submitted by /u/..." 꼬리표를
+  // 본문으로 삼키지 않는 안전한 경계다.
+  const html = decode(entry.match(/<content type="html">([\s\S]*?)<\/content>/)?.[1] ?? '');
+  const body = html.match(/<!-- SC_OFF -->([\s\S]*?)<!-- SC_ON -->/)?.[1];
+  const description = body ? htmlToText(body).slice(0, SELFTEXT_MAX) || null : null;
+  return { title, description };
+}
+
+// 레딧 벽에 막혔을 때의 공통 처리 — .rss가 되면 그걸 쓰고, 안 되면 아무것도 못 받은 것으로
+// 취급한다(쓰레기 제목을 저장하느니 비워 두고 다음 포그라운드에 다시 시도하게 둔다).
+async function redditRssFallback(
+  finalUrl: string,
+  signal: AbortSignal,
+): Promise<{ title: string | null; description: string | null; thumbnail: string | null }> {
+  const rss = await fetchRedditRss(finalUrl, signal).catch(() => null);
+  return { title: rss?.title ?? null, description: rss?.description ?? null, thumbnail: null };
 }
 
 // 레딧 글 본문(selftext). og:description은 레딧이 150자 안팎에서 "…"로 잘라 보내기 때문에
@@ -240,7 +307,9 @@ export async function fetchLinkMeta(
     // 주는데 status를 안 보던 시절엔 그 페이지 제목("Just a moment...")이 그대로 박혔다 —
     // producthunt·kvraudio·dreamtonics 12건이 전부 이것이었다(2026-08-12 실측, 브라우저 UA로도 403).
     // 레딧 전용 규칙(isRedditJunk)이 200으로 오는 챌린지를 따로 막는 것과 짝이다.
-    if (!res.ok) return { title: null, description: null, thumbnail: null };
+    // 레딧은 봇 차단을 403(<title>이 "Blocked")으로도 준다 — 200 인터스티셜과 형태만 다를 뿐
+    // 같은 벽이므로 여기서도 .rss로 넘어간다. 레딧이 아니면 아래 함수가 즉시 null이라 공짜다.
+    if (!res.ok) return await redditRssFallback(res.url || url, ctrl.signal);
     const html = await res.text();
     // og 태그와 <title>은 <head> 안에만 있다. 유튜브 같은 1~2MB짜리 페이지 **전문**에
     // `<meta[^>]+...` 정규식을 네 번 돌리면 그동안 JS 스레드가 통째로 막혀 첫 화면 렌더가 밀린다.
@@ -250,9 +319,9 @@ export async function fetchLinkMeta(
     const fallback = decode(head.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '');
     // 네이버 플레이스는 og:title 끝에 " : 네이버"를 붙인다 — 장소 이름만 남긴다.
     const title = (meta(head, 'og:title') ?? (fallback || null))?.replace(/ : 네이버$/, '') ?? null;
-    // 레딧이 실제 글 대신 챌린지/로그인 페이지를 준 경우 — 아무것도 못 받은 것으로 취급한다
+    // 레딧이 실제 글 대신 챌린지/로그인/연령확인 페이지를 준 경우 — 위 403과 같은 처리
     if (isRedditJunk(res.url || url, title)) {
-      return { title: null, description: null, thumbnail: null };
+      return await redditRssFallback(res.url || url, ctrl.signal);
     }
     // 검색 신호용. 유튜브는 홍보 문구 오염 때문에 실제 재생 데이터에서 따로 뽑는다 —
     // ytInitialPlayerResponse는 body에 있으므로 여기만 전문을 본다(리터럴 앵커라 스캔이 싸다).
