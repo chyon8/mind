@@ -720,14 +720,22 @@ function renderDetail() {
   // 고정한 걸 실수로 묻지 않게 — 묻으려면 먼저 고정을 풀어야 한다 (앱과 동일 규칙)
   const pinnedBlocksGrave = f.tier === 'pinned' && !f.archived;
   const actions = el('div', 'detailActions');
-  const archiveBtn = el('button', 'detailBtn' + (pinnedBlocksGrave ? ' disabled' : ''));
-  archiveBtn.textContent = f.archived
-    ? '파내기 — 타임라인으로 복귀'
-    : pinnedBlocksGrave ? '묻기 — 고정을 먼저 풀어야 한다' : '묻기 — 무덤으로';
-  archiveBtn.onclick = () => { if (!pinnedBlocksGrave) toggleDetailArchive(); };
+  if (f.archived || pinnedBlocksGrave) {
+    const archiveBtn = el('button', 'detailBtn' + (pinnedBlocksGrave ? ' disabled' : ''));
+    archiveBtn.textContent = f.archived ? '파내기 — 타임라인으로 복귀' : '묻기 — 고정을 먼저 풀어야 한다';
+    archiveBtn.onclick = () => { if (!pinnedBlocksGrave) toggleDetailArchive(false); };
+    actions.append(archiveBtn);
+  } else {
+    // "묻기"는 끝(회상에 다시 안 나옴), "나중에"는 resurface: true — 앱 회상이 가끔 다시 편입한다
+    const buryBtn = el('button', 'detailBtn'); buryBtn.textContent = '묻기';
+    buryBtn.onclick = () => toggleDetailArchive(false);
+    const laterBtn = el('button', 'detailBtn'); laterBtn.textContent = '나중에';
+    laterBtn.onclick = () => toggleDetailArchive(true);
+    actions.append(buryBtn, laterBtn);
+  }
   const deleteBtn = el('button', 'detailBtn danger'); deleteBtn.textContent = '삭제';
   deleteBtn.onclick = deleteDetailFragment;
-  actions.append(archiveBtn, deleteBtn);
+  actions.appendChild(deleteBtn);
   panel.appendChild(actions);
 }
 
@@ -844,10 +852,11 @@ function askBuryChoice() {
   });
 }
 
-async function toggleDetailArchive() {
+async function toggleDetailArchive(resurface) {
   const f = detailFragment;
   const next = !f.archived;
   const fields = { archived: next };
+  if (next) fields.resurface = !!resurface;
   if (next && f.discover_next) {
     const choice = await askBuryChoice();
     if (choice === null) return;
