@@ -64,6 +64,8 @@ export default function FragmentDetail() {
   const [discoverFull, setDiscoverFull] = useState(false);
   // 발견 포함 지정된 파편을 묻으려 할 때만 뜬다 (BuryDiscoverModal)
   const [buryModalOpen, setBuryModalOpen] = useState(false);
+  // 모달을 띄우기 전에 고른 끝/나중에 — 모달 응답이 올 때까지만 들고 있는다(리렌더 불필요)
+  const pendingResurface = useRef(false);
 
   // 화면을 떠나는 순간(뒤로·스와이프백·하드웨어백) 바뀐 것만 저장하기 위한 최신값 스냅샷.
   // blur가 미처 못 뛴 채로 나가도 여기서 건진다 — 저장 버튼 없이 마찰 0.
@@ -195,16 +197,19 @@ export default function FragmentDetail() {
 
   // 묻기/파내기. 발견에 포함 지정된 걸 묻을 때만 한 번 물어본다 — 지정은 상한 5개라
   // 까먹고 묻어두면 다음 브리핑 한 자리가 조용히 묻힌 파편에 먹힌다.
-  function toggleArchive() {
+  // resurface: "끝"이 아니라 "나중에" — 회상 풀에 다시 편입된다(recall.ts). 판단은 이 순간
+  // 한 번뿐이고 회상 화면에는 버튼이 늘지 않는다 (2026-08-16).
+  function toggleArchive(resurface: boolean) {
     if (pinnedBlocksGrave) return;
     if (fragment!.archived) {
       patch({ archived: false }).catch(() => {});
       return;
     }
     if (!fragment!.discover_next) {
-      patch({ archived: true }).catch(() => {});
+      patch({ archived: true, resurface }).catch(() => {});
       return;
     }
+    pendingResurface.current = resurface;
     setBuryModalOpen(true);
   }
 
@@ -213,8 +218,8 @@ export default function FragmentDetail() {
     if (choice === null) return;
     patch(
       choice === 'release'
-        ? { archived: true, discover_next: false, discover_next_slot: null }
-        : { archived: true },
+        ? { archived: true, discover_next: false, discover_next_slot: null, resurface: pendingResurface.current }
+        : { archived: true, resurface: pendingResurface.current },
     ).catch(() => {});
   }
 
@@ -535,18 +540,25 @@ export default function FragmentDetail() {
 
         <View style={styles.divider} />
 
-        <Pressable
-          onPress={toggleArchive}
-          style={[styles.graveBtn, pinnedBlocksGrave && styles.graveBtnDisabled]}
-        >
-          <Text style={styles.graveLabel}>
-            {fragment.archived
-              ? '파내기 — 타임라인으로 복귀'
-              : pinnedBlocksGrave
-                ? '묻기 — 고정을 먼저 풀어야 한다'
-                : '묻기 — 무덤으로'}
-          </Text>
-        </Pressable>
+        {fragment.archived || pinnedBlocksGrave ? (
+          <Pressable
+            onPress={() => toggleArchive(false)}
+            style={[styles.graveBtn, pinnedBlocksGrave && styles.graveBtnDisabled]}
+          >
+            <Text style={styles.graveLabel}>
+              {fragment.archived ? '파내기 — 타임라인으로 복귀' : '묻기 — 고정을 먼저 풀어야 한다'}
+            </Text>
+          </Pressable>
+        ) : (
+          <View style={styles.graveRow}>
+            <Pressable onPress={() => toggleArchive(false)} style={styles.graveBtn}>
+              <Text style={styles.graveLabel}>묻기</Text>
+            </Pressable>
+            <Pressable onPress={() => toggleArchive(true)} style={styles.graveBtn}>
+              <Text style={styles.graveLabel}>나중에</Text>
+            </Pressable>
+          </View>
+        )}
 
         <Pressable onPress={remove} style={styles.deleteBtn}>
           <Text style={styles.deleteLabel}>삭제</Text>
@@ -818,6 +830,7 @@ const styles = StyleSheet.create({
   discoverLabelOn: { color: colors.onInk },
   // 한 줄 안내 — 상태·경고가 여기로 온다. 버튼 폭에 영향을 주지 않는 자리다.
   discoverHint: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sans, marginTop: spacing.xs },
+  graveRow: { flexDirection: 'row', gap: spacing.lg },
   graveBtn: { paddingVertical: spacing.sm },
   graveBtnDisabled: { opacity: 0.4 },
   graveLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },

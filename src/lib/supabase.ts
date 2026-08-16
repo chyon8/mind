@@ -370,6 +370,26 @@ export async function fetchRecallPool(): Promise<Fragment[]> {
   return data.map(toFragment);
 }
 
+// 무덤에서 가끔 떠오르는 것 — "끝"이 아니라 "나중에"로 묻은 것만(resurface, 2026-08-16).
+// 필터는 묻는 순간 유저가 이미 골랐으므로 여기서 프로젝트·카테고리로 다시 거르지 않는다.
+export async function fetchResurfacePool(): Promise<Fragment[]> {
+  if (!isConfigured) {
+    const { fixtureResurfacePool } = await import('./fixtures');
+    return fixtureResurfacePool();
+  }
+  const cooldown = new Date(Date.now() - LET_GO_COOLDOWN_DAYS * 86_400_000).toISOString();
+  const { data, error } = await supabase()
+    .from('fragments')
+    .select(EMBED)
+    .eq('archived', true)
+    .eq('resurface', true)
+    .or(`let_go_at.is.null,let_go_at.lt.${cooldown}`)
+    .order('archived_at', { ascending: true })
+    .limit(50);
+  if (error) throw error;
+  return data.map(toFragment);
+}
+
 // 충돌 회상의 씨앗 — 최근 며칠 안에 던진 파편들. 각각이 개별 씨앗이 된다 (rudy-collision.sql).
 export async function fetchRecentThrownIds(days: number): Promise<string[]> {
   if (!isConfigured) return [];
@@ -539,6 +559,9 @@ export async function rememberFragment(fr: Fragment): Promise<void> {
   await updateFragment(fr.id, {
     last_touched_at: new Date().toISOString(),
     touch_count: fr.touch_count + 1,
+    // 무덤에서 떠오른 걸 "기억하기"는 곧 파내기다 — 건드리기만 하고 계속 숨겨두면
+    // touch_count만 오르고 아무도 못 보는 죽은 갱신이 된다.
+    ...(fr.archived ? { archived: false } : {}),
   });
 }
 

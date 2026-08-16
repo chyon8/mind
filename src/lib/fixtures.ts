@@ -72,6 +72,7 @@ const f = (
   tier: 'normal',
   archived: false,
   archived_at: null,
+  resurface: false,
   touch_count: 0,
   let_go_at: null,
   note_at: null,
@@ -135,6 +136,11 @@ let store: Fragment[] = [
   }),
   // ── 무덤 (수동으로 묻은 것)
   f('fx-19', ago(33, 2), '묻어둔 파편. 무덤 칩에서만 보인다', 'text', { archived: true }),
+  // ── 무덤인데 "나중에" — 회상 풀에 가끔 다시 편입된다
+  f('fx-20', ago(10, 1), '독서모임. 지금은 관심 없지만 언젠가 다시', 'text', {
+    archived: true,
+    resurface: true,
+  }),
 ];
 
 // ============ 파편 ============
@@ -188,6 +194,14 @@ export function fixtureRecallPool(): Fragment[] {
     .filter((fr) => !fr.archived)
     .filter((fr) => fr.let_go_at == null || new Date(fr.let_go_at).getTime() < cutoff)
     .sort((a, b) => a.last_touched_at.localeCompare(b.last_touched_at));
+}
+
+export function fixtureResurfacePool(): Fragment[] {
+  const cutoff = Date.now() - LET_GO_COOLDOWN_MS;
+  return store
+    .filter((fr) => fr.archived && fr.resurface)
+    .filter((fr) => fr.let_go_at == null || new Date(fr.let_go_at).getTime() < cutoff)
+    .sort((a, b) => (a.archived_at ?? '').localeCompare(b.archived_at ?? ''));
 }
 
 export function fixtureFragmentsByIds(ids: string[]): Fragment[] {

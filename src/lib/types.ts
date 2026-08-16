@@ -29,6 +29,9 @@ export interface Fragment {
   // 묻은 시각. 파내면 null로 돌아간다 — "지금 묻혀 있나"는 archived가, "언제 묻었나"는 여기가 답한다.
   // 아침 브리핑의 소화 속도(던지고 며칠 만에 정리했나)가 이 값 하나로 만들어진다.
   archived_at: string | null;
+  // 묻을 때 "끝"이 아니라 "나중에"를 고른 것 — 회상 풀에 다시 편입된다(recall.ts).
+  // archived가 false면 뜻이 없다 — 항상 묻은 시점의 선택으로만 켜진다(2026-08-16).
+  resurface: boolean;
   touch_count: number; // 회상에서 구해낸 횟수 = 자라나는 중요도
   let_go_at: string | null; // 회상에서 흘려보낸 시각. 보여준 것만으론 기록되지 않는다
   // 덧붙임을 쓴 시각. created_at과의 차이가 "며칠 뒤에 다시 왔나"다 —

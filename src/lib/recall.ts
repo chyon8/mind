@@ -4,6 +4,7 @@ import {
   fetchFragmentsByIds,
   fetchRecallPool,
   fetchRecentThrownIds,
+  fetchResurfacePool,
   logGate,
   logUtterance,
   resurfacedIdsSince,
@@ -38,6 +39,10 @@ const SIM_THRESHOLD = 0.42;
 // 원장(rudy.utterances)이 있어야 가능한 규칙 — 그래서 §10-4 전까진 이게 없었다.
 const RESURFACE_COOLDOWN_DAYS = 30;
 
+// 무덤에서 "나중에"로 묻은 것 중 한 판에 몇 자리를 내줄까 (2026-08-16 유저 지시).
+// 없으면 그냥 일반 회상으로 채운다 — 억지로 자리를 비우지 않는다.
+const GRAVE_SLOTS = 1;
+
 const LEDGER = { surface: 'recall_feed', kind: 'resurface' } as const;
 
 // 이 아래로 흐려진 것만 후보다. 이미 또렷한 걸 또 보여주는 건 낭비고,
@@ -55,6 +60,13 @@ const LET_GO_COOLDOWN_MS = 7 * 86_400_000;
 function stillFading(fr: Fragment, now: Date): boolean {
   const cooledDown = fr.let_go_at == null || now.getTime() - new Date(fr.let_go_at).getTime() > LET_GO_COOLDOWN_MS;
   return !fr.archived && cooledDown && vividness(fr, now) <= NEAR_FLOOR;
+}
+
+// 무덤에서 "나중에"로 나온 픽인가 — 선명도는 안 본다(이미 묻힌 것이라 뜻이 없다),
+// 흘려보내기 쿨다운만 같이 적용한다.
+function stillBuried(fr: Fragment, now: Date): boolean {
+  const cooledDown = fr.let_go_at == null || now.getTime() - new Date(fr.let_go_at).getTime() > LET_GO_COOLDOWN_MS;
+  return fr.archived && fr.resurface && cooledDown;
 }
 
 // 중요할수록, 여러 번 구해냈을수록 더 자주 떠오른다.
@@ -157,11 +169,12 @@ export async function currentRecall(): Promise<Fragment[]> {
   const seen = saved?.seen ?? [];
   if (isFresh(saved)) {
     const frs = await fetchFragmentsByIds(saved.ids);
-    return frs.filter((fr) => stillFading(fr, now)); // 손댄 건 조용히 빠진다
+    return frs.filter((fr) => (fr.archived ? stillBuried(fr, now) : stillFading(fr, now))); // 손댄 건 조용히 빠진다
   }
 
-  // 충돌 1개(있으면) + 랜덤 1개. 임계 미달이면 그냥 랜덤 2개 — 슬롯을 억지로 채우지 않는다.
-  // 충돌 경로가 죽어도(RPC 미배포 등) 회상 자체는 살아야 하므로 랜덤으로 폴백한다.
+  // 충돌 1개(있으면) + 무덤 1개(있으면) + 나머지 랜덤. 못 채우면 그만큼 랜덤이 메운다 —
+  // 슬롯을 억지로 채우지 않는다. 충돌 경로가 죽어도(RPC 미배포 등) 회상 자체는 살아야 하므로
+  // 랜덤으로 폴백한다.
   let collision: { fr: Fragment; seedId: string } | null = null;
   try {
     collision = await collisionPick(now);
@@ -169,13 +182,20 @@ export async function currentRecall(): Promise<Fragment[]> {
     console.warn('[recall] 충돌 실패 → 랜덤만', e); // 무성 실패 방지
   }
 
+  const wantAfterCollision = RECALL_COUNT - (collision ? 1 : 0);
+
+  // 무덤 한 자리(있으면) — "나중에"로 묻은 것 중 하나. 풀이 비어 있으면 그냥 일반으로 채운다.
+  const graveWant = Math.min(GRAVE_SLOTS, wantAfterCollision);
+  const gravePool = (await fetchResurfacePool()).filter((fr) => !seen.includes(fr.id));
+  const gravePicked = weightedSample(gravePool, graveWant);
+
   const pool = (await fetchRecallPool()).filter((fr) => stillFading(fr, now));
   const eligible = pool.filter((fr) => fr.id !== collision?.fr.id);
-  const want = RECALL_COUNT - (collision ? 1 : 0);
+  const want = wantAfterCollision - gravePicked.length;
   const unseen = eligible.filter((fr) => !seen.includes(fr.id));
   // 못 채울 만큼 마르면 seen을 통째로 무시한다. 겹쳐 보이는 게 텅 빈 것보단 낫다.
   const random = weightedSample(unseen.length >= want ? unseen : eligible, want);
-  const picked = collision ? [collision.fr, ...random] : random;
+  const picked = collision ? [collision.fr, ...gravePicked, ...random] : [...gravePicked, ...random];
 
   const next: Saved = {
     at: now.getTime(),
