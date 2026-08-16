@@ -57,11 +57,11 @@ Deno.serve(async (req) => {
   }
 
   // 살아있는 파편 전체 — 무리에 못 든 것도 "안 묶인 것"으로 보여줘야 하므로 목록이 필요하다.
+  // ⚠️ archived만 뺀다. 흘려보낸 것(let_go_at)은 **안 뺀다** — rudy-groups.sql 각주 참고.
   const { data: alive, error: fErr } = await supabase
     .from('fragments')
     .select('id')
-    .eq('archived', false)
-    .is('let_go_at', null);
+    .eq('archived', false);
   if (fErr) return json({ error: fErr.message }, 500);
   let aliveIds = (alive ?? []).map((f) => f.id as string);
 
