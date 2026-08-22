@@ -54,11 +54,15 @@ function storeOpts(meta?: Record<string, string>) {
 }
 
 // 스트리밍 없는 단발 호출 (보조 작업용).
+// effort — gpt-5 계열 전용 추론량 조절(minimal|low|medium|high). 안 주면 모델 기본값.
+// 실측(2026-08-22, 묶기 120개): 기본은 출력 5,802토큰·83초인데 low는 355토큰·5.7초에
+// 결과가 오히려 낫다. 답이 짧고 형식이 정해진 작업이면 기본값이 과추론한다.
 export async function complete(
   messages: ChatMessage[],
   model = FAST_MODEL,
   onUsage?: UsageSink,
   meta?: Record<string, string>,
+  effort?: 'minimal' | 'low' | 'medium' | 'high',
 ): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -67,7 +71,7 @@ export async function complete(
     body: JSON.stringify({
       model,
       messages,
-      ...(model.startsWith('gpt-5') ? {} : { temperature: 0 }),
+      ...(model.startsWith('gpt-5') ? (effort ? { reasoning_effort: effort } : {}) : { temperature: 0 }),
       ...storeOpts(meta),
     }),
   });

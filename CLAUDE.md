@@ -39,6 +39,12 @@
 
 ---
 
+## 0-2. 답변 스타일 (필수 준수)
+
+> **결론부터, 핵심만, 짧게.** 설명·근거는 물어볼 때만 붙인다. 문학적 표현·수식어 금지, 쉬운 단어로 담백하게.
+
+---
+
 ## 1. Think Before Coding
 
 Don't assume. Don't hide confusion. Surface tradeoffs.

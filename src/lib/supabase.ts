@@ -370,6 +370,13 @@ export async function fetchRecallPool(): Promise<Fragment[]> {
   return data.map(toFragment);
 }
 
+// 무덤에 묻힌 뒤 최소 이만큼은 지나야 다시 떠오른다 (2026-08-22 유저 지시).
+// 없을 땐 어제 묻은 게 오늘 바로 올라왔다 — 실측: 풀 13개 중 5개가 묻힌 지 2일 이내였고
+// 회상은 4시간마다 무덤 한 자리를 뽑으니(GRAVE_SLOTS) 하루 6번 그 풀을 긁는다.
+// "나중에"는 "내일"이 아니다. 잊을 시간을 안 주면 회상이 아니라 그냥 목록이다.
+// (fixtures.ts에 복제돼 있다. 같이 바꾼다.)
+const GRAVE_MIN_DAYS = 14;
+
 // 무덤에서 가끔 떠오르는 것 — "끝"이 아니라 "나중에"로 묻은 것만(resurface, 2026-08-16).
 // 필터는 묻는 순간 유저가 이미 골랐으므로 여기서 프로젝트·카테고리로 다시 거르지 않는다.
 export async function fetchResurfacePool(): Promise<Fragment[]> {
@@ -378,12 +385,15 @@ export async function fetchResurfacePool(): Promise<Fragment[]> {
     return fixtureResurfacePool();
   }
   const cooldown = new Date(Date.now() - LET_GO_COOLDOWN_DAYS * 86_400_000).toISOString();
+  // archived_at이 null인 건 이 컬럼이 생기기 전에 묻힌 것 — 오래된 것이므로 통과시킨다.
+  const buried = new Date(Date.now() - GRAVE_MIN_DAYS * 86_400_000).toISOString();
   const { data, error } = await supabase()
     .from('fragments')
     .select(EMBED)
     .eq('archived', true)
     .eq('resurface', true)
     .or(`let_go_at.is.null,let_go_at.lt.${cooldown}`)
+    .or(`archived_at.is.null,archived_at.lt.${buried}`)
     .order('archived_at', { ascending: true })
     .limit(50);
   if (error) throw error;
@@ -526,18 +536,23 @@ export async function fetchFragmentsByIds(ids: string[]): Promise<Fragment[]> {
   return data.map(toFragment);
 }
 
-// "무리" — 살아있는 파편을 유사도로 묶는다. LLM 없음, 저장 없음(§2-1).
-// Edge Function groups/index.ts가 평균연결로 묶고 id만 돌려준다 — 여기선 그 id로 실제 파편을
-// 채워 넣기만 한다. repId는 접힌 머리글에 쓸 medoid고 분류에는 영향을 안 준다.
-export type FragmentGroup = { repId: string; memberIds: string[] };
+// "무리" — 살아있는 파편을 묶는다. 저장 없음(§2-1).
+// Edge Function groups/index.ts가 묶고 id만 돌려준다 — 여기선 그 id로 실제 파편을 채워 넣는다.
+//
+// 머리글은 갈래마다 다르다: 기본(임베딩)은 대표 파편 medoid `repId`, 스마트(LLM)는 무리 이름
+// `label`. 의도로 묶으면 대표 파편 한 줄로는 무리가 뭔지 안 보여서 이름이 필요하다.
+// 둘 중 하나는 항상 null이다.
+export type FragmentGroup = { repId: string | null; label: string | null; memberIds: string[] };
 
 // excludeProjects를 주면 그 프로젝트의 파편은 묶기 전에 빠진다 (헤매기의 제외 목록을 그대로 쓴다).
+// smart=true면 LLM이 의도로 묶는다 — 12초 걸리고 돈이 든다. 유저가 버튼을 눌렀을 때만 켠다.
 export async function fetchGroups(
   excludeProjects: string[] = [],
+  smart = false,
 ): Promise<{ groups: FragmentGroup[]; noiseIds: string[] }> {
   if (!isConfigured) return { groups: [], noiseIds: [] };
   const { data, error } = await supabase().functions.invoke('groups', {
-    body: { excludeProjects },
+    body: { excludeProjects, mode: smart ? 'intent' : 'embed' },
   });
   if (error) throw error;
   return { groups: data.groups ?? [], noiseIds: data.noiseIds ?? [] };

@@ -1,11 +1,15 @@
-// "무리" — 살아있는 파편을 유사도로 묶어서 본다 (2026-08-12).
+// "무리" — 살아있는 파편을 묶어서 본다 (2026-08-12).
+//
+// 갈래가 둘이다 (2026-08-22 유저 결정): 기본은 임베딩 유사도(즉시·$0·매번 같은 결과),
+// "스마트"를 누르면 LLM이 의도로 묶는다(12초·유료·매번 다른 결과). 왜 둘 다 두는지는
+// supabase/functions/groups/index.ts 머리주석에 있다.
 //
 // 판단 버튼 없음 — 헤매기와 같은 규칙(SPEC §7). 탭해서 상세로 들어가면 그때 touch된다.
 // 무리 소속은 저장하지 않는다 — 매번 새로 계산해서 보여줄 뿐이다 (§2-1).
 //
-// 머리글은 대표 파편(medoid) 한 줄 — **누르면 펼치기만 한다.** 대표를 여는 Pressable을 머리글
-// 안에 겹쳐 넣었다가 탭이 어디로 갈지 모르게 됐었다(2026-08-12). 파편을 열려면 펼친 목록에서
-// 그 줄을 직접 누른다. 대표도 그 목록 안에 그대로 들어 있다.
+// 머리글은 기본 갈래에선 대표 파편(medoid) 한 줄, 스마트 갈래에선 무리 이름이다.
+// **누르면 펼치기만 한다.** 파편을 열려면 펼친 목록에서 그 줄을 직접 누른다 (머리글 안에
+// Pressable을 겹쳐 넣었다가 탭이 어디로 갈지 모르게 됐었다, 2026-08-12).
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -19,17 +23,18 @@ import { vividness } from '@/lib/vividness';
 
 const NOISE = 'noise'; // 접힘 상태 맵에서 "안 묶인 것" 섹션의 자리
 
-// 헤매기에서 칩을 길게 눌러 빼둔 프로젝트 (wander.tsx가 쓰는 그 키를 읽기만 한다).
-const EXCLUDE_KEY = 'wander.excluded';
-// 그 제외를 무리에도 적용할지 — 무리와 헤매기는 보는 자리가 달라 따로 켜고 끈다.
-const APPLY_KEY = 'groups.applyExclude';
-
-// 머리글 한 줄 — FragmentBullet이 뽑는 줄과 같은 규칙(링크는 제목, 이미지는 캡션).
+// 기본 갈래의 머리글 한 줄 — FragmentBullet이 뽑는 줄과 같은 규칙(링크는 제목, 이미지는 캡션).
+// 스마트 갈래는 이걸 안 쓴다 — 거긴 모델이 붙인 이름이 온다.
 function headLine(fr: Fragment): string {
   if (fr.type === 'link') return fr.link_title ?? fr.content;
   if (fr.type === 'image') return fr.content || '(이미지)';
   return fr.content.replace(/\n/g, ' ');
 }
+
+// 헤매기에서 칩을 길게 눌러 빼둔 프로젝트 (wander.tsx가 쓰는 그 키를 읽기만 한다).
+const EXCLUDE_KEY = 'wander.excluded';
+// 그 제외를 무리에도 적용할지 — 무리와 헤매기는 보는 자리가 달라 따로 켜고 끈다.
+const APPLY_KEY = 'groups.applyExclude';
 
 export default function Groups() {
   const [loading, setLoading] = useState(true);
@@ -40,6 +45,9 @@ export default function Groups() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [excluded, setExcluded] = useState<string[]>([]);
   const [applyExclude, setApplyExclude] = useState(false);
+  // 화면을 떠나면 꺼진다 — 저장하지 않는다. "내가 원할 때만"이 요청의 핵심이라,
+  // 다음에 들어왔을 때 나도 모르게 유료 경로가 도는 일이 없어야 한다.
+  const [smart, setSmart] = useState(false);
   // 저장된 값이 도착하기 전에 첫 묶기를 시작하면 조건이 안 먹은 결과가 나온다 (wander.tsx와 같은 함정)
   const [hydrated, setHydrated] = useState(false);
 
@@ -47,7 +55,7 @@ export default function Groups() {
     setLoading(true);
     setError(false);
     try {
-      const { groups: g, noiseIds: n } = await fetchGroups(applyExclude ? excluded : []);
+      const { groups: g, noiseIds: n } = await fetchGroups(applyExclude ? excluded : [], smart);
       const frs = await fetchFragmentsByIds([
         ...new Set([...g.flatMap((x) => x.memberIds), ...n]),
       ]);
@@ -60,7 +68,7 @@ export default function Groups() {
     } finally {
       setLoading(false);
     }
-  }, [applyExclude, excluded]);
+  }, [applyExclude, excluded, smart]);
 
   useEffect(() => {
     Promise.all([AsyncStorage.getItem(EXCLUDE_KEY), AsyncStorage.getItem(APPLY_KEY)])
@@ -114,9 +122,16 @@ export default function Groups() {
         </Pressable>
       </View>
 
-      {/* 뺀 프로젝트가 없으면 이 줄은 아무 의미가 없다 — 안 그린다. */}
-      {excluded.length > 0 && (
-        <View style={styles.optionRow}>
+      <View style={styles.optionRow}>
+        <Pressable
+          onPress={() => setSmart((prev) => !prev)}
+          disabled={loading}
+          style={[styles.option, smart && styles.optionOn]}
+        >
+          <Text style={[styles.optionLabel, smart && styles.optionLabelOn]}>스마트 묶기</Text>
+        </Pressable>
+        {/* 뺀 프로젝트가 없으면 이 버튼은 아무 의미가 없다 — 안 그린다. */}
+        {excluded.length > 0 && (
           <Pressable
             onPress={toggleApply}
             disabled={loading}
@@ -126,12 +141,14 @@ export default function Groups() {
               헤매기에서 뺀 것 빼고
             </Text>
           </Pressable>
-        </View>
-      )}
+        )}
+      </View>
 
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.mute} />
+          {/* 스마트는 실측 12초다. 말 없이 돌면 멈춘 줄 안다. */}
+          {smart && <Text style={styles.centerText}>의도로 묶는 중…</Text>}
         </View>
       ) : error ? (
         <View style={styles.center}>
@@ -144,14 +161,18 @@ export default function Groups() {
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
           {groups.map((g) => {
-            const rep = byId.get(g.repId);
-            if (!rep) return null;
-            const isOpen = open.has(g.repId);
+            // 두 갈래 다 한 파편이 한 무리에만 속하므로 첫 멤버 id가 고유한 키다.
+            // 이름은 모델이 붙인 거라 겹칠 수 있어서 키로 못 쓴다.
+            const key = g.memberIds[0];
+            const isOpen = open.has(key);
+            const rep = g.repId ? byId.get(g.repId) : null;
+            const head = g.label ?? (rep ? headLine(rep) : null);
+            if (!head) return null;
             return (
-              <View key={g.repId} style={styles.group}>
-                <Pressable onPress={() => toggle(g.repId)} style={styles.groupHead}>
+              <View key={key} style={styles.group}>
+                <Pressable onPress={() => toggle(key)} style={styles.groupHead}>
                   <Text style={styles.headLabel} numberOfLines={1}>
-                    {headLine(rep)}
+                    {head}
                   </Text>
                   <Text style={styles.count}>{g.memberIds.length}개</Text>
                   <Text style={styles.chevron}>{isOpen ? '▴' : '▾'}</Text>
@@ -190,7 +211,13 @@ const styles = StyleSheet.create({
   refresh: { ...type.bodyMd, color: colors.link, fontFamily: fonts.sansMedium },
   refreshDisabled: { color: colors.faint },
   // 헤매기의 필터 칩과 같은 문법 — 켜면 채워진다
-  optionRow: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs, alignItems: 'flex-start' },
+  optionRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
+    alignItems: 'flex-start',
+  },
   option: {
     borderColor: colors.hairline,
     borderWidth: 1,

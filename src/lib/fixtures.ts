@@ -187,6 +187,7 @@ export function fixtureUpdateFragment(id: string, patch: Partial<Fragment>): voi
 }
 
 const LET_GO_COOLDOWN_MS = 7 * 86_400_000; // supabase.ts LET_GO_COOLDOWN_DAYS와 같은 값
+const GRAVE_MIN_DAYS = 14; // supabase.ts GRAVE_MIN_DAYS와 같은 값
 
 export function fixtureRecallPool(): Fragment[] {
   const cutoff = Date.now() - LET_GO_COOLDOWN_MS;
@@ -198,9 +199,11 @@ export function fixtureRecallPool(): Fragment[] {
 
 export function fixtureResurfacePool(): Fragment[] {
   const cutoff = Date.now() - LET_GO_COOLDOWN_MS;
+  const buried = Date.now() - GRAVE_MIN_DAYS * 86_400_000; // supabase.ts와 같은 값
   return store
     .filter((fr) => fr.archived && fr.resurface)
     .filter((fr) => fr.let_go_at == null || new Date(fr.let_go_at).getTime() < cutoff)
+    .filter((fr) => fr.archived_at == null || new Date(fr.archived_at).getTime() < buried)
     .sort((a, b) => (a.archived_at ?? '').localeCompare(b.archived_at ?? ''));
 }
 
