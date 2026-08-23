@@ -206,6 +206,16 @@
   }
   .groupHead .cnt, .groupHead .chev { color: var(--muted); font-size: 12px; flex-shrink: 0; }
   .groupHead.noise .lbl { color: var(--muted); font-weight: 400; }
+  /* 갈래 세그먼티드 — 앱 groups.tsx의 styles.seg와 같은 문법(둘 중 하나임을 한 덩어리로 보인다) */
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .seg button {
+    background: none; border: 0; color: var(--muted);
+    padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  .seg button.on { background: var(--chip-on); color: var(--chip-on-ink); }
+  .seg button:disabled, .ghost:disabled, .chip:disabled { opacity: .5; cursor: default; }
+  .groupsMeta { color: var(--muted); font-size: 12px; margin: -6px 0 14px; }
+  .groupsMeta .warn { color: var(--text); }
 
   /* ---------- 프로젝트 ---------- */
   .lineInput {
@@ -336,11 +346,19 @@
       </div>
 
       <div id="groupsView" class="hidden">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px;">
           <!-- 헤매기에서 뺀 프로젝트가 없으면 숨긴다 (renderGroupsOption) -->
           <button class="chip hidden" id="groupsExcludeBtn" style="cursor: pointer;">헤매기에서 뺀 것 빼고</button>
-          <button class="ghost" id="groupsRefresh">다시</button>
+          <div style="display: flex; align-items: center; gap: 10px; margin-left: auto;">
+            <div class="seg" id="groupsSeg">
+              <button data-smart="0">기본</button>
+              <button data-smart="1">스마트</button>
+            </div>
+            <button class="ghost" id="groupsRefresh">다시</button>
+          </div>
         </div>
+        <!-- 스마트는 지난 결과를 다시 보여주는 것이라 언제 묶은 건지 밝힌다 -->
+        <div id="groupsMeta" class="groupsMeta hidden"></div>
         <div id="groupsList"></div>
       </div>
 
@@ -1406,10 +1424,20 @@ window.addEventListener('scroll', () => {
 // 묶기는 groups Edge Function이 전부 한다 — 앱과 **같은 함수, 같은 결과**다. 여기에 임계값이나
 // 평균연결을 다시 적지 않는다 (cluster.ts 주석: 로직이 갈라지면 실측한 숫자가 무의미해진다).
 // 무리 소속은 저장하지 않는다 — 열 때마다 새로 계산된다 (§2-1).
+//
+// 갈래가 둘이다 (2026-08-22): 기본은 임베딩(즉시·$0·매번 같은 결과), 스마트는 LLM이 의도로
+// 묶는다(12초·유료·매번 다른 결과). 왜 둘 다 두는지는 functions/groups/index.ts 머리주석에 있다.
+// **스마트 결과만 브라우저에 남긴다**(localStorage) — 앱이 AsyncStorage에 남기는 것과 같은 이유고
+// 같은 이유로 §2-1에 안 걸린다(DB에 사람을 규정하는 게 아니라 기기 캐시다). 저장소가 달라
+// 앱과 웹의 스마트 결과는 서로 안 보인다.
 let groupsStarted = false;
 let groupsData = { groups: [], noiseIds: [] };
 let groupsById = new Map();
-let groupsOpen = new Set(); // 펼쳐진 머리글 키 = 대표 파편 id, '안 묶인 것'은 GROUPS_NOISE
+let groupsOpen = new Set(); // 펼쳐진 머리글 키 = 무리 첫 멤버 id, '안 묶인 것'은 GROUPS_NOISE
+// 늦게 온 응답을 버린다 (앱 groups.tsx의 run과 같은 수법). 스마트가 12초라 실제로 겹친다.
+let groupsRun = 0;
+// 도는 동안 버튼을 막는다 — 안 막으면 12초짜리 스마트를 연타해서 그만큼 돈이 나간다.
+let groupsLoading = false;
 
 const GROUPS_NOISE = 'noise';
 
@@ -1418,42 +1446,132 @@ const GROUPS_NOISE = 'noise';
 const GROUPS_APPLY_KEY = 'groups.applyExclude';
 let groupsApplyExclude = localStorage.getItem(GROUPS_APPLY_KEY) === '1';
 
+// 마지막 스마트 묶기 결과 { at, exclude, groups, noiseIds }.
+const GROUPS_SMART_KEY = 'groups.smart';
+// 지난번에 스마트로 묶어뒀으면 그걸 보여주면서 연다 — 그게 마지막으로 본 화면이다.
+let groupsSmart = localStorage.getItem(GROUPS_SMART_KEY) !== null;
+// 지금 보고 있는 스마트 결과를 언제·어떤 제외로 만들었나 (캐시에서 왔으면 채워진다).
+let groupsCacheMeta = null;
+
 // 머리글 한 줄 — fragmentCardEl이 뽑는 줄과 같은 규칙(링크는 제목).
+// 스마트 갈래는 이걸 안 쓴다 — 거긴 모델이 붙인 이름(label)이 온다.
 function groupHeadLine(f) {
   return f.type === 'link' ? (f.link_title || f.content) : (f.content ?? '').replace(/\n/g, ' ');
 }
+
+// "오늘 15:14" / "8월 22일 15:14" — 언제 묶은 건지 안 밝히면 오늘 것인 줄 안다.
+function groupsWhen(at) {
+  const d = new Date(at);
+  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.toDateString() === new Date().toDateString()
+    ? `오늘 ${hm}`
+    : `${d.getMonth() + 1}월 ${d.getDate()}일 ${hm}`;
+}
+
+const groupsExclude = () => (groupsApplyExclude ? [...wanderExcluded] : []);
 
 // 뺀 프로젝트가 하나도 없으면 이 버튼은 아무 일도 안 한다 — 안 보여준다.
 function renderGroupsOption() {
   const btn = $('groupsExcludeBtn');
   btn.classList.toggle('hidden', wanderExcluded.size === 0);
   btn.classList.toggle('on', groupsApplyExclude);
+  btn.disabled = groupsLoading;
+  $('groupsRefresh').disabled = groupsLoading;
+  for (const b of $('groupsSeg').children) {
+    b.classList.toggle('on', (b.dataset.smart === '1') === groupsSmart);
+    b.disabled = groupsLoading;
+  }
 }
 
-async function startGroups() {
+function renderGroupsMeta() {
+  const box = $('groupsMeta');
+  box.classList.toggle('hidden', !(groupsSmart && groupsCacheMeta));
+  if (!groupsSmart || !groupsCacheMeta) return;
+  box.innerHTML = '';
+  const line = el('div');
+  line.textContent = `${groupsWhen(groupsCacheMeta.at)}에 묶음 · '다시'를 누르면 12초 걸려 새로 묶는다`;
+  box.appendChild(line);
+  // 제외 설정이 바뀌면 이 결과는 다른 입력으로 만든 것이다. 조용히 보여주지 않는다.
+  if (groupsCacheMeta.exclude.join(',') !== groupsExclude().join(',')) {
+    const warn = el('div', 'warn');
+    warn.textContent = '제외 설정이 바뀐 뒤로 아직 안 묶었다';
+    box.appendChild(warn);
+  }
+}
+
+// force=true면 캐시를 무시하고 새로 묶는다 ("다시"). 기본 갈래는 캐시가 없어 항상 새로 묶는다.
+async function startGroups(force = false) {
+  const version = ++groupsRun;
   groupsOpen = new Set();
+  groupsLoading = true;
   renderGroupsOption();
-  $('groupsList').innerHTML = '<div class="empty">불러오는 중…</div>';
+  $('groupsMeta').classList.add('hidden');
+
+  const exclude = groupsExclude();
+  let data = null;
+  let meta = null;
+
+  if (groupsSmart && !force) {
+    try {
+      const raw = localStorage.getItem(GROUPS_SMART_KEY);
+      if (raw) {
+        const c = JSON.parse(raw);
+        data = { groups: c.groups, noiseIds: c.noiseIds };
+        meta = { at: c.at, exclude: c.exclude };
+      }
+    } catch {
+      // 깨진 캐시로 화면이 영영 안 뜨면 안 된다 — 무시하고 새로 묶는다
+    }
+  }
+
+  // 캐시를 못 쓸 때만 12초를 예고한다 — 말 없이 돌면 멈춘 줄 안다.
+  $('groupsList').innerHTML = groupsSmart && !data
+    ? '<div class="empty">의도로 묶는 중… (12초쯤 걸린다)</div>'
+    : '<div class="empty">불러오는 중…</div>';
+
   try {
-    const { data, error } = await sb.functions.invoke('groups', {
-      body: { excludeProjects: groupsApplyExclude ? [...wanderExcluded] : [] },
-    });
-    if (error) throw error;
-    groupsData = { groups: data.groups ?? [], noiseIds: data.noiseIds ?? [] };
+    if (!data) {
+      const { data: fresh, error } = await sb.functions.invoke('groups', {
+        body: { excludeProjects: exclude, mode: groupsSmart ? 'intent' : 'embed' },
+      });
+      if (error) throw error;
+      data = { groups: fresh.groups ?? [], noiseIds: fresh.noiseIds ?? [] };
+      if (groupsSmart) {
+        meta = { at: Date.now(), exclude };
+        try {
+          localStorage.setItem(GROUPS_SMART_KEY, JSON.stringify({ ...meta, ...data }));
+        } catch {
+          // 저장이 안 돼도 이번 결과는 보여준다
+        }
+      }
+    }
+
     // 함수는 id만 돌려준다 — 실제 파편은 여기서 한 번에 받아온다 (앱 fetchFragmentsByIds와 같은 몫)
-    const ids = [...new Set([...groupsData.groups.flatMap((g) => g.memberIds), ...groupsData.noiseIds])];
-    groupsById = new Map();
+    const ids = [...new Set([...data.groups.flatMap((g) => g.memberIds), ...data.noiseIds])];
+    let byId = new Map();
     if (ids.length) {
       const { data: frs, error: fErr } = await sb.from('fragments')
         .select('*, fragment_projects(project_id)')
         .in('id', ids);
       if (fErr) throw fErr;
-      groupsById = new Map(frs.map((r) => [
+      // 캐시가 만들어진 뒤 묻힌 파편은 빼고 그린다 — 무덤은 무리에 안 들어간다.
+      byId = new Map(frs.filter((r) => !r.archived).map((r) => [
         r.id, { ...r, project_ids: (r.fragment_projects ?? []).map((m) => m.project_id) },
       ]));
     }
+    if (version !== groupsRun) return;
+    groupsData = data;
+    groupsById = byId;
+    groupsCacheMeta = groupsSmart ? meta : null;
+    groupsLoading = false;
+    renderGroupsOption();
+    renderGroupsMeta();
     renderGroups();
   } catch (e) {
+    if (version !== groupsRun) return;
+    groupsLoading = false;
+    renderGroupsOption();
+    // 스마트가 실패해도 임베딩으로 조용히 되돌아가지 않는다 — 실패는 실패로 뜬다.
     $('groupsList').innerHTML = `<div class="empty">안 됐다. '다시'를 눌러봐. (${e.message ?? e})</div>`;
   }
 }
@@ -1461,7 +1579,8 @@ async function startGroups() {
 function renderGroups() {
   const box = $('groupsList');
   box.innerHTML = '';
-  if (groupsData.groups.length === 0 && groupsData.noiseIds.length === 0) {
+  const liveNoise = groupsData.noiseIds.filter((id) => groupsById.has(id));
+  if (groupsData.groups.length === 0 && liveNoise.length === 0) {
     box.innerHTML = '<div class="empty">아직 묶을 게 없다</div>';
     return;
   }
@@ -1495,18 +1614,32 @@ function renderGroups() {
   };
 
   for (const g of groupsData.groups) {
-    const rep = groupsById.get(g.repId);
-    if (!rep) continue;
-    block(g.repId, groupHeadLine(rep), g.memberIds, false);
+    // 캐시된 결과라면 그 사이에 묻힌 파편이 섞여 있다 — 살아있는 것만 센다.
+    const members = g.memberIds.filter((id) => groupsById.has(id));
+    // 머리글은 갈래마다 다르다: 기본은 대표 파편(medoid) 한 줄, 스마트는 모델이 붙인 이름.
+    const rep = g.repId ? groupsById.get(g.repId) : null;
+    const head = g.label ?? (rep ? groupHeadLine(rep) : null);
+    if (!head || members.length === 0) continue;
+    // 이름은 겹칠 수 있어 키로 못 쓴다 — 한 파편은 한 무리에만 속하므로 첫 멤버 id가 고유하다.
+    block(members[0], head, members, false);
   }
-  if (groupsData.noiseIds.length) block(GROUPS_NOISE, '안 묶인 것', groupsData.noiseIds, true);
+  if (liveNoise.length) block(GROUPS_NOISE, '안 묶인 것', liveNoise, true);
 }
 
-$('groupsRefresh').onclick = () => startGroups();
+$('groupsRefresh').onclick = () => startGroups(true);
 $('groupsExcludeBtn').onclick = () => {
   groupsApplyExclude = !groupsApplyExclude;
   localStorage.setItem(GROUPS_APPLY_KEY, groupsApplyExclude ? '1' : '0');
   startGroups(); // 무리는 저장을 안 하므로 다시 묶는 게 유일한 경로다
+};
+// 갈래를 바꾸면 다시 그린다. 스마트는 캐시가 있으면 캐시로 — 토글이 돈을 쓰면 안 된다.
+$('groupsSeg').onclick = (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const next = btn.dataset.smart === '1';
+  if (next === groupsSmart) return;
+  groupsSmart = next;
+  startGroups();
 };
 
 // ---------- 발견 (앱 discovery.tsx 포팅 — 읽기 전용: 던지기는 안 붙였다) ----------
