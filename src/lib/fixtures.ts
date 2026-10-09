@@ -149,6 +149,7 @@ export function fixtureListFragments(filter: FeedFilter): Fragment[] {
   return store
     .filter((fr) => {
       if (filter === 'grave') return fr.archived;
+      if (filter === 'later') return fr.archived && fr.resurface;
       if (filter === 'discover') return fr.discover_next; // 묻힌 것도 포함 — supabase.ts와 같은 규칙
       if (fr.archived) return false;
       if (filter === 'inbox') return fr.project_ids.length === 0;

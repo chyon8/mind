@@ -143,7 +143,7 @@ mind/                         # = 저장소 루트 = Expo 앱 루트
 
 - **조회**: `fragments`를 `created_at desc`로 페이지당 100개 range 페이징.
   필터: All(전체) / Inbox(매핑 없는 파편) / 프로젝트(`fragment_projects`로 조인).
-  기본 조회는 `archived = false`만. 감쇠로 바닥(15%)에 도달한 파편은 archived가 아니므로
+  기본 조회는 `archived = false`만. 감쇠로 바닥(35%)에 도달한 파편은 archived가 아니므로
   리스트에 계속 남는다 (SPEC §5) — 감쇠와 무덤은 무관하다.
 - **무덤(archived)**: 자동으로 묻히는 일은 없다. 사용자가 상세 화면에서 수동으로 "묻기" →
   모든 기본 뷰에서 사라지고, 사이드바의 **무덤**으로만 열람.
@@ -187,7 +187,7 @@ opacity(lastTouchedAt, tier, now):
   d = (now - lastTouchedAt) 일 단위 (음수면 0으로 clamp — 시계 오차 방어)
   (start, floor) = normal: (1, 7) / important: (7, 21)   ← SPEC §5 (2026-07-22 개정)
   d ≤ start                     → 1.0
-  d ≥ floor                     → 0.15
+  d ≥ floor                     → 0.35
   그 외                          → 1.0 − 0.85 × (d − start) / (floor − start)
 ```
 
@@ -385,7 +385,7 @@ Geist가 실제로 그리는 것: UI 라벨, 숫자(어젠다 날짜 큰 숫자 
 4. expo-share-intent 통합 (prebuild + dev client, 실기기 필수)
    → verify: 실기기에서 Safari URL·사진·선택 텍스트 각각 2탭 저장 → 피드에 등장.
 5. 파편 상세 (touch / tier / 프로젝트 / 묻기 / 삭제)
-   → verify: 바닥(15%) 파편은 열어도 그대로다(보는 건 touch 아님). `기억하기`를 누르거나
+   → verify: 바닥(35%) 파편은 열어도 그대로다(보는 건 touch 아님). `기억하기`를 누르거나
      프로젝트를 지정하면 100% 복귀. tier만 바꾸면 감쇠 커브만 바뀌고 시계는 안 건드린다.
      묻기 → 기본 피드에서 사라지고 무덤 칩에서 보임, 파내기 → 복귀.
 6. 어젠다 뷰

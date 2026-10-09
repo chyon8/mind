@@ -9,9 +9,11 @@ import { useImageUrl } from '@/lib/useImageUrl';
 export function FragmentBullet({
   fragment,
   rowOpacity = 1,
+  similarCount = 0,
 }: {
   fragment: Fragment;
   rowOpacity?: number;
+  similarCount?: number; // 비슷한 파편 개수 (rudy.similar_counts). 0이면 안 그린다
 }) {
   const isImage = fragment.type === 'image';
   const imageUrl = useImageUrl(isImage ? fragment.image_path : null);
@@ -21,29 +23,32 @@ export function FragmentBullet({
       : isImage
         ? fragment.content // 캡션 없으면 빈 줄 — 썸네일이 이미 그 자리에 있다
         : fragment.content.replace(/\n/g, ' ');
+  // 선명도는 행 전체가 아니라 마크를 뺀 나머지에 건다 — 흐려진 줄에서도 ★는 보여야 한다
+  const fade = { opacity: rowOpacity };
   return (
-    <View style={[styles.row, { opacity: rowOpacity }]}>
+    <View style={styles.row}>
       {/* 썸네일이 불릿 자리를 대신한다 — 행 높이는 그대로 (PLAN.md §6.1) */}
       {isImage ? (
-        <Image source={imageUrl} style={styles.thumb} contentFit="cover" transition={200} />
+        <Image source={imageUrl} style={[styles.thumb, fade]} contentFit="cover" transition={200} />
       ) : (
-        <Text style={styles.bullet}>·</Text>
+        <Text style={[styles.bullet, fade]}>·</Text>
       )}
-      <Text style={styles.text} numberOfLines={1}>
+      <Text style={[styles.text, fade]} numberOfLines={1}>
         {line}
       </Text>
-      {/* 중요(★)·고정(⚑) — ✎(덧붙임)과 같은 마크 관용구인데 색만 ink로 올린다.
-          불릿 줄은 촘촘해서 회색 마크는 안 보인다 (2026-07-29 유저 요청). */}
+      {/* 중요(★)·고정(⚑) — ✎(덧붙임)과 같은 마크 관용구인데 색을 link로 올린다.
+          불릿 줄은 촘촘해서 회색·흰 마크는 안 보인다 (2026-07-29, 2026-10-09 유저 요청). */}
       {fragment.tier !== 'normal' && (
         <Text style={styles.tierMark}>{fragment.tier === 'pinned' ? '⚑' : '★'}</Text>
       )}
       {fragment.merged_from.length > 0 && (
-        <Text style={styles.time}>+{fragment.merged_from.length}</Text>
+        <Text style={[styles.time, fade]}>+{fragment.merged_from.length}</Text>
       )}
       {fragment.note && (
-        <Text style={styles.time}>✎</Text>
+        <Text style={[styles.time, fade]}>✎</Text>
       )}
-      <Text style={styles.time}>{formatTime(fragment.created_at)}</Text>
+      {similarCount > 0 && <Text style={[styles.time, fade]}>≈{similarCount}</Text>}
+      <Text style={[styles.time, fade]}>{formatTime(fragment.created_at)}</Text>
     </View>
   );
 }
@@ -67,5 +72,5 @@ const styles = StyleSheet.create({
   text: { ...type.bodyMd, lineHeight: 24, color: colors.ink, fontFamily: fonts.sans, flex: 1 },
   time: { ...type.bodySm, lineHeight: 24, color: colors.faint, fontFamily: fonts.mono },
   // mono가 아니라 sans — ★·⚑는 고정폭 폰트에 글리프가 없거나 깨질 수 있다.
-  tierMark: { fontSize: 13, lineHeight: 24, color: colors.ink, fontFamily: fonts.sans },
+  tierMark: { fontSize: 13, lineHeight: 24, color: colors.link, fontFamily: fonts.sans },
 });

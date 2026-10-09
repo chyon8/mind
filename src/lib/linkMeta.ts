@@ -2,20 +2,38 @@
 // RN의 fetch는 CORS 제약이 없어 브라우저와 달리 HTML을 직접 받아 파싱할 수 있다.
 // 실패한 것은 그냥 둔다 — URL 원문이 이미 있으므로 기능 손실이 없다. 재시도 카운터 없음.
 
+import { markFragmentUpdated } from './fragmentUpdates';
 import { fetchLinksMissingMeta, updateFragment } from './supabase';
 
 const BATCH = 10; // 포그라운드 진입 1회당 처리할 파편 수 (PLAN §3.6)
 const TIMEOUT_MS = 8000;
 
 function meta(html: string, property: string): string | null {
-  // <meta property="og:title" content="..."> — 속성 순서가 뒤집힌 경우도 받는다
+  // <meta property="og:title" content="..."> — 속성 순서가 뒤집힌 경우도 받는다.
+  // content는 여는 따옴표와 같은 따옴표에서 끝난다 — 예전 [^"']+는 content="It's..."를
+  // 아포스트로피에서 잘랐다.
+  const value = `content=(?:"([^"]*)"|'([^']*)')`;
   const patterns = [
-    new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i'),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property}["']`, 'i'),
+    new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+${value}`, 'i'),
+    new RegExp(`<meta[^>]+${value}[^>]+(?:property|name)=["']${property}["']`, 'i'),
   ];
   for (const re of patterns) {
     const m = html.match(re);
-    if (m) return decode(m[1]);
+    const v = m?.[1] ?? m?.[2];
+    if (v) return decode(v);
+  }
+  return null;
+}
+
+// head 밖에 og 태그를 두는 사이트용. 전문에 정규식을 돌리면 JS 스레드가 막히므로(아래 head 주석)
+// 리터럴로 위치만 찾고 그 <meta> 태그 하나에만 정규식을 건다.
+function metaAnywhere(html: string, property: string): string | null {
+  for (const q of ['"', "'"]) {
+    const i = html.indexOf(`${q}${property}${q}`);
+    if (i < 0) continue;
+    const start = html.lastIndexOf('<meta', i);
+    const end = html.indexOf('>', i);
+    if (start >= 0 && end > i) return meta(html.slice(start, end + 1), property);
   }
   return null;
 }
@@ -45,26 +63,10 @@ function decode(s: string): string {
     // 활자 기호(&ldquo; 등)가 빠져 있어서 musicradar 제목이 "&ldquo;We strongly..."로 저장됐다.
     .replace(/&(nbsp|amp|lt|gt|quot|apos|ldquo|rdquo|lsquo|rsquo|mdash|ndash|hellip|middot|bull|laquo|raquo|deg|times|copy|reg|trade);/g,
       (raw, name) => NAMED[name] ?? raw)
-    // 보이지 않는 C0 제어문자를 턴다(줄바꿈·탭은 살린다 — htmlToText가 문단 보존에 쓴다).
+    // 보이지 않는 C0 제어문자를 턴다(줄바꿈·탭은 살린다).
     // 네이버 플레이스는 og:title 끝에 U+001C를 붙여 보내는데, 화면엔 안 보이면서 제목 끝
     // 비교(" : 네이버" 제거)와 검색어 매칭을 조용히 깨뜨린다(2026-08-09).
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-    .trim();
-}
-
-// HTML 조각 → 읽을 수 있는 평문. 블록 태그를 줄바꿈으로 바꾼 뒤 나머지 태그를 지운다.
-// 예전엔 태그를 전부 공백으로 바꾸고 \s+를 공백 하나로 뭉갰는데, 그러면 원문의 문단·목록이
-// 통째로 사라져 글이 벽처럼 이어졌다("주르륵", 2026-08-09 유저 지적).
-function htmlToText(html: string): string {
-  const withBreaks = html
-    .replace(/<\s*br\s*\/?>/gi, '\n')
-    .replace(/<\s*li[^>]*>/gi, '\n• ')
-    .replace(/<\/\s*(?:p|div|li|ul|ol|h[1-6]|blockquote|tr)\s*>/gi, '\n')
-    .replace(/<[^>]+>/g, '');
-  return decode(withBreaks)
-    .replace(/[^\S\n]+/g, ' ') // 가로 공백만 정리한다 — 줄바꿈은 살려야 한다
-    .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n') // 빈 줄은 최대 하나까지
     .trim();
 }
 
@@ -77,163 +79,63 @@ function isYoutubeUrl(url: string): boolean {
   }
 }
 
-// reddit.com(신버전)은 서버사이드 fetch에 og 태그 없는 봇 차단/JS 챌린지 페이지를 내려준다 —
-// <title>이 그냥 "Reddit"뿐이라 실측 결과 링크 제목이 전부 "Reddit"으로만 남았다(2026-08-09).
-// old.reddit.com은 같은 경로로 실제 제목·og:title이 박힌 HTML을 그대로 준다 — 저장은 원본
-// URL 그대로 하고, fetch할 때만 호스트를 바꾼다.
 function isRedditUrl(u: URL): boolean {
   return u.hostname === 'reddit.com' || u.hostname.endsWith('.reddit.com');
 }
 
-// 아이폰 공유 시트가 주는 링크는 /r/xxx/s/짧은코드 형식인데, old.reddit.com은 이 형식을
-// 모르고 로그인 페이지로 보낸다 — 그 페이지 제목("Reddit에 오신 걸 환영합니다")이 그대로
-// 저장되는 사고가 있었다(2026-08-09). www가 리다이렉트로 알려주는 실제 /comments/ 경로를
-// 먼저 알아낸 뒤 호스트를 바꾼다.
-//
-// ⚠️ Location 헤더를 읽으면 안 된다. RN의 fetch는 whatwg-fetch(XHR) 폴리필이라
-// `redirect: 'manual'`을 **조용히 무시하고** 항상 리다이렉트를 따라간다 — 헤더 방식은 앱에서
-// 절대 동작하지 않는다(Node에서만 되는 걸 보고 넣었다가 이 사고가 났다). 따라간 뒤의 최종
-// 주소인 res.url(= xhr.responseURL, RN도 채운다)이 유일하게 믿을 수 있는 값이다.
-async function redditFetchUrl(url: string, signal: AbortSignal): Promise<string | null> {
-  let u: URL;
+// 공식 oEmbed가 있는 곳은 HTML 대신 거기서 제목을 받는다. HTML은 사이트가 구조를 바꾸면 깨지지만
+// oEmbed는 임베드용 공개 API라 형태가 고정돼 있다. 둘 다 실제로 깨져서 옮겼다(2026-10-09 실측):
+//   - 유튜브: og:title이 </head> 뒤(본문 56만 자 지점)에 있어서 head만 읽던 파서가 <title>의
+//     "YouTube"를 제목으로 저장했다(4건).
+//   - 레딧: 우회로로 쓰던 old.reddit.com과 .rss가 둘 다 로그인 페이지로 리다이렉트되기 시작해
+//     2026-08-25 이후 공유한 레딧 링크가 전부 제목 없이 남았다(5건). www는 og 없는 챌린지 페이지다.
+function oembedEndpoint(url: string): string | null {
+  if (isYoutubeUrl(url)) return 'https://www.youtube.com/oembed?format=json&url=';
   try {
-    u = new URL(url);
+    if (isRedditUrl(new URL(url))) return 'https://www.reddit.com/oembed?url=';
   } catch {
     return null;
   }
-  if (!isRedditUrl(u) || u.hostname === 'old.reddit.com') return null;
-
-  if (/\/s\/[^/]+\/?$/.test(u.pathname)) {
-    u.hostname = 'www.reddit.com'; // 단축링크 해석은 www만 안다
-    const res = await fetch(u.toString(), { signal });
-    try {
-      u = new URL(res.url);
-    } catch {
-      return null;
-    }
-    // 해석이 안 됐으면(여전히 /s/) old로 보내봐야 로그인 페이지다 — 포기하고 원본으로 둔다
-    if (!isRedditUrl(u) || /\/s\/[^/]+\/?$/.test(u.pathname)) return null;
-  }
-  u.hostname = 'old.reddit.com';
-  return u.toString();
+  return null;
 }
 
-// 챌린지/로그인 페이지를 제목이라고 저장하지 않는다. 저장을 건너뛰면 link_title이 null로 남아
-// 다음 포그라운드에 자동으로 다시 시도한다 — 쓰레기 제목이 박히는 것보다 낫다.
-// 문구는 기기 언어를 타므로("Welcome to Reddit" / "Reddit에 오신 걸 환영합니다") 경로로 판정하고,
-// 챌린지 페이지의 <title>만 언어와 무관하게 늘 "Reddit"이라 그것만 문자열로 거른다.
-// NSFW 글의 old.reddit 연령확인 페이지는 /comments/ 경로에서 200으로 오고 제목도 "Reddit"이
-// 아니라 "reddit.com: 만 19세 이상의 성인이십니까?" 같은 시스템 페이지 템플릿이다(2026-08-14).
-// 도메인 부분("reddit.com: ")은 번역되지 않으므로 이걸로 언어 무관하게 거른다 — 실제 글 제목은
-// old.reddit에서 "<제목> : <서브레딧>" 형태라 이 접두사가 절대 안 붙는다.
-function isRedditJunk(finalUrl: string, title: string | null): boolean {
-  try {
-    const u = new URL(finalUrl);
-    if (!isRedditUrl(u)) return false;
-    return (
-      u.pathname.startsWith('/login') ||
-      u.pathname === '/over18' || // 연령 게이트 — 제목 문구보다 이 경로가 확실한 신호다
-      title === 'Reddit' ||
-      !!title?.toLowerCase().startsWith('reddit.com:')
-    );
-  } catch {
-    return false;
-  }
-}
-
-// 연령확인(NSFW) 인터스티셜이 걸린 글은 HTML 경로로는 제목을 **원리상** 못 얻는다.
-// 쿠키 한 줄(over18=1)이면 넘어가지만 **RN에서는 그 방법을 못 쓴다**: iOS의 NSURLSession이
-// 자기 쿠키 저장소 값으로 Cookie 헤더를 통째로 덮어쓰는데, 바로 위 redditFetchUrl의 단축링크
-// 해석 요청이 이미 reddit 쿠키를 저장소에 심어놓기 때문에 수동 헤더는 확실히 지워진다.
-// (2026-08-14: Node에서 쿠키가 먹는 걸 보고 넣었다가 앱에서 안 먹어 되돌렸다 — RN fetch의
-// redirect:'manual'과 같은 부류의 함정이다.)
-//
-// 대신 .rss를 쓴다. 피드리더용이라 연령 게이트가 없고, 쿠키도 UA도 필요 없는 평범한 GET이며,
-// 제목과 본문이 구조화돼 나온다(.json API는 2026-08-14 기준 403이라 못 쓴다).
-// 게이트에 걸렸을 때만 타는 폴백이다 — 멀쩡한 글은 기존 HTML 경로를 그대로 쓴다.
-async function fetchRedditRss(
-  finalUrl: string,
+async function fetchOembed(
+  url: string,
   signal: AbortSignal,
-): Promise<{ title: string; description: string | null } | null> {
-  let u: URL;
-  try {
-    u = new URL(finalUrl);
-  } catch {
-    return null;
-  }
-  if (!isRedditUrl(u)) return null;
-  // 연령 게이트는 리다이렉트다 — 최종 주소가 /over18?dest=<원래 글 주소>로 바뀌어 있어서
-  // 글 경로가 통째로 사라진다(2026-08-14 실측). 글 주소는 dest 안에 있으므로 거기서 되찾는다.
-  if (u.pathname === '/over18') {
-    const dest = u.searchParams.get('dest');
-    if (!dest) return null;
-    try {
-      u = new URL(dest);
-    } catch {
-      return null;
-    }
-    if (!isRedditUrl(u)) return null;
-  }
-  if (!u.pathname.includes('/comments/')) return null;
-
-  const rss = `https://old.reddit.com${u.pathname.replace(/\/?$/, '/')}.rss`;
-  const res = await fetch(rss, { signal });
+): Promise<{ title: string | null; thumbnail: string | null } | null> {
+  const endpoint = oembedEndpoint(url);
+  if (!endpoint) return null;
+  const res = await fetch(endpoint + encodeURIComponent(url), { signal });
   if (!res.ok) return null;
-  const xml = await res.text();
-
-  // 피드 머리글에도 <title>이 있으므로 반드시 <entry> 이후만 본다
-  const entry = xml.slice(xml.indexOf('<entry>'));
-  const title = decode(entry.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '');
-  if (!title) return null;
-
-  // 본문은 이스케이프가 두 겹이다 — XML로 한 번(&lt;p&gt;), 그 안의 HTML 엔티티가 또 한 번
-  // (&amp;#39;). 그래서 **decode를 먼저** 걸어 진짜 HTML로 되돌린 뒤에야 주석 경계를 찾을 수
-  // 있고, 남은 엔티티는 htmlToText가 두 번째 decode로 푼다. 순서를 바꾸면 본문이 통째로 빈다.
-  // SC_OFF/SC_ON은 레딧이 본문 양끝에 늘 박는 주석이라 "submitted by /u/..." 꼬리표를
-  // 본문으로 삼키지 않는 안전한 경계다.
-  const html = decode(entry.match(/<content type="html">([\s\S]*?)<\/content>/)?.[1] ?? '');
-  const body = html.match(/<!-- SC_OFF -->([\s\S]*?)<!-- SC_ON -->/)?.[1];
-  const description = body ? htmlToText(body).slice(0, SELFTEXT_MAX) || null : null;
-  return { title, description };
+  const j = (await res.json()) as { title?: unknown; thumbnail_url?: unknown };
+  return {
+    title: typeof j.title === 'string' && j.title ? decode(j.title) : null,
+    thumbnail: typeof j.thumbnail_url === 'string' ? j.thumbnail_url : null,
+  };
 }
 
-// 레딧 벽에 막혔을 때의 공통 처리 — .rss가 되면 그걸 쓰고, 안 되면 아무것도 못 받은 것으로
-// 취급한다(쓰레기 제목을 저장하느니 비워 두고 다음 포그라운드에 다시 시도하게 둔다).
-async function redditRssFallback(
-  finalUrl: string,
+// 레딧 oEmbed는 공유 시트가 주는 단축링크(/r/xxx/s/코드)를 400으로 거절한다. www로 한 번 열면
+// 실제 /comments/ 주소로 리다이렉트되므로 그 최종 주소를 쓴다.
+// ⚠️ Location 헤더를 읽으면 안 된다. RN의 fetch는 whatwg-fetch(XHR) 폴리필이라
+// `redirect: 'manual'`을 **조용히 무시하고** 항상 리다이렉트를 따라간다. 따라간 뒤의 최종
+// 주소인 res.url(= xhr.responseURL, RN도 채운다)이 유일하게 믿을 수 있는 값이다.
+async function redditOembedUrl(url: string, signal: AbortSignal): Promise<string | null> {
+  const u = new URL(url);
+  if (!/\/s\/[^/]+\/?$/.test(u.pathname)) return url;
+  u.hostname = 'www.reddit.com'; // 단축링크 해석은 www만 안다
+  const res = await fetch(u.toString(), { signal });
+  return res.url.includes('/comments/') ? res.url : null;
+}
+
+// 레딧은 HTML로 받을 수 있는 게 없다 — oEmbed만 쓴다. oEmbed엔 본문이 없어 설명은 비운다.
+// 실패하면 전부 null → link_title이 비어 있으니 다음 포그라운드에 자동으로 다시 시도한다.
+async function fetchRedditMeta(
+  url: string,
   signal: AbortSignal,
 ): Promise<{ title: string | null; description: string | null; thumbnail: string | null }> {
-  const rss = await fetchRedditRss(finalUrl, signal).catch(() => null);
-  return { title: rss?.title ?? null, description: rss?.description ?? null, thumbnail: null };
-}
-
-// 레딧 글 본문(selftext). og:description은 레딧이 150자 안팎에서 "…"로 잘라 보내기 때문에
-// 임베딩 신호로도 약하고 상세 화면에도 잘린 채 뜬다 — old.reddit.com은 본문 전체를 페이지에
-// 그대로 담고 있으므로 그걸 쓴다. 본문이 없는 글(이미지·영상만)이면 null → og로 폴백한다.
-//
-// 경계 두 개가 핵심이고, 둘 다 실제로 틀렸다가 잡은 것들이다(2026-08-09):
-//   (1) 글(/comments/)일 때만 본다 — 서브레딧 목록 페이지에선 첫 .md가 "보관된 글입니다" 공지다.
-//   (2) 댓글 영역 앞에서 끊는다 — 본문 없는 글에서 모더레이터 봇 댓글이 본문으로 잡혔다.
-const SELFTEXT_MAX = 2000; // 임베딩 신호로 충분하고, 긴 글이 행을 부풀리지 않을 정도
-
-function extractRedditSelftext(html: string, finalUrl: string): string | null {
-  let u: URL;
-  try {
-    u = new URL(finalUrl);
-  } catch {
-    return null;
-  }
-  if (!isRedditUrl(u) || !u.pathname.includes('/comments/')) return null;
-
-  const start = html.indexOf('id="siteTable"');
-  if (start < 0) return null;
-  const commentarea = html.indexOf('commentarea', start);
-  const zone = html.slice(start, commentarea > start ? commentarea : undefined);
-
-  const m = zone.match(/<div class="md">([\s\S]*?)<\/div><\/div>/);
-  if (!m) return null;
-  const text = htmlToText(m[1]);
-  return text ? text.slice(0, SELFTEXT_MAX) : null;
+  const target = await redditOembedUrl(url, signal);
+  const o = target ? await fetchOembed(target, signal) : null;
+  return { title: o?.title ?? null, description: null, thumbnail: null };
 }
 
 // 네이버 지도(map.naver.com)는 서버사이드 fetch에 og:title도 <title>도 없는 2KB짜리 SPA 껍데기를
@@ -244,7 +146,7 @@ const NAVER_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
 // 공유 시트가 주는 naver.me 단축링크는 map.naver.com/p/entry/place/{id}로 풀린다.
-// 레딧과 같은 이유로 res.url을 쓴다 — Location 헤더는 RN에서 못 읽는다(위 §redditFetchUrl 참고).
+// 레딧과 같은 이유로 res.url을 쓴다 — Location 헤더는 RN에서 못 읽는다(위 §redditOembedUrl 참고).
 // 장소 id를 못 찾으면(지도 검색·블로그 등) null → 원본 URL 그대로 범용 경로를 탄다.
 async function naverPlaceFetchUrl(url: string, signal: AbortSignal): Promise<string | null> {
   let u: URL;
@@ -298,46 +200,68 @@ export async function fetchLinkMeta(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
+    let isReddit = false;
+    try {
+      isReddit = isRedditUrl(new URL(url));
+    } catch {
+      // URL이 아니면 아래 fetch가 실패하고 그냥 둔다
+    }
+    if (isReddit) return await fetchRedditMeta(url, ctrl.signal);
+
+    // 유튜브는 제목·썸네일을 oEmbed에서 받고, 설명만 페이지에서 뽑는다(아래 extractYoutubeDescription)
+    const oembed = isYoutubeUrl(url) ? await fetchOembed(url, ctrl.signal).catch(() => null) : null;
+
     const naverUrl = await naverPlaceFetchUrl(url, ctrl.signal);
-    const res = await fetch(naverUrl ?? (await redditFetchUrl(url, ctrl.signal)) ?? url, {
+    const res = await fetch(naverUrl ?? url, {
       signal: ctrl.signal,
       ...(naverUrl ? { headers: { 'User-Agent': NAVER_UA } } : {}),
     });
     // 에러 응답의 <title>을 제목이라고 저장하지 않는다. Cloudflare는 봇 차단 페이지를 **403과 함께**
     // 주는데 status를 안 보던 시절엔 그 페이지 제목("Just a moment...")이 그대로 박혔다 —
     // producthunt·kvraudio·dreamtonics 12건이 전부 이것이었다(2026-08-12 실측, 브라우저 UA로도 403).
-    // 레딧 전용 규칙(isRedditJunk)이 200으로 오는 챌린지를 따로 막는 것과 짝이다.
-    // 레딧은 봇 차단을 403(<title>이 "Blocked")으로도 준다 — 200 인터스티셜과 형태만 다를 뿐
-    // 같은 벽이므로 여기서도 .rss로 넘어간다. 레딧이 아니면 아래 함수가 즉시 null이라 공짜다.
-    if (!res.ok) return await redditRssFallback(res.url || url, ctrl.signal);
+    if (!res.ok) {
+      return { title: oembed?.title ?? null, description: null, thumbnail: oembed?.thumbnail ?? null };
+    }
     const html = await res.text();
-    // og 태그와 <title>은 <head> 안에만 있다. 유튜브 같은 1~2MB짜리 페이지 **전문**에
+    // og 태그와 <title>은 보통 <head> 안에 있다. 유튜브 같은 1~2MB짜리 페이지 **전문**에
     // `<meta[^>]+...` 정규식을 네 번 돌리면 그동안 JS 스레드가 통째로 막혀 첫 화면 렌더가 밀린다.
-    // </head>를 못 찾는 페이지만 앞 200KB로 자른다.
+    // </head>를 못 찾는 페이지만 앞 200KB로 자른다. head에 없으면 metaAnywhere로 한 번 더 찾는다.
     const headEnd = html.indexOf('</head>');
     const head = headEnd > 0 ? html.slice(0, headEnd) : html.slice(0, 200_000);
+    const og = (property: string) => meta(head, property) ?? metaAnywhere(html, property);
     const fallback = decode(head.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '');
     // 네이버 플레이스는 og:title 끝에 " : 네이버"를 붙인다 — 장소 이름만 남긴다.
-    const title = (meta(head, 'og:title') ?? (fallback || null))?.replace(/ : 네이버$/, '') ?? null;
-    // 레딧이 실제 글 대신 챌린지/로그인/연령확인 페이지를 준 경우 — 위 403과 같은 처리
-    if (isRedditJunk(res.url || url, title)) {
-      return await redditRssFallback(res.url || url, ctrl.signal);
-    }
+    const title =
+      oembed?.title ?? (og('og:title') ?? (fallback || null))?.replace(/ : 네이버$/, '') ?? null;
     // 검색 신호용. 유튜브는 홍보 문구 오염 때문에 실제 재생 데이터에서 따로 뽑는다 —
     // ytInitialPlayerResponse는 body에 있으므로 여기만 전문을 본다(리터럴 앵커라 스캔이 싸다).
     const description = isYoutubeUrl(url)
       ? extractYoutubeDescription(html)
-      : (extractRedditSelftext(html, res.url || url) ??
-        (naverUrl ? extractNaverPlaceInfo(html) : null) ??
-        meta(head, 'og:description') ??
+      : ((naverUrl ? extractNaverPlaceInfo(html) : null) ??
+        og('og:description') ??
         meta(head, 'description'));
-    return { title, description, thumbnail: meta(head, 'og:image') };
+    return { title, description, thumbnail: oembed?.thumbnail ?? og('og:image') };
   } finally {
     clearTimeout(timer);
   }
 }
 
+// 링크 파편 하나의 제목·설명·썸네일을 받아 채운다. 받은 게 없으면 그대로 둔다.
+// 채웠으면 열려 있는 목록이 다시 읽도록 알린다 — 안 그러면 다음 화면 진입까지 URL로 보인다.
+export async function fillLinkMeta(fr: { id: string; content: string }): Promise<void> {
+  const { title, description, thumbnail } = await fetchLinkMeta(fr.content);
+  if (!title && !description && !thumbnail) return;
+  await updateFragment(fr.id, {
+    link_title: title,
+    link_description: description,
+    link_thumbnail_url: thumbnail,
+  });
+  markFragmentUpdated();
+}
+
 // 앱이 포그라운드로 올라올 때 호출 — 제목이 빈 링크 파편을 뒤늦게 채운다.
+// 저장 직후엔 insertFragment가 바로 fillLinkMeta를 부른다. 이건 그게 실패했거나
+// 웹(CORS로 직접 못 받음)에서 저장한 링크를 위한 재시도 경로다.
 export async function backfillLinkMeta(): Promise<void> {
   let pending: { id: string; content: string }[];
   try {
@@ -349,15 +273,7 @@ export async function backfillLinkMeta(): Promise<void> {
   await Promise.all(
     pending.map(async (fr) => {
       try {
-        const { title, description, thumbnail } = await fetchLinkMeta(fr.content);
-        if (!title && !description && !thumbnail) return;
-        // 새 링크는 여기서 제목·설명을 한 번에 받는다. 기존 링크(제목 이미 있음)는 이 경로로 안 오므로
-        // 설명 백필은 일회성 scripts/backfill-link-desc.mjs가 담당한다.
-        await updateFragment(fr.id, {
-          link_title: title,
-          link_description: description,
-          link_thumbnail_url: thumbnail,
-        });
+        await fillLinkMeta(fr);
       } catch {
         // 이 링크는 그냥 둔다 (PLAN §3.6)
       }

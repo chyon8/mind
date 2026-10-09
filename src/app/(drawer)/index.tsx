@@ -306,13 +306,35 @@ export default function Home() {
         <DailyView />
       ) : (
         <>
-          <ProjectChips
-            projects={projects}
-            selected={filter}
-            onSelect={(f) => router.setParams({ filter: f })}
-            excluded={excluded}
-            onToggleExclude={toggleExclude}
-          />
+          {/* 무덤 안에서는 프로젝트 칩 대신 "전체 / 나중에" 탭. 무덤은 프로젝트로 거르지 않는다 */}
+          {filter === 'grave' || filter === 'later' ? (
+            <View style={styles.graveTabs}>
+              {(
+                [
+                  ['grave', '전체'],
+                  ['later', '나중에'],
+                ] as const
+              ).map(([key, label]) => (
+                <Pressable
+                  key={key}
+                  onPress={() => router.setParams({ filter: key })}
+                  style={[styles.graveTab, filter === key && styles.graveTabActive]}
+                >
+                  <Text style={[styles.graveTabLabel, filter === key && styles.graveTabLabelActive]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <ProjectChips
+              projects={projects}
+              selected={filter}
+              onSelect={(f) => router.setParams({ filter: f })}
+              excluded={excluded}
+              onToggleExclude={toggleExclude}
+            />
+          )}
 
           {failed ? (
             <View style={styles.center}>
@@ -328,11 +350,13 @@ export default function Home() {
                 <Text style={styles.emptyText}>
                   {filter === 'grave'
                     ? '무덤이 비어 있다'
-                    : filter === 'pinned'
-                      ? '고정한 파편이 없다'
-                      : filter === 'discover'
-                        ? '발견에 포함하도록 지정한 파편이 없다'
-                        : '아직 파편이 없다'}
+                    : filter === 'later'
+                      ? '나중에로 묻은 파편이 없다'
+                      : filter === 'pinned'
+                        ? '고정한 파편이 없다'
+                        : filter === 'discover'
+                          ? '발견에 포함하도록 지정한 파편이 없다'
+                          : '아직 파편이 없다'}
                 </Text>
               )}
             </View>
@@ -516,6 +540,21 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   toggleLabel: { ...type.bodySm, color: colors.body, fontFamily: fonts.sansMedium },
   toggleLabelActive: { color: colors.onInk },
+  graveTabs: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.hairline,
+  },
+  graveTab: {
+    paddingVertical: spacing.sm,
+    marginRight: spacing.lg,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  graveTabActive: { borderBottomColor: colors.ink },
+  graveTabLabel: { ...type.bodyMd, color: colors.mute, fontFamily: fonts.sansMedium },
+  graveTabLabelActive: { color: colors.ink },
   listContent: { paddingHorizontal: spacing.md, paddingBottom: 120 },
   cardWrap: { marginBottom: spacing.sm },
   // 카드를 딱 감싸는 링. margin은 링 바깥(아래)에 둬서 빈 공간을 감싸지 않는다.

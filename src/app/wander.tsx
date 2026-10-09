@@ -4,7 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FragmentCard } from '@/components/FragmentCard';
-import { fetchDayIndex, fetchFragmentsByIds, fetchProjects, type FeedFilter } from '@/lib/supabase';
+import {
+  fetchDayIndex,
+  fetchFragmentsByIds,
+  fetchProjects,
+  fetchSimilarCounts,
+  type FeedFilter,
+} from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import { onFragmentUpdated } from '@/lib/fragmentUpdates';
 import type { Fragment, Project } from '@/lib/types';
@@ -52,6 +58,17 @@ export default function Wander() {
   const pool = useRef<string[]>([]); // 전체 id
   const deck = useRef<string[]>([]); // 이번 바퀴에 남은 것
   const [items, setItems] = useState<Fragment[]>([]);
+  // 카드 옆 "≈n" — 새로 붙은 파편 몫만 더 받는다
+  const [simCounts, setSimCounts] = useState<Record<string, number>>({});
+  const simAsked = useRef(new Set<string>());
+  useEffect(() => {
+    const missing = [...new Set(items.map((fr) => fr.id))].filter((id) => !simAsked.current.has(id));
+    if (missing.length === 0) return;
+    missing.forEach((id) => simAsked.current.add(id));
+    fetchSimilarCounts(missing)
+      .then((c) => setSimCounts((prev) => ({ ...prev, ...c })))
+      .catch(() => {}); // RPC가 없거나 실패하면 숫자 없이 그린다
+  }, [items]);
   const [empty, setEmpty] = useState(false);
   const [done, setDone] = useState(false); // 한 바퀴 다 돌았다
   const [projects, setProjects] = useState<Project[]>([]);
@@ -257,6 +274,7 @@ export default function Wander() {
               fragment={item}
               opacity={Math.max(vividness(item), READABLE_FLOOR)}
               projectsById={projectsById}
+              similarCount={simCounts[item.id]}
             />
           </Pressable>
         )}

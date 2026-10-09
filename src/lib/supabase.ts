@@ -46,10 +46,11 @@ export async function signIn(email: string, password: string): Promise<void> {
 
 export const PAGE_SIZE = 30;
 
-// 'all' | 'inbox' | 'pinned' | 'grave' | 'discover' | 프로젝트 id
+// 'all' | 'inbox' | 'pinned' | 'grave' | 'later' | 'discover' | 프로젝트 id
+// later = 무덤 중 "나중에"로 묻은 것(resurface). 무덤 렌즈 안의 하위 렌즈다.
 // pinned = 즐겨찾기. 새 개념이 아니라 tier의 pinned를 모아 보는 렌즈일 뿐이다.
 // discover = "다음 발견에 포함" 지정을 모아 보는 렌즈. 이것도 새 개념이 아니다.
-export type FeedFilter = 'all' | 'inbox' | 'pinned' | 'grave' | 'discover' | (string & {});
+export type FeedFilter = 'all' | 'inbox' | 'pinned' | 'grave' | 'later' | 'discover' | (string & {});
 
 function isLens(filter: FeedFilter): boolean {
   return (
@@ -57,6 +58,7 @@ function isLens(filter: FeedFilter): boolean {
     filter === 'inbox' ||
     filter === 'pinned' ||
     filter === 'grave' ||
+    filter === 'later' ||
     filter === 'discover'
   );
 }
@@ -89,6 +91,7 @@ export async function fetchFragments(filter: FeedFilter, page = 0): Promise<Frag
   } else {
     q = supabase().from('fragments').select(EMBED);
     if (filter === 'grave') q = q.eq('archived', true);
+    else if (filter === 'later') q = q.eq('archived', true).eq('resurface', true);
     // 발견 렌즈는 archived를 안 건다 — 재료 로더가 지정된 파편을 창·archived 무시하고 싣기
     // 때문이다(scripts/discover-claude/material.mjs). 묻힌 채 지정이 살아 있는 것까지 보여야
     // "묻었는데 왜 또 나오지"가 여기서 풀린다.
@@ -141,6 +144,7 @@ export async function fetchDayIndex(filter: FeedFilter): Promise<DayMark[]> {
   } else {
     q = supabase().from('fragments').select(`${cols}, fragment_projects(project_id)`);
     if (filter === 'grave') q = q.eq('archived', true);
+    else if (filter === 'later') q = q.eq('archived', true).eq('resurface', true);
     else if (filter === 'discover') q = q.eq('discover_next', true); // fetchFragments와 같은 이유로 archived를 안 건다
     else {
       q = q.eq('archived', false);
@@ -255,6 +259,13 @@ export async function insertFragment(input: {
   if (error) throw error;
   const fragment = { ...toFragment(data), project_ids: project_ids ?? [] };
   if (project_ids?.length) await setFragmentProjects(fragment.id, project_ids);
+  // 링크는 저장 직후 바로 제목을 받으러 간다(기다리지 않는다). 예전엔 포그라운드 진입 때만 받아서,
+  // 공유로 앱이 열린 순간엔 아직 저장 전이라 놓치고 다음에 앱을 다시 열 때까지 URL로 보였다.
+  // 공유 시트가 준 제목이 있어도 다시 받는다 — 시트 제목은 "YouTube" 같은 사이트 이름일 때가 있다.
+  // linkMeta가 이 파일을 import하므로 순환을 피하려고 동적 import.
+  if (fragment.type === 'link') {
+    import('./linkMeta').then((m) => m.fillLinkMeta(fragment)).catch(() => {});
+  }
   return fragment;
 }
 
@@ -440,13 +451,48 @@ export async function fetchCollisionCandidates(seedIds: string[]): Promise<Colli
 // 파편 하나와 뜻이 닿는 것들 (파편 상세의 "이거 관련 뭐 있었지"). 무덤도 포함한다 —
 // 찾으러 온 행위라 회상 필터를 안 건다 (rudy-similar.sql 참고).
 // 임베딩은 저장 후 비동기로 생기므로 갓 저장한 파편은 빈 배열이 정상이다.
-export async function fetchSimilarFragments(id: string): Promise<Fragment[]> {
+// 상세 화면이 버튼 없이 바로 보여줄 몫을 고르려고 유사도도 같이 돌려준다.
+export async function fetchSimilarFragments(
+  id: string,
+): Promise<{ fr: Fragment; similarity: number }[]> {
   if (!isConfigured) return [];
   const { data, error } = await supabase()
     .schema('rudy')
     .rpc('similar_fragments', { source_id: id });
   if (error) throw error;
   // 유사도 순서는 fetchFragmentsByIds가 보존하지 않는다 — 여기서 다시 건다 (searchFragments와 같은 수법)
+  const hits = (data ?? []) as { id: string; similarity: number }[];
+  const sim = new Map(hits.map((h) => [h.id, h.similarity]));
+  const frs = await fetchFragmentsByIds(hits.map((h) => h.id));
+  return frs
+    .map((fr) => ({ fr, similarity: sim.get(fr.id)! }))
+    .sort((a, b) => b.similarity - a.similarity);
+}
+
+// 연관으로 칠 유사도 하한 — rudy-related.sql의 기본값과 같다. 실측 근거는 그 파일 머리에.
+export const RELATED_MIN_SIM = 0.5;
+
+// 파편마다 비슷한 것 개수 (행 옆 숫자). 0개인 파편은 결과에 0으로 온다.
+export async function fetchSimilarCounts(ids: string[]): Promise<Record<string, number>> {
+  if (!isConfigured || ids.length === 0) return {};
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .rpc('similar_counts', { ids, min_sim: RELATED_MIN_SIM });
+  if (error) throw error;
+  return Object.fromEntries(((data ?? []) as { id: string; n: number }[]).map((r) => [r.id, r.n]));
+}
+
+// 그 날 던진 것들과 닿는 그 이전 파편 (데일리 뷰 아래). 무덤은 SQL에서 뺀다.
+export async function fetchRelatedToDay(seedIds: string[], dayStart: Date): Promise<Fragment[]> {
+  if (!isConfigured || seedIds.length === 0) return [];
+  const { data, error } = await supabase()
+    .schema('rudy')
+    .rpc('related_to_day', {
+      seed_ids: seedIds,
+      before: dayStart.toISOString(),
+      min_sim: RELATED_MIN_SIM,
+    });
+  if (error) throw error;
   const ids = ((data ?? []) as { id: string }[]).map((h) => h.id);
   const order = new Map(ids.map((fid, i) => [fid, i]));
   const frs = await fetchFragmentsByIds(ids);

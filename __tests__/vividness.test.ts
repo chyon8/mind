@@ -15,21 +15,21 @@ describe('opacity — SPEC §5 확정값 (PLAN.md §3.4)', () => {
   });
 
   test('normal: 1일~7일 선형 감쇠', () => {
-    expect(opacity(daysAgo(4), 'normal', NOW)).toBeCloseTo(0.575); // 중간점
+    expect(opacity(daysAgo(4), 'normal', NOW)).toBeCloseTo(0.675); // 중간점
     expect(opacity(daysAgo(2), 'normal', NOW)).toBeLessThan(1);
-    expect(opacity(daysAgo(6), 'normal', NOW)).toBeGreaterThan(0.15);
+    expect(opacity(daysAgo(6), 'normal', NOW)).toBeGreaterThan(0.35);
   });
 
-  test('normal: 7일 이후 바닥 15% 고정', () => {
-    expect(opacity(daysAgo(7), 'normal', NOW)).toBe(0.15);
-    expect(opacity(daysAgo(365), 'normal', NOW)).toBe(0.15);
+  test('normal: 7일 이후 바닥 35% 고정', () => {
+    expect(opacity(daysAgo(7), 'normal', NOW)).toBe(0.35);
+    expect(opacity(daysAgo(365), 'normal', NOW)).toBe(0.35);
   });
 
   test('important: 7일까지 100%, 21일에 바닥', () => {
     expect(opacity(daysAgo(7), 'important', NOW)).toBe(1);
-    expect(opacity(daysAgo(14), 'important', NOW)).toBeCloseTo(0.575); // 중간점
-    expect(opacity(daysAgo(21), 'important', NOW)).toBe(0.15);
-    expect(opacity(daysAgo(365), 'important', NOW)).toBe(0.15);
+    expect(opacity(daysAgo(14), 'important', NOW)).toBeCloseTo(0.675); // 중간점
+    expect(opacity(daysAgo(21), 'important', NOW)).toBe(0.35);
+    expect(opacity(daysAgo(365), 'important', NOW)).toBe(0.35);
   });
 
   test('미래 timestamp(시계 오차)는 100%로 clamp', () => {
@@ -56,7 +56,7 @@ describe('effectiveTier — 자라나는 중요도', () => {
       tier: 'normal' as const,
       touch_count,
     });
-    expect(vividness(fr(0), NOW)).toBe(0.15); // normal은 7일에 바닥
+    expect(vividness(fr(0), NOW)).toBe(0.35); // normal은 7일에 바닥
     expect(vividness(fr(2), NOW)).toBeGreaterThan(0.8); // important 곡선 (7일부터 감쇠 시작)
   });
 });

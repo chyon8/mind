@@ -4,12 +4,13 @@ import type { Tier } from './types';
 // 2026-07-22 조정: [3,14]/[14,45]·floor .25는 실사용에서 "애초에 흐려지질 않는다"였다.
 // 실측(파편 127개, 코퍼스 6.5일): 바닥에 닿은 게 0개, 제일 오래된 것도 0.76이라
 // 100%와 눈으로 구분이 안 됐다. 일주일이면 흐려지는 게 체감되게 낮춘 값.
+// 2026-10-08: 바닥 0.15는 다크 배경에서 거의 안 읽혀서 0.35로 올렸다. 속도는 그대로.
 const DECAY: Record<Exclude<Tier, 'pinned'>, [start: number, floor: number]> = {
   normal: [1, 7],
   important: [7, 21],
 };
 
-const FLOOR_OPACITY = 0.15;
+const FLOOR_OPACITY = 0.35;
 const MS_PER_DAY = 86_400_000;
 
 export function opacity(lastTouchedAt: Date, tier: Tier, now: Date = new Date()): number {

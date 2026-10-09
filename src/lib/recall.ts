@@ -46,7 +46,7 @@ const GRAVE_SLOTS = 1;
 const LEDGER = { surface: 'recall_feed', kind: 'resurface' } as const;
 
 // 이 아래로 흐려진 것만 후보다. 이미 또렷한 걸 또 보여주는 건 낭비고,
-// 회상의 가치는 "잊고 있었는데 다시 만나는 것"에 있다. (바닥은 0.25)
+// 회상의 가치는 "잊고 있었는데 다시 만나는 것"에 있다. (바닥은 0.35)
 // 0.5는 normal tier 기준 10일+ 미접촉을 요구해 실사용 초기엔 후보가 안 생겼다 — 0.7로 완화.
 const NEAR_FLOOR = 0.7;
 

@@ -7,48 +7,58 @@ import { useImageUrl } from '@/lib/useImageUrl';
 
 // 중요/고정 표시 (2026-07-29 유저 요청: "중요로 체크하면 별표든 뭐든 눈에 띄게").
 // 전엔 'IMPORTANT'를 다른 eyebrow와 **같은 faint 회색**으로 찍어서 사실상 안 보였다 —
-// 글자를 마크로 바꾸고 ink(최상위 색)로 올린다. 메타 줄 맨 앞에 둬서 시선이 먼저 닿게.
-// ⚠️ 카드 전체 opacity(선명도)는 그대로 걸린다 — 흐려진 파편의 별은 같이 흐려지는 게 맞다.
+// 글자를 마크로 바꾸고 메타 줄 맨 앞에 둬서 시선이 먼저 닿게.
+// 2026-10-09: 그래도 흐려진 카드에선 별이 같이 흐려져 안 보였다 — 색을 link로 바꾸고,
+// 선명도 opacity를 카드 전체가 아니라 별을 뺀 나머지에만 건다.
 const TIER_MARK: Record<string, string> = { important: '★', pinned: '⚑' };
 
-// 선명도는 카드 전체(보더 포함)에 opacity로 — 다크 캔버스 속으로 가라앉는 지층감 (PLAN §6.5)
+// 선명도는 카드(보더 포함)에 opacity로 — 다크 캔버스 속으로 가라앉는 지층감 (PLAN §6.5).
+// 별만 흐려지지 않게 하려고 배경·보더(frame)와 내용에 opacity를 따로 건다.
 export function FragmentCard({
   fragment,
   opacity,
   projectsById,
+  similarCount = 0,
 }: {
   fragment: Fragment;
   opacity: number;
   projectsById?: Record<string, string>;
+  similarCount?: number; // 비슷한 파편 개수 (rudy.similar_counts). 0이면 안 그린다
 }) {
   // 이 파편이 속한 프로젝트 이름들 — 맵이 있고 해석되는 것만 (Inbox면 빈 배열)
   const projectNames = projectsById
     ? fragment.project_ids.map((id) => projectsById[id]).filter(Boolean)
     : [];
   return (
-    <View style={[styles.card, { opacity }]}>
-      <CardBody fragment={fragment} />
-      {fragment.note ? (
-        <View style={styles.noteWrap}>
-          <Text style={styles.noteText} numberOfLines={3}>
-            {fragment.note}
-          </Text>
-        </View>
-      ) : null}
+    <View style={styles.card}>
+      <View style={[StyleSheet.absoluteFill, styles.frame, { opacity }]} />
+      <View style={{ opacity }}>
+        <CardBody fragment={fragment} />
+        {fragment.note ? (
+          <View style={styles.noteWrap}>
+            <Text style={styles.noteText} numberOfLines={3}>
+              {fragment.note}
+            </Text>
+          </View>
+        ) : null}
+      </View>
       <View style={styles.meta}>
         {fragment.tier !== 'normal' && (
           <Text style={styles.tierMark}>{TIER_MARK[fragment.tier]}</Text>
         )}
-        <Text style={styles.eyebrow}>{fragment.type.toUpperCase()}</Text>
-        {fragment.merged_from.length > 0 && (
-          <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
-        )}
-        {projectNames.map((name) => (
-          <View key={name} style={styles.projectTag}>
-            <Text style={styles.projectTagLabel}>{name}</Text>
-          </View>
-        ))}
-        <Text style={[styles.eyebrow, styles.time]}>{formatTime(fragment.created_at)}</Text>
+        <View style={[styles.metaRest, { opacity }]}>
+          <Text style={styles.eyebrow}>{fragment.type.toUpperCase()}</Text>
+          {fragment.merged_from.length > 0 && (
+            <Text style={styles.eyebrow}>+{fragment.merged_from.length}</Text>
+          )}
+          {similarCount > 0 && <Text style={styles.eyebrow}>≈{similarCount}</Text>}
+          {projectNames.map((name) => (
+            <View key={name} style={styles.projectTag}>
+              <Text style={styles.projectTagLabel}>{name}</Text>
+            </View>
+          ))}
+          <Text style={[styles.eyebrow, styles.time]}>{formatTime(fragment.created_at)}</Text>
+        </View>
       </View>
     </View>
   );
@@ -110,12 +120,12 @@ function ImageBody({ fragment }: { fragment: Fragment }) {
 }
 
 const styles = StyleSheet.create({
-  card: {
+  card: { padding: spacing.card },
+  frame: {
     backgroundColor: colors.canvasElevated,
     borderColor: colors.hairline,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderRadius: rounded.md,
-    padding: spacing.card,
   },
   body: { ...type.bodyLg, color: colors.ink, fontFamily: fonts.sans },
   meta: {
@@ -124,9 +134,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     alignItems: 'center',
   },
+  metaRest: { flex: 1, flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
   eyebrow: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
   // 마크는 mono가 아니라 sans — ★·⚑는 고정폭 폰트에 글리프가 없거나 깨질 수 있다.
-  tierMark: { fontSize: 14, lineHeight: 16, color: colors.ink, fontFamily: fonts.sans },
+  tierMark: { fontSize: 14, lineHeight: 16, color: colors.link, fontFamily: fonts.sans },
   time: { marginLeft: 'auto' },
   projectTag: {
     borderColor: colors.hairline,

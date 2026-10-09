@@ -12,6 +12,7 @@ import {
   deleteFragment,
   fetchProjects,
   fetchSimilarFragments,
+  RELATED_MIN_SIM,
   getFragment,
   rememberFragment,
   setFragmentProjects,
@@ -57,9 +58,10 @@ export default function FragmentDetail() {
   // 내용이 있으면 기본은 읽기 모드, 탭하면 편집으로 전환.
   const [noteEditing, setNoteEditing] = useState(false);
   const [selectedPiece, setSelectedPiece] = useState<MergedPiece | null>(null);
-  // "이거 관련 뭐 있었지" — 이 화면 안에서 펼쳐지는 안쪽 목록. null = 아직 안 눌렀다.
-  const [similar, setSimilar] = useState<Fragment[] | null>(null);
-  const [similarLoading, setSimilarLoading] = useState(false);
+  // 안쪽 연관 목록. 화면을 열면 바로 가져온다 — null = 아직 못 받았다.
+  // 접힌 상태에선 유사도 RELATED_MIN_SIM 이상만 3개까지, "이거 관련 뭐 있었지"를 누르면 전부.
+  const [similar, setSimilar] = useState<{ fr: Fragment; similarity: number }[] | null>(null);
+  const [similarOpen, setSimilarOpen] = useState(false);
   // 표시가 5개 꽉 찼을 때 잠깐 뜨는 안내 (토스트를 새로 들이지 않는다 — 그 자리 글자로만 말한다)
   const [discoverFull, setDiscoverFull] = useState(false);
   // 발견 포함 지정된 파편을 묻으려 할 때만 뜬다 (BuryDiscoverModal)
@@ -80,6 +82,11 @@ export default function FragmentDetail() {
 
   useEffect(() => {
     if (!id) return;
+    setSimilar(null);
+    setSimilarOpen(false);
+    fetchSimilarFragments(id)
+      .then(setSimilar)
+      .catch(() => setSimilar([])); // 실패도 "없다"로 보여준다 — 빈 화면보단 낫다
     fetchProjects().then(setProjects).catch(() => {});
     getFragment(id)
       .then((fr) => {
@@ -239,18 +246,12 @@ export default function FragmentDetail() {
   }
 
   // "이거 관련 뭐 있었지" — 채팅으로 나가지 않고 여기서 편다. 임베딩만 쓰므로 공짜다.
-  // 다시 누르면 접힌다. 접었다 펴도 다시 안 가져온다 — 그 사이 바뀔 게 없다.
-  function toggleSimilar() {
-    if (similar) {
-      setSimilar(null);
-      return;
-    }
-    setSimilarLoading(true);
-    fetchSimilarFragments(fragment!.id)
-      .then(setSimilar)
-      .catch(() => setSimilar([])) // 실패도 "없다"로 보여준다 — 빈 화면보단 낫다
-      .finally(() => setSimilarLoading(false));
-  }
+  // 목록은 화면을 열 때 이미 받아뒀다. 누르면 임계 아래까지 전부 펴고, 다시 누르면 접는다.
+  const similarShown = similar
+    ? similarOpen
+      ? similar
+      : similar.filter((s) => s.similarity >= RELATED_MIN_SIM).slice(0, 3)
+    : [];
 
   async function remove() {
     if (!(await confirmDelete())) return;
@@ -392,7 +393,7 @@ export default function FragmentDetail() {
             타이핑 마찰이 wow 사이의 평일 사용을 죽인다.
             셋의 역할이 겹치지 않게 갈랐다: **안쪽 / 자유 / 바깥.** */}
         <View style={styles.askRow}>
-          <Pressable onPress={toggleSimilar} style={styles.askChip}>
+          <Pressable onPress={() => setSimilarOpen((o) => !o)} style={styles.askChip}>
             <Text style={styles.askLabel}>이거 관련 뭐 있었지</Text>
           </Pressable>
           {/* 물고만 들어간다 — 자동 전송 없음. 뭘 물을지는 거기서 정한다. */}
@@ -428,16 +429,17 @@ export default function FragmentDetail() {
           <Text style={styles.similarEmpty}>링크 제목을 아직 못 가져왔다 — 잠시 뒤 다시 열면 바깥으로 나갈 수 있다</Text>
         )}
 
-        {/* 안쪽 목록 — 열면 touch되지 않는다(이 화면 자체가 그렇다). 무덤도 나온다. */}
-        {similarLoading && <Text style={styles.similarEmpty}>찾는 중…</Text>}
-        {similar && !similarLoading && (
+        {/* 안쪽 목록 — 열면 touch되지 않는다(이 화면 자체가 그렇다). 무덤도 나온다.
+            접힌 상태에서 닿는 게 없으면 아무것도 안 그린다. */}
+        {similarOpen && !similar && <Text style={styles.similarEmpty}>찾는 중…</Text>}
+        {similar && (similarOpen || similarShown.length > 0) && (
           <View style={styles.similarList}>
-            {similar.length === 0 ? (
+            {similarShown.length === 0 ? (
               <Text style={styles.similarEmpty}>
-                닿는 게 아직 없다 — 방금 저장한 파편이면 잠시 뒤 다시 눌러봐라
+                닿는 게 아직 없다 — 방금 저장한 파편이면 잠시 뒤 다시 열어봐라
               </Text>
             ) : (
-              similar.map((s) => (
+              similarShown.map(({ fr: s }) => (
                 <Pressable key={s.id} onPress={() => router.push(`/fragment/${s.id}`)}>
                   <Text style={styles.similarDate}>
                     {feedDateLabel(s.created_at)}

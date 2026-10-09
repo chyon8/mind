@@ -33,10 +33,11 @@ const MAX_DOTS = 8; // 마크 박스(너비 30)에 한 줄 4개 × 2줄. 더 늘
 
 const ROW_H = 46;
 const HEADER_H = 18;
+const MONTH_H = 20; // 연·월 표시 줄. 펼쳤을 때만 — 접힌 주 뷰는 아래 날짜 제목이 이미 말해준다
 const CHROME = spacing.sm * 2 + 14; // 상하 여백 + 손잡이
 
 function heightFor(mode: StripMode): number {
-  return HEADER_H + ROWS[mode] * ROW_H + CHROME;
+  return (mode === 'week' ? 0 : MONTH_H) + HEADER_H + ROWS[mode] * ROW_H + CHROME;
 }
 
 const SNAPS = MODES.map(heightFor);
@@ -129,6 +130,10 @@ export function CalendarStrip({
     const weeks = weekStartsIn(mode, page);
     onRangeNeeded(weeks[0], addDays(weeks[weeks.length - 1], 7));
   }, [mode, pageIdx, pages, onRangeNeeded]);
+
+  // 넘겨보고 있는 페이지의 연·월. 2주가 두 달에 걸치면 가운데 날이 속한 달로 친다.
+  const shownPage = pages[pageIdx] ?? today;
+  const shownMonth = mode === 'month' ? shownPage : addDays(shownPage, 7);
 
   // 지금 보고 있는 페이지에 오늘이 없다 = 오늘에서 벗어났다 ("오늘로" pill의 조건)
   const away = !pages[pageIdx] || !pageHolds(mode, pages[pageIdx], today);
@@ -224,6 +229,11 @@ export function CalendarStrip({
   return (
     <GestureDetector gesture={pan}>
       <Animated.View style={[styles.strip, animatedStyle]}>
+        {mode !== 'week' && (
+          <Text style={styles.monthLabel}>
+            {shownMonth.getFullYear()}년 {shownMonth.getMonth() + 1}월
+          </Text>
+        )}
         <View style={styles.weekdayHeader}>
           {WEEKDAY_LABELS.map((label) => (
             <Text key={label} style={styles.weekdayLabel}>
@@ -284,6 +294,13 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.hairline,
+  },
+  monthLabel: {
+    ...type.bodySm,
+    height: MONTH_H,
+    paddingHorizontal: spacing.md,
+    color: colors.body,
+    fontFamily: fonts.sansMedium,
   },
   weekdayHeader: { flexDirection: 'row', height: HEADER_H },
   weekdayLabel: {

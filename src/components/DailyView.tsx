@@ -10,7 +10,13 @@ import { SwipeableRow } from '@/components/SwipeableRow';
 import { TodayPill } from '@/components/TodayPill';
 import { confirmDelete } from '@/lib/confirm';
 import { addDays, dayKey, feedDateLabel, startOfWeek, getTimeBand } from '@/lib/dates';
-import { deleteFragment, fetchFragmentsByRange, mergeFragments } from '@/lib/supabase';
+import {
+  deleteFragment,
+  fetchFragmentsByRange,
+  fetchRelatedToDay,
+  fetchSimilarCounts,
+  mergeFragments,
+} from '@/lib/supabase';
 import { colors, fonts, rounded, spacing, type } from '@/lib/theme';
 import { consumeThrown, onThrown } from '@/lib/thrown';
 import { onFragmentUpdated } from '@/lib/fragmentUpdates';
@@ -110,6 +116,30 @@ export function DailyView() {
   // 이걸 안 보면 첫 렌더에서 아직 안 읽은 오늘이 "아무것도 던지지 않았다"로 보인다.
   const dayLoaded = byDay[selectedKey] !== undefined;
 
+  // 행 옆 "≈n"과 아래 "이 날과 닿은 옛 파편" — 고른 날의 파편 구성이 바뀔 때만 다시 받는다.
+  // 둘 다 rudy-related.sql RPC라 배포 전이거나 실패하면 그냥 안 그린다.
+  const dayIds = dayFragments.map((fr) => fr.id).join(',');
+  const [simCounts, setSimCounts] = useState<Record<string, number>>({});
+  const [related, setRelated] = useState<Fragment[]>([]);
+  useEffect(() => {
+    const ids = dayIds ? dayIds.split(',') : [];
+    let alive = true;
+    setRelated([]);
+    fetchSimilarCounts(ids)
+      .then((c) => alive && setSimCounts(c))
+      .catch(() => alive && setSimCounts({}));
+    const dayStart = new Date(selected);
+    dayStart.setHours(0, 0, 0, 0);
+    fetchRelatedToDay(ids, dayStart)
+      .then((r) => alive && setRelated(r))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // selected는 dayIds가 바뀔 때 같이 바뀐다 — 같은 날 안에서 시각만 다른 건 다시 받을 이유가 없다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayIds]);
+
   async function removeFragment(fr: Fragment) {
     if (!(await confirmDelete())) return;
     await deleteFragment(fr);
@@ -147,7 +177,13 @@ export function DailyView() {
         ) : (
           dayFragments.map((fr, index) => {
             const isSelected = selection.selected.has(fr.id);
-            const body = <FragmentBullet fragment={fr} rowOpacity={vividness(fr, now)} />;
+            const body = (
+              <FragmentBullet
+                fragment={fr}
+                rowOpacity={vividness(fr, now)}
+                similarCount={simCounts[fr.id]}
+              />
+            );
             const band = getTimeBand(fr.created_at);
             const prevBand = index > 0 ? getTimeBand(dayFragments[index - 1].created_at) : null;
 
@@ -189,6 +225,21 @@ export function DailyView() {
             }
             return row;
           })
+        )}
+
+        {/* 이 날 던진 것과 뜻이 닿는 그 이전 파편. 없으면 아무것도 안 그린다. */}
+        {related.length > 0 && (
+          <View style={styles.related}>
+            <Text style={styles.relatedLabel}>이 날과 닿은 옛 파편</Text>
+            {related.map((fr) => (
+              <Pressable key={fr.id} onPress={() => router.push(`/fragment/${fr.id}`)}>
+                <Text style={styles.relatedDate}>{feedDateLabel(fr.created_at)}</Text>
+                <Text style={styles.relatedText} numberOfLines={2}>
+                  {(fr.link_title || fr.content || '').replace(/\s+/g, ' ').trim()}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         )}
 
         {/* 어떤 날짜를 보고 있어도 항상 뜬다 — 떠오름은 오늘 파편이 아니라 감쇠재고라 날짜를 안 탄다. */}
@@ -248,5 +299,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   bandLabel: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sansMedium },
+  related: { gap: spacing.md, paddingTop: spacing.lg },
+  relatedLabel: { ...type.bodySm, color: colors.faint, fontFamily: fonts.sansMedium },
+  relatedDate: { ...type.monoEyebrow, color: colors.faint, fontFamily: fonts.mono },
+  relatedText: { ...type.bodyMd, color: colors.body, fontFamily: fonts.sans },
   bandLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.hairlineSoft },
 });
